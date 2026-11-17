@@ -37,3 +37,6 @@ release/
 # OS
 .DS_Store
 Thumbs.db
+
+*.log
+shot.png
