@@ -16,7 +16,9 @@ namespace Pot.Dev
     /// Runner 与 Dev Server 之间的开发通道（ws://host:port/runner）。
     /// 协议见 js/devserver/server.js：
     /// - Runner → Server：hello、log、result、event
-    /// - Server → Runner：load / cold / screenshot / input 由本类处理；其余命令转给 JS 的 pot.devtools.handle
+    /// - Server → Runner：open / restart / home 交给外壳（ShellHandler）；screenshot / input 由本类处理；
+    ///   其余命令转给 JS 的 pot.devtools.handle
+    /// Dev Server 只是 AI 与 Runner 之间的通道：游戏由 Runner 自己加载、监听、热重载，不经过这里。
     /// 网络收发在线程池，命令处理在主线程（Update）。
     /// </summary>
     [Preserve]
@@ -25,19 +27,11 @@ namespace Pot.Dev
         public enum ConnectionState { Disconnected, Connecting, Connected }
 
         [Serializable]
-        class FileEntry
-        {
-            public string path;
-            public string content;
-        }
-
-        [Serializable]
         class Command
         {
             public string type;
             public int id;
-            public FileEntry[] files;
-            public bool resetState;
+            public bool reset;
             public int width;
             public string action;
             public string name;
@@ -48,6 +42,28 @@ namespace Pot.Dev
         }
 
         public static PotDevClient Instance { get; private set; }
+
+        /// <summary>
+        /// 外壳命令处理（type, 原始 JSON, id）→ 是否已处理。open / home 必须由外壳处理；
+        /// restart 未处理时回退为 PotRuntime.Restart。外壳处理后自行调用 Reply 或 ReplyOnBoot。
+        /// </summary>
+        public static Func<string, string, int, bool> ShellHandler;
+
+        /// <summary>当前游戏信息 JSON（hello 与启动回复里带上）；null 表示没有打开游戏</summary>
+        public static Func<string> GameInfo;
+
+        /// <summary>Dev Server 的 HTTP 根地址（由 ws 地址推出），如 http://192.168.1.5:7788</summary>
+        public string HttpBase
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(Url)) return null;
+                Uri uri;
+                if (!Uri.TryCreate(Url, UriKind.Absolute, out uri)) return null;
+                var scheme = uri.Scheme == "wss" ? "https" : "http";
+                return scheme + "://" + uri.Host + ":" + uri.Port;
+            }
+        }
 
         public string Url { get; private set; }
         public ConnectionState State { get { return state; } }
@@ -148,7 +164,8 @@ namespace Pot.Dev
             var token = cts.Token;
             var hello = "{\"type\":\"hello\",\"platform\":" + Json.Quote(Application.platform.ToString())
                 + ",\"unity\":" + Json.Quote(Application.unityVersion)
-                + ",\"device\":" + Json.Quote(SystemInfo.deviceModel) + "}";
+                + ",\"device\":" + Json.Quote(SystemInfo.deviceModel)
+                + ",\"game\":" + CurrentGame() + "}";
             var url = Url;
             Task.Run(() => RunAsync(ws, url, hello, token));
         }
@@ -244,8 +261,17 @@ namespace Pot.Dev
             EnqueueLog(level, condition);
         }
 
-        void Reply(int id, bool ok, string dataJson, string error)
+        static string CurrentGame()
         {
+            if (GameInfo == null) return "null";
+            try { return GameInfo() ?? "null"; }
+            catch (Exception) { return "null"; }
+        }
+
+        /// <summary>回复 Dev Server 的命令（id &lt; 0 时忽略）</summary>
+        public void Reply(int id, bool ok, string dataJson, string error)
+        {
+            if (id < 0) return;
             var sb = new StringBuilder("{\"type\":\"result\",\"id\":");
             sb.Append(id).Append(",\"ok\":").Append(Json.Bool(ok));
             if (ok) sb.Append(",\"data\":").Append(string.IsNullOrEmpty(dataJson) ? "null" : dataJson);
@@ -290,8 +316,18 @@ namespace Pot.Dev
             {
                 switch (cmd.type)
                 {
-                    case "load": HandleLoad(cmd); break;
-                    case "cold": HandleCold(cmd); break;
+                    case "open":
+                    case "home":
+                    case "restart":
+                    case "cold":
+                        if (ShellHandler != null && ShellHandler(cmd.type == "cold" ? "restart" : cmd.type, raw, cmd.id)) break;
+                        if (cmd.type == "restart" || cmd.type == "cold")
+                        {
+                            ReplyOnBoot(cmd.id, "restart");
+                            PotRuntime.Ensure().Restart(!cmd.reset);
+                        }
+                        else Reply(cmd.id, false, null, "当前 Runner 不支持 " + cmd.type);
+                        break;
                     case "screenshot": StartCoroutine(Screenshot(cmd.id, cmd.width)); break;
                     case "input": HandleInput(cmd); break;
                     default: ForwardToJs(cmd, raw); break;
@@ -303,34 +339,21 @@ namespace Pot.Dev
             }
         }
 
-        void HandleLoad(Command cmd)
-        {
-            GameFS.Clear();
-            var n = 0;
-            if (cmd.files != null)
-            {
-                foreach (var f in cmd.files)
-                {
-                    if (string.IsNullOrEmpty(f.path)) continue;
-                    GameFS.WriteText(f.path, f.content);
-                    n++;
-                }
-            }
-            Debug.Log("[pot] 收到游戏文件 " + n + " 个，" + (cmd.resetState ? "清空 state 后" : "") + "启动");
-            BootAndReply(cmd.id, "load", !cmd.resetState);
-        }
-
-        void HandleCold(Command cmd)
-        {
-            BootAndReply(cmd.id, "cold", !cmd.resetState);
-        }
-
-        void BootAndReply(int id, string kind, bool keepState)
+        /// <summary>下一次启动完成时回复该命令（调用方随后自行 Boot / Restart）</summary>
+        public void ReplyOnBoot(int id, string kind)
         {
             if (pendingBootId >= 0) Reply(pendingBootId, false, null, "被新的 " + kind + " 请求取代");
             pendingBootId = id;
             pendingBootKind = kind;
-            PotRuntime.Ensure().Restart(keepState);
+        }
+
+        /// <summary>取消等待中的启动回复，以错误回复（如打开失败、没有启动）</summary>
+        public void FailBootReply(string error)
+        {
+            if (pendingBootId < 0) return;
+            var id = pendingBootId;
+            pendingBootId = -1;
+            Reply(id, false, null, error);
         }
 
         void OnBooted(bool ok, string error)
@@ -338,7 +361,7 @@ namespace Pot.Dev
             if (pendingBootId < 0) return;
             var id = pendingBootId;
             pendingBootId = -1;
-            if (ok) Reply(id, true, "{\"mode\":" + Json.Quote(pendingBootKind) + ",\"files\":" + GameFS.OverlayCount + "}", null);
+            if (ok) Reply(id, true, "{\"mode\":" + Json.Quote(pendingBootKind) + ",\"game\":" + CurrentGame() + "}", null);
             else Reply(id, false, null, error);
         }
 

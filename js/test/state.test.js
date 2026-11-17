@@ -4,7 +4,7 @@ const { startGame, startHello, frames, unit } = require('./helpers')
 
 function game(units) {
   const files = new Map([['manifest.json', JSON.stringify({ id: 't', plugins: Object.keys(units).filter((n) => !n.startsWith('_')) })]])
-  for (const [name, body] of Object.entries(units)) files.set(`units/${name.replace(/^_/, '')}.cjs`, unit(name.replace(/^_/, ''), body))
+  for (const [name, body] of Object.entries(units)) files.set(`src/plugins/${name.replace(/^_/, '')}.js`, unit(name.replace(/^_/, ''), body))
   return startGame(files)
 }
 

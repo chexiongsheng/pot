@@ -1,0 +1,55 @@
+Mono path[0] = 'D:/learn/js3a/pot/runner/Builds/Win64/PotRunner_Data/Managed'
+Mono config path = 'D:/learn/js3a/pot/runner/Builds/Win64/MonoBleedingEdge/etc'
+Input System module state changed to: Initialized.
+[PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+Initialize engine version: 2022.3.62f1c1 (b0109b07edb8)
+[Subsystems] Discovering subsystems at path D:/learn/js3a/pot/runner/Builds/Win64/PotRunner_Data/UnitySubsystems
+GfxDevice: creating device client; threaded=1; jobified=1
+Direct3D:
+    Version:  Direct3D 11.0 [level 11.1]
+    Renderer: NVIDIA GeForce RTX 5060 Ti (ID=0x2d04)
+    Vendor:   NVIDIA
+    VRAM:     16050 MB
+    Driver:   32.0.16.1742
+Begin MonoManager ReloadAssembly
+- Loaded All Assemblies, in  0.068 seconds
+- Finished resetting the current domain, in  0.001 seconds
+<RI> Initializing input.
+<RI> Input initialized.
+<RI> Initialized touch support.
+[PhysX] Initialized MultithreadedTaskDispatcher with 32 workers.
+UnloadTime: 0.570700 ms
+[pot] 打开 Hello Pot（D:\learn\js3a\pot\games\hello），读取存档
+[pot] 游戏已启动
+[js] 拾取金币 2，得分 1
+[js] 拾取金币 4，得分 2
+[js] 拾取金币 0，得分 3
+[js] 热重载失败（preload 阶段）：SyntaxError: src/plugins/world.ts:17:2 Error transforming src/plugins/world.ts: Unexpected token, expected "," (17:1)
+    at transpile (pot/devtools.cjs:21807:13)
+    at SourceLoader._execute (pot/devtools.cjs:21838:57)
+    at SourceLoader.load (pot/devtools.cjs:21877:29)
+    at Proxy.compile (pot/core.cjs:2608:35)
+    at Object.apply (pot/core.cjs:407:42)
+    at transaction (pot/devtools.cjs:1172:28)
+    at reload (pot/devtools.cjs:1274:25)
+    at applyChanges (pot/devtools.cjs:1357:26)
+    at Object.changed (pot/devtools.cjs:1395:26)
+    at pot/changed:1:14
+[js] 拾取金币 3，得分 4
+[js] 单元 world 启动失败：SyntaxError: src/plugins/world.ts:17:2 Error transforming src/plugins/world.ts: Unexpected token, expected "," (17:1)
+    at transpile (pot/devtools.cjs:21807:13)
+    at SourceLoader._execute (pot/devtools.cjs:21838:57)
+    at SourceLoader.load (pot/devtools.cjs:21877:29)
+    at Proxy.compile (pot/core.cjs:2608:35)
+    at Object.apply (pot/core.cjs:407:42)
+    at Proxy.get (pot/core.cjs:2620:21)
+    at Object.apply (pot/core.cjs:407:42)
+    at Proxy.use (pot/core.cjs:2634:25)
+    at Object.apply (pot/core.cjs:407:42)
+    at Runtime.start (pot/core.cjs:2748:35)
+[pot] 游戏已启动
+[js] 已挂载之前启动失败的单元：world
+[pot] 打开 Hello Pot（D:\learn\js3a\pot\games\hello\.pot\pot.hello-0.1.0.potg），读取存档
+[pot] 游戏已启动
+[pot] 打开 Hello Pot（D:\learn\js3a\pot\games\hello），读取存档
+[pot] 游戏已启动

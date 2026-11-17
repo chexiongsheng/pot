@@ -2582,39 +2582,36 @@ var pot = (() => {
     return unit;
   }
   var PluginsService = class extends Service {
-    constructor(ctx, _host, _modules) {
+    constructor(ctx, _host, _modules, loader) {
       super(ctx, "plugins");
       __publicField(this, "_host", _host);
       __publicField(this, "_modules", _modules);
+      __publicField(this, "loader", loader);
       __publicField(this, "units", /* @__PURE__ */ new Map());
       __publicField(this, "_bundle");
       ctx.mixin("plugins", ["use"]);
     }
-    /** 发布期：bundle.cjs 导出 { 单元名: 工厂函数 } */
+    /** 发布期：bundle.cjs 是一个整体打包的模块，导出 { units: { 单元名: 模块导出 } }，共享代码只有一份 */
     _getBundle() {
       if (this._bundle !== void 0) return this._bundle;
       const code = this._host.readText("bundle.cjs");
       this._bundle = null;
       if (code) {
         const exports = runModule(compileModule(code, "bundle.cjs"), "bundle.cjs", this._modules);
-        this._bundle = exports;
+        if (!exports?.units) throw new Error("bundle.cjs 格式不对（缺少 units），请用当前版本的 pot build 重新构建");
+        this._bundle = exports.units;
       }
       return this._bundle;
     }
-    /** 编译单元但不登记（热重载预加载用） */
+    /** 编译单元但不登记（热重载预加载用）。有源码（Runner）读源码，否则读发布包 bundle.cjs */
     compile(name) {
-      const filename = `units/${name}.cjs`;
-      const code = this._host.readText(filename);
-      if (code !== null && code !== void 0) {
-        const exports = runModule(compileModule(code, filename), filename, this._modules);
-        return createUnit(name, exports, hash(code), filename);
+      const source = this.loader?.load(name, this._modules);
+      if (source) return createUnit(name, source.exports, source.hash, source.source);
+      const bundle = this._getBundle();
+      if (bundle && Object.prototype.hasOwnProperty.call(bundle, name)) {
+        return createUnit(name, bundle[name], `bundle:${name}`, "bundle.cjs");
       }
-      const factory = this._getBundle()?.[name];
-      if (factory) {
-        const exports = runModule(factory, filename, this._modules);
-        return createUnit(name, exports, hash(factory.toString()), "bundle.cjs");
-      }
-      throw new Error(`找不到单元 "${name}"（${filename}）`);
+      throw new Error(`找不到单元 "${name}"（src/plugins/${name}.ts）`);
     }
     /** 取已加载的单元，未加载则编译并登记 */
     get(name) {
@@ -2717,7 +2714,7 @@ var pot = (() => {
       await install(bind(DataService, host));
       await install(bind(SceneService, host));
       await install(bind(InputService, host));
-      await install(bind(PluginsService, host, modules));
+      await install(bind(PluginsService, host, modules, this.options.loader));
       if (this.options.state) this.root.state.importJSON(this.options.state);
       return this;
     }
@@ -2813,7 +2810,6 @@ var pot = (() => {
         const text = FS.ReadText(path);
         return text === null || text === void 0 ? null : text;
       },
-      writeText: (path, content) => FS.WriteText(path, content),
       gc: () => H.RequestGC(),
       send: (message) => H.Send(message),
       engine: {
@@ -2845,7 +2841,8 @@ var pot = (() => {
     /** 启动：异步完成后回调 PotHost.OnBooted(ok, error) */
     boot(stateJson) {
       const host = createUnityHost();
-      createRuntime(host, { state: stateJson || void 0 }).then((runtime) => {
+      const loader = globalThis.pot?.devtools?.createLoader?.(host);
+      createRuntime(host, { state: stateJson || void 0, loader }).then((runtime) => {
         unity.runtime = runtime;
         globalThis.pot?.devtools?.attach?.(runtime);
         return runtime.start();

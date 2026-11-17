@@ -348,14 +348,14 @@ pot-game-dev/
 | 项 | 设计 | 原型 |
 |---|---|---|
 | 插件注册表 | `registry` | `plugins` 服务（`ctx.use(name, config)`）。每个单元有稳定的 wrapper 插件，自动注入全部核心服务，游戏代码不用写 `inject` |
-| 模块加载 | Puerts 模块缓存 + `deleteModuleCache` | 不用 Puerts 模块系统：单元源码用间接 eval 编译成工厂函数（带 `sourceURL`），旧版本释放引用即可回收 |
+| 模块加载 | Puerts 模块缓存 + `deleteModuleCache` | 不用 Puerts 模块系统：devtools 的 SourceLoader 用 sucrase 把源码转成 CJS（不改行号，`sourceURL` 为相对路径）后编译成工厂函数；共享模块按路径缓存、单元文件每次重新执行；发布包读 esbuild 打出的 `bundle.cjs` |
 | 定时器 | cordis timer | 改编自 `@cordisjs/timer`，走游戏时钟：暂停、时间缩放、热重载冻结都生效，不会“补跑” |
-| 变更推送 | `reload` 消息含 code 和 sourcemap | Dev Server 推送构建产物（`units/*.cjs`、data、manifest），sourcemap 留在 Dev Server 侧做栈映射 |
-| 阶段名 | preload/mount/commit | `preload`、`apply`、`commit`；内容 hash 未变的单元记入 `skipped` |
-| 冷重启 | 销毁 JsEnv | C# 侧 `PotRuntime.Restart(keepState)`：`exportState` → Dispose ScriptEnv → 新建 → `boot(state)` |
+| 变更检测 | Dev Server 推送 | Runner 自己检测：本地目录 FileSystemWatcher（去抖 150ms），手机镜像目录每秒轮询 Dev Server 的 `/files/` 清单；C# 调 `pot.devtools.changed(paths)`，SourceLoader 沿反向依赖找出受影响单元 |
+| 阶段名 | preload/mount/commit | `preload`、`apply`、`commit`；内容 hash（依赖闭包合成）未变的单元记入 `skipped`；启动失败的入口单元在文件变化后重试挂载，记入 `mounted` |
+| 冷重启 | 销毁 JsEnv | C# 侧 `PotRuntime.Restart(keepState)`：`exportState` → Dispose ScriptEnv → 新建 → `boot(state)`；manifest 变化自动冷重启；state 另存为存档 |
 | 泄漏检查 | WeakRef 哨兵 + GC | 同设计；GC 由 JS 请求、C# 下一帧调用 `LowMemoryNotification`；另比对 JS 登记对象数与引擎实际对象数 |
-| MCP | `reload`、`state`、`leaks`、`plugins` | 另有 `status`、`logs`、`sync`、`load`、`eval`、`query`、`time`、`input`、`screenshot`，统一 `pot_` 前缀 |
+| MCP | `reload`、`state`、`leaks`、`plugins` | 另有 `status`、`logs`、`open`、`restart`、`check`、`eval`、`query`、`time`、`input`、`screenshot`，统一 `pot_` 前缀；类型检查由 `pot check`（tsc）负责，Runner 只转译 |
 
-实测（Win64 Runner，batchmode）：单个单元热重载约 16 ms；`apply` 抛错时栈映射到 `src/plugins/player.ts:20:18` 并回滚，场景对象数不变。
+实测（Win64 Runner）：单个单元热重载 4 到 16 ms；报错栈直接指向 `src/plugins/*.ts` 源码行并回滚，场景对象数不变。
 
 Skill 初版位于 `skills/pot-game-dev`，坑点库已包含原型开发中遇到的 Unity 侧问题（Puerts 构建前检查、包内 `link.xml` 不生效、后台线程调用 Unity API、PowerShell 编码）。

@@ -36,13 +36,11 @@ export type VecProp = 'position' | 'rotation' | 'scale' | 'localPosition'
 export interface Host {
   platform: 'unity' | 'node'
   log(level: LogLevel, text: string): void
-  /** 读游戏文件（GameFS 相对路径，如 manifest.json、units/player.cjs、data/levels/1.json）。不存在返回 null */
+  /** 读游戏文件（游戏目录相对路径，如 manifest.json、src/plugins/player.ts、data/levels/1.json）。不存在返回 null */
   readText(path: string): string | null
-  /** 写入 GameFS 内存覆盖层（仅开发期）；content 为 null 表示删除 */
-  writeText?(path: string, content: string | null): void
   /** 请求一次 GC。Unity 中在下一帧生效，调用方应等待帧后再检查 WeakRef */
   gc?(): void
-  /** 开发通道：向 Dev Server 发送消息（仅开发期） */
+  /** 开发通道：向 Dev Server 发送消息（仅开发期，未连接时丢弃） */
   send?(message: string): void
   engine: Engine
 }

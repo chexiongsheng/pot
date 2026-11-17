@@ -25,7 +25,7 @@ function request(port, method, path, body, timeout = 65000) {
     })
     req.on('timeout', () => req.destroy(new Error('请求超时')))
     req.on('error', (e) => {
-      if (e.code === 'ECONNREFUSED') reject(new Error(`连不上 Dev Server（端口 ${port}）。先运行：pot dev <游戏目录>`))
+      if (e.code === 'ECONNREFUSED') reject(new Error(`连不上 Dev Server（端口 ${port}）。先运行：pot dev`))
       else reject(e)
     })
     if (data) req.write(data)
@@ -38,8 +38,7 @@ function client(port = 7788) {
     status: () => request(port, 'GET', '/status'),
     logs: (since = 0, level, limit = 200) => request(port, 'GET', `/logs?since=${since}&limit=${limit}${level ? `&level=${level}` : ''}`),
     call: (msg) => request(port, 'POST', '/call', msg),
-    sync: () => request(port, 'POST', '/sync', {}),
-    load: (options = {}) => request(port, 'POST', '/load', options),
+    open: (target, options = {}) => request(port, 'POST', '/open', { ...options, target }, 130000),
   }
 }
 

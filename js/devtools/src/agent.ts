@@ -1,6 +1,8 @@
 /**
- * 开发通道的 JS 侧代理：处理 Dev Server 发来的、需要 JS 运行时参与的命令。
- * C# 侧（PotDevClient）自己处理 load / cold / screenshot / input，其余转发到 handle(json)。
+ * 开发通道的 JS 侧代理。
+ * - changed(paths)：Runner 监听到游戏文件变化时由 C# 调用，触发热重载（不依赖 Dev Server）。
+ * - handle(json)：Dev Server 转发来的、需要 JS 运行时参与的命令；
+ *   C# 侧（PotDevClient / Runner 外壳）自己处理 open / cold / screenshot / input，其余转到这里。
  * 回复格式：{ type: 'result', id, ok, data | error }
  */
 import type { Runtime } from '@pot/core'
@@ -66,25 +68,85 @@ function evaluate(code: string, rt: Runtime) {
 
 type Handler = (msg: Message, rt: Runtime) => any
 
-const handlers: Record<string, Handler> = {
-  async reload(msg, rt) {
-    const files: { path: string; content: string | null }[] = msg.files ?? []
-    for (const file of files) rt.host.writeText?.(file.path, file.content)
-    const names = new Set<string>(msg.units ?? [])
-    const force = new Set<string>()
-    for (const file of files) {
-      const match = /^units\/(.+)\.cjs$/.exec(file.path)
-      if (match) names.add(match[1])
-      if (file.path.startsWith('data/')) {
-        for (const unit of rt.data.readers(file.path)) {
-          names.add(unit)
-          force.add(unit)
-        }
+/** 文件变化（相对游戏目录的路径）→ 找出受影响且已加载的单元做事务式热重载 */
+async function applyChanges(rt: Runtime, paths: string[], checkLeaks = true): Promise<ReloadResult> {
+  const names = new Set<string>()
+  const force = new Set<string>()
+  for (const path of paths) {
+    const p = path.replace(/\\/g, '/')
+    if (p.startsWith('data/')) {
+      for (const unit of rt.data.readers(p)) {
+        names.add(unit)
+        force.add(unit)
       }
     }
-    // 只重载已加载过的单元；没加载过的下次 use 时自然拿到新代码
-    const loaded = [...names].filter((n) => rt.plugins.units.has(n))
-    lastReload = await reload(rt, loaded, { force, checkLeaks: msg.checkLeaks !== false })
+  }
+  for (const unit of rt.plugins.loader?.invalidate?.(paths) ?? []) names.add(unit)
+  // 只重载已加载过的单元；没加载过的下次 use 时自然拿到新代码
+  const loaded = [...names].filter((n) => rt.plugins.units.has(n))
+  const result = await reload(rt, loaded, { force, checkLeaks })
+  const mounted = await retryFailures(rt)
+  if (mounted.length) result.mounted = mounted
+  return result
+}
+
+/** 启动时挂载失败的入口单元（如语法错误）：文件变化后重试挂载，修好代码即恢复，无需冷重启 */
+async function retryFailures(rt: Runtime): Promise<string[]> {
+  const manifest = rt.manifest
+  if (!manifest || !rt.failures.length) return []
+  const pending = rt.failures.splice(0)
+  const mounted: string[] = []
+  for (const failure of pending) {
+    const item = manifest.plugins.find((i: any) => (typeof i === 'string' ? i : i.name) === failure.name)
+    const entry = typeof item === 'string' ? { name: item, config: undefined } : item
+    if (!entry || rt.plugins.units.has(entry.name)) continue
+    try {
+      await rt.root.plugins.use(entry.name, entry.config)
+      mounted.push(entry.name)
+    } catch (error: any) {
+      rt.failures.push({ name: failure.name, error: error?.stack ?? String(error) })
+    }
+  }
+  return mounted
+}
+
+function report(rt: Runtime, result: ReloadResult, paths: string[]) {
+  const log = rt.root.logger('hmr')
+  if (!result.ok) log.error('热重载失败（%s 阶段%s）：%s', result.phase, result.rolledBack ? '，已回滚' : '', result.error)
+  else if (result.units.length) log.info('热重载 %s（%sms）', result.units.join(', '), result.durationMs)
+  if (result.mounted?.length) log.info('已挂载之前启动失败的单元：%s', result.mounted.join(', '))
+  if (rt.failures.length) log.error('仍有单元启动失败：%s', rt.failures.map((f) => `${f.name}：${f.error.split('\n')[0]}`).join('; '))
+  if (result.leaks?.length) log.warn('可能的泄漏：%s', result.leaks.join('; '))
+  try {
+    rt.host.send?.(JSON.stringify({ type: 'event', name: 'reload', data: { ...result, paths } }))
+  } catch {}
+}
+
+/**
+ * Runner 监听到游戏文件变化时调用（C# 侧 Eval：pot.devtools.changed('["src/plugins/player.ts"]')）。
+ * manifest.json 变化由 C# 侧直接冷重启，不走这里。
+ */
+export async function changed(pathsJson: string | string[]) {
+  const rt = runtime()
+  const paths: string[] = typeof pathsJson === 'string' ? JSON.parse(pathsJson) : pathsJson
+  const result = await applyChanges(rt, paths)
+  lastReload = result
+  report(rt, result, paths)
+  return result
+}
+
+const handlers: Record<string, Handler> = {
+  /** 强制重载指定单元：{ units: ['player'] } */
+  async reload(msg, rt) {
+    const names: string[] = (msg.units ?? []).filter((n: string) => rt.plugins.units.has(n))
+    rt.plugins.loader?.invalidate?.(names.map((n) => `src/plugins/${n}.ts`))
+    lastReload = await reload(rt, names, { force: names, checkLeaks: msg.checkLeaks !== false })
+    return lastReload
+  },
+
+  /** 模拟文件变化：{ paths: ['src/plugins/player.ts'] } */
+  async changed(msg, rt) {
+    lastReload = await applyChanges(rt, msg.paths ?? [], msg.checkLeaks !== false)
     return lastReload
   },
 
@@ -124,6 +186,7 @@ const handlers: Record<string, Handler> = {
       case 'objects': return rt.scene.list(msg.unit)
       case 'data': return rt.data.dependencies()
       case 'cache': return rt.cache.stats()
+      case 'modules': return (rt.plugins.loader as any)?.info?.() ?? null
       default: throw new Error(`未知查询：${msg.what}`)
     }
   },

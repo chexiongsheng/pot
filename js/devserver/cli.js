@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 /**
  * pot 命令行：
- *   pot dev [游戏目录] [--port 7788]       启动 Dev Server（构建 + 监听 + 等待 Runner 连接）
- *   pot build <游戏目录> <输出目录>         发布构建（manifest.json + bundle.cjs + data/）
- *   pot mcp [--port 7788]                  以 stdio MCP 方式暴露调试工具
- *   pot status | logs [--follow] [--level error] | sync | load [--reset]
- *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache] [unit]
- *   pot plugins | leaks | time [get|pause|resume|step|scale] [n]
+ *   pot dev [--port 7788] [--root 目录]      启动 Dev Server（AI ↔ Runner 通道；/files/ 提供 root 下的文件给手机 Runner）
+ *   pot open <游戏目录|.potg|URL> [--reset]   让已连接的 Runner 打开游戏（--reset 清空存档）
+ *   pot restart [--reset]                   冷重启当前游戏（默认保留 state）
+ *   pot check <游戏目录>                     类型检查 + 试打包，Runner 运行前发现错误
+ *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
+ *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
+ *   pot mcp [--port 7788]                   以 stdio MCP 方式暴露调试工具
+ *   pot status | logs [--follow] [--level error]
+ *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules] [unit]
+ *   pot plugins | leaks | reload <单元...> | time [get|pause|resume|step|scale] [n]
  *   pot input axis <name> <x> <y> [frames] | input key <name> [down|up|tap] | input clear
  *   pot screenshot [输出文件.png] [宽度]
+ *
+ * Runner 不依赖 Dev Server：直接运行 PotRunner.exe <游戏目录> 即可试玩，改源码自动热重载。
  */
 const fs = require('fs')
 const path = require('path')
@@ -54,18 +60,34 @@ async function main() {
   switch (command) {
     case 'dev': {
       const { DevServer } = require('./server')
-      const gameDir = path.resolve(args[0] ?? '.')
-      const server = new DevServer({ gameDir, port, quiet: !!flags.quiet })
+      if (args[0]) console.log('提示：Dev Server 不再需要游戏路径。启动后用 pot open <游戏目录> 让 Runner 打开游戏')
+      const server = new DevServer({ root: path.resolve(flags.root ?? '.'), port, quiet: !!flags.quiet })
       await server.start()
       const stop = () => server.close().finally(() => process.exit(0))
       process.on('SIGINT', stop)
       process.on('SIGTERM', stop)
       return
     }
+    case 'open': {
+      if (!args[0]) throw new Error('用法：pot open <游戏目录|.potg|URL> [--reset]')
+      const target = /^https?:\/\//i.test(args[0]) ? args[0] : path.resolve(args[0])
+      return exitBy(await api.open(target, { reset: !!flags.reset }))
+    }
+    case 'restart':
+      return exitBy(await api.call({ type: 'restart', reset: !!flags.reset }))
+    case 'check': {
+      const { checkGame } = require('./builder')
+      return exitBy(await checkGame(path.resolve(args[0] ?? '.')))
+    }
     case 'build': {
       const { buildRelease } = require('./builder')
       if (args.length < 2) throw new Error('用法：pot build <游戏目录> <输出目录>')
       return print(await buildRelease(path.resolve(args[0]), path.resolve(args[1])))
+    }
+    case 'pack': {
+      const { packGame } = require('./builder')
+      if (args.length < 1) throw new Error('用法：pot pack <游戏目录> [输出文件.potg]')
+      return print(await packGame(path.resolve(args[0]), args[1] && path.resolve(args[1])))
     }
     case 'mcp':
       return require('./mcp').runMcp(port)
@@ -86,10 +108,8 @@ async function main() {
         show(await api.logs(since, flags.level))
       }
     }
-    case 'sync':
-      return print(await api.sync())
-    case 'load':
-      return exitBy(await api.load({ resetState: !!flags.reset }))
+    case 'reload':
+      return exitBy(await api.call({ type: 'reload', units: args }))
     case 'eval':
       return exitBy(await api.call({ type: 'eval', code: args.join(' ') }))
     case 'state': {

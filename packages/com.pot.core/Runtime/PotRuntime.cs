@@ -124,6 +124,13 @@ namespace Pot
             Boot(state);
         }
 
+        /// <summary>在当前 ScriptEnv 执行一段 JS（外壳用，避免依赖 Puerts 程序集）</summary>
+        public void Eval(string code, string chunkName)
+        {
+            if (env == null) throw new InvalidOperationException("游戏未运行");
+            env.Eval(code, chunkName);
+        }
+
         public string Info()
         {
             if (env == null) return "{\"status\":\"idle\"}";

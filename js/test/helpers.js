@@ -5,7 +5,6 @@
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
-const { buildGame } = require('../devserver/builder')
 
 const dist = path.resolve(__dirname, '../dist')
 
@@ -80,19 +79,25 @@ function createHost(files = new Map()) {
 
 const helloDir = path.resolve(__dirname, '../../games/hello')
 
-async function startGame(files, options) {
+/** 读取游戏目录全部文件到 Map（与 Runner 读游戏目录相同的视图） */
+function readGameFiles(dir) {
+  const { walk } = require('../devserver/builder')
+  return new Map(walk(dir).map((rel) => [rel, fs.readFileSync(path.join(dir, rel), 'utf8')]))
+}
+
+/** 启动游戏；默认带源码加载器（Runner 的行为），options.loader === false 时只读 bundle（发布包的行为） */
+async function startGame(files, options = {}) {
   const pot = loadPot()
   const host = createHost(files)
-  const runtime = await pot.createRuntime(host, options)
+  const { loader, ...rest } = options
+  const runtime = await pot.createRuntime(host, { ...rest, loader: loader === false ? undefined : pot.devtools.createLoader(host) })
   pot.devtools.attach(runtime)
   await runtime.start()
-  return { pot, host, runtime, engine: host.engine }
+  return { pot, host, runtime, engine: host.engine, files }
 }
 
 async function startHello(options) {
-  const build = await buildGame(helloDir)
-  if (build.errors.length) throw new Error(build.errors.join('\n'))
-  return { ...(await startGame(new Map(build.files), options)), build }
+  return startGame(readGameFiles(helloDir), options)
 }
 
 function frames(runtime, n, dt = 1 / 60) {
@@ -118,4 +123,4 @@ function unit(name, body) {
   return `"use strict";\nexports.name = ${JSON.stringify(name)};\nexports.apply = function (ctx, config) {\n${body}\n};\n`
 }
 
-module.exports = { loadPot, createHost, startGame, startHello, frames, run, unit, helloDir, MockEngine }
+module.exports = { loadPot, createHost, startGame, startHello, readGameFiles, frames, run, unit, helloDir, MockEngine }

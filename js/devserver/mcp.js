@@ -8,13 +8,15 @@ const { client } = require('./client')
 const PROTOCOL_VERSION = '2024-11-05'
 
 const tools = [
-  { name: 'pot_status', description: 'Dev Server 与 Runner 状态：是否连接、单元列表、构建错误、最近一次热重载结果', inputSchema: { type: 'object', properties: {} } },
-  { name: 'pot_logs', description: '读取日志（Runner 日志 + Dev Server 日志，报错栈已映射回 TS）。用 since 增量读取', inputSchema: { type: 'object', properties: { since: { type: 'number', description: '只返回 sn 大于此值的日志' }, level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] }, limit: { type: 'number' } } } },
-  { name: 'pot_sync', description: '立即重新构建并把变化推送到 Runner（一般不需要，文件保存后会自动同步）。返回热重载结果', inputSchema: { type: 'object', properties: {} } },
-  { name: 'pot_load', description: '全量重新加载游戏（冷启动）。resetState=true 时清空 state', inputSchema: { type: 'object', properties: { resetState: { type: 'boolean' } } } },
+  { name: 'pot_status', description: 'Dev Server 与 Runner 状态：是否连接、Runner 正在运行的游戏（id、来源、单元）、最近一次热重载结果。Runner 自己监听游戏文件并热重载，改完源码后用它或 pot_logs 看结果', inputSchema: { type: 'object', properties: {} } },
+  { name: 'pot_logs', description: '读取日志（Runner 日志 + Dev Server 日志，报错栈直接指向 TS 源码行）。用 since 增量读取', inputSchema: { type: 'object', properties: { since: { type: 'number', description: '只返回 sn 大于此值的日志' }, level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] }, limit: { type: 'number' } } } },
+  { name: 'pot_open', description: '让 Runner 打开游戏：本地游戏目录 / .potg 文件（绝对路径或相对 Dev Server root）或 http(s) URL。Runner 自己读取源码、监听变化、热重载。reset=true 清空该游戏存档', inputSchema: { type: 'object', properties: { target: { type: 'string' }, reset: { type: 'boolean' } }, required: ['target'] } },
+  { name: 'pot_restart', description: '冷重启当前游戏（重建 JS 环境）。默认保留 state；reset=true 清空 state', inputSchema: { type: 'object', properties: { reset: { type: 'boolean' } } } },
+  { name: 'pot_reload', description: '强制热重载指定单元（一般不需要，保存文件后 Runner 会自动重载）', inputSchema: { type: 'object', properties: { units: { type: 'array', items: { type: 'string' } } }, required: ['units'] } },
+  { name: 'pot_check', description: '在本机对游戏目录做类型检查 + 试打包（不需要 Runner）。返回错误列表', inputSchema: { type: 'object', properties: { dir: { type: 'string', description: '游戏目录绝对路径' } }, required: ['dir'] } },
   { name: 'pot_eval', description: '在 Runner 的 JS 运行时中执行代码。可用变量：runtime、ctx（根上下文）、pot。表达式直接返回值；多语句请用 return', inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] } },
   { name: 'pot_state', description: '读写 state。action: keys | get | set | reset', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['keys', 'get', 'set', 'reset'] }, key: { type: 'string' }, value: {} } } },
-  { name: 'pot_query', description: '查询运行时。what: info（总体）| objects（场景对象，可按 unit 过滤）| data（数据文件依赖）| cache', inputSchema: { type: 'object', properties: { what: { type: 'string', enum: ['info', 'objects', 'data', 'cache'] }, unit: { type: 'string' } } } },
+  { name: 'pot_query', description: '查询运行时。what: info（总体）| objects（场景对象，可按 unit 过滤）| data（数据文件依赖）| cache | modules（源码模块依赖图）', inputSchema: { type: 'object', properties: { what: { type: 'string', enum: ['info', 'objects', 'data', 'cache', 'modules'] }, unit: { type: 'string' } } } },
   { name: 'pot_plugins', description: '已加载单元及其挂载点', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_leaks', description: '泄漏检查：最近一次热重载未回收的旧版本、对象数、定时器数', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_time', description: '控制游戏时间。action: get | pause | resume | step（frames）| scale（value）', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['get', 'pause', 'resume', 'step', 'scale'] }, frames: { type: 'number' }, value: { type: 'number' } } } },
@@ -26,8 +28,10 @@ async function callTool(api, name, args = {}) {
   switch (name) {
     case 'pot_status': return api.status()
     case 'pot_logs': return api.logs(args.since ?? 0, args.level, args.limit ?? 200)
-    case 'pot_sync': return api.sync()
-    case 'pot_load': return api.load({ resetState: !!args.resetState })
+    case 'pot_open': return api.open(args.target, { reset: !!args.reset })
+    case 'pot_restart': return api.call({ type: 'restart', reset: !!args.reset })
+    case 'pot_reload': return api.call({ type: 'reload', units: args.units ?? [] })
+    case 'pot_check': return require('./builder').checkGame(args.dir)
     case 'pot_eval': return api.call({ type: 'eval', code: args.code })
     case 'pot_state': return api.call({ type: 'state', ...args })
     case 'pot_query': return api.call({ type: 'query', ...args })

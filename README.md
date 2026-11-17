@@ -2,7 +2,7 @@
 
 面向 AI 的 Unity 游戏开发框架，基于 Puerts。
 
-名字取自普洱（Puerts 名字的来源）的茶壶：Runner 是壶，游戏包是茶。用 JS/TS 代码和 JSON 配置写成的游戏包，在 Runner 里加载、热重载、预览。AI 通过 MCP/CLI 读取日志和截图、操作游戏，形成开发闭环；人可以在电脑或手机上实时试玩、提意见。发布时用 Unity 正常打包成独立 App。
+名字取自普洱（Puerts 名字的来源）的茶壶：Runner 是壶，游戏包是茶。用 JS/TS 代码和 JSON 配置写成的游戏包，由 Runner 直接加载源码（内置 TS 转译）、监听变化并热重载。Dev Server 只是 AI 与 Runner 之间的可选通道：AI 通过 MCP/CLI 读取日志和截图、操作游戏，形成开发闭环；人不开 Dev Server 也能在电脑或手机上试玩。发布时用 Unity 正常打包成独立 App。
 
 ## 文档
 
@@ -32,17 +32,22 @@ powershell -File tools/install-puerts.ps1 -Source <Puerts 包目录>
 # 2. 构建 JS 运行时并测试
 cd js; npm install; node scripts/build.js; node --expose-gc --test "test/*.test.js"; cd ..
 
-# 3. 启动 Dev Server
-node js/devserver/cli.js dev games/hello --port 7788
+# 3. 构建 Runner（不要加 -nographics，否则内置着色器不会编译）
+Unity -batchmode -quit -projectPath runner -executeMethod RunnerBuild.BuildWin64
 
-# 4. 运行 Runner：用 Unity 打开 runner/ 点 Play，或构建后运行
-#    Unity -batchmode -quit -projectPath runner -executeMethod RunnerBuild.BuildWin64
-#    runner/Builds/Win64/PotRunner.exe -potServer=ws://127.0.0.1:7788/runner
+# 4. 直接用 Runner 打开游戏试玩：不需要 Dev Server，改 games/hello/src/**/*.ts、data/*.json 自动热重载
+runner/Builds/Win64/PotRunner.exe games/hello
+#    不带参数启动则显示首页：输入目录 / .potg / URL 打开，或点最近打开
 
-# 5. 修改 games/hello/src/plugins/*.ts，自动热重载；查看结果
-node js/devserver/cli.js status
+# 5. 需要 AI 参与时再启动 Dev Server（AI ↔ Runner 通道，不需要游戏路径）。Runner 会在后台自动连上
+node js/devserver/cli.js dev
+node js/devserver/cli.js open games/hello     # 让 Runner 打开（切换）游戏
+node js/devserver/cli.js status               # lastReload、当前游戏
 node js/devserver/cli.js logs
+node js/devserver/cli.js check games/hello    # 类型检查 + 试打包
 ```
+
+手机：Runner 面板（F1 / 三指触摸）里填电脑的 `IP:7788`，之后 `pot open games/hello` 会让手机从 `http://电脑IP:7788/files/games/hello/` 镜像游戏并每秒同步变化；也可以在首页直接输入这个 URL。
 
 MCP：`node js/devserver/cli.js mcp --port 7788`（stdio）。
 

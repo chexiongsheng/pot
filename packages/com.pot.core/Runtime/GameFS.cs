@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Scripting;
@@ -6,15 +5,15 @@ using UnityEngine.Scripting;
 namespace Pot
 {
     /// <summary>
-    /// 游戏文件系统。读取顺序：内存覆盖层（Dev Server 推送）→ 磁盘目录（-potGame=）→ Resources/pot-game/。
-    /// 路径为游戏相对路径，如 manifest.json、units/player.cjs、bundle.cjs、data/coins.json。
+    /// 游戏文件系统。读取顺序：磁盘目录 Root → Resources/pot-game/（发布包）。
+    /// - Runner：Root 指向游戏源码目录（本地目录、.potg 解压目录或 HTTP 镜像目录），UseResources=false。
+    /// - 发布包：Root 为空（或 -potGame= 指定的构建产物目录），UseResources=true。
+    /// 路径为游戏相对路径，如 manifest.json、src/plugins/player.ts、bundle.cjs、data/coins.json。
     /// </summary>
     [Preserve]
     public static class GameFS
     {
-        static readonly Dictionary<string, string> overlay = new Dictionary<string, string>();
-
-        /// <summary>磁盘上的游戏目录（发布构建产物目录）；为空则不读磁盘</summary>
+        /// <summary>磁盘上的游戏目录；为空则不读磁盘</summary>
         public static string Root;
 
         /// <summary>是否回退到 Resources/pot-game（发布包）</summary>
@@ -31,12 +30,19 @@ namespace Pot
         public static string ReadText(string path)
         {
             path = Normalize(path);
-            string text;
-            if (overlay.TryGetValue(path, out text)) return text;
+if (path.Length == 0 || path == ".." || path.StartsWith("../") || path.Contains("/../")) return null;
             if (!string.IsNullOrEmpty(Root))
             {
                 var full = Path.Combine(Root, path);
-                if (File.Exists(full)) return File.ReadAllText(full);
+                if (File.Exists(full))
+                {
+                    try { return File.ReadAllText(full); }
+                    catch (IOException)
+                    {
+                        // 编辑器保存时文件可能短暂被占用，稍后由变更通知重读
+                        return null;
+                    }
+                }
             }
             if (UseResources)
             {
@@ -46,25 +52,6 @@ namespace Pot
                 if (asset != null) return asset.text;
             }
             return null;
-        }
-
-        /// <summary>写入覆盖层；content 为 null 表示删除（之后回退到磁盘/Resources）</summary>
-        [Preserve]
-        public static void WriteText(string path, string content)
-        {
-            path = Normalize(path);
-            if (content == null) overlay.Remove(path);
-            else overlay[path] = content;
-        }
-
-        public static void Clear()
-        {
-            overlay.Clear();
-        }
-
-        public static int OverlayCount
-        {
-            get { return overlay.Count; }
         }
     }
 }

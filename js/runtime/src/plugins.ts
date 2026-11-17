@@ -1,7 +1,8 @@
 /**
  * plugins：游戏单元（unit）的加载与挂载。
- * 一个单元 = 一个插件文件（开发期 units/<name>.cjs，发布期 bundle.cjs 中的同名条目）。
- * 不用 Puerts 的模块缓存：每次编译都是一个新的模块对象，旧版本释放引用后即可被 GC。
+ * 一个单元 = 一个插件文件 src/plugins/<name>.ts。
+ * - Runner（开发期）：devtools 提供的 UnitLoader 直接读源码转译执行，每次编译都是新的模块对象，旧版本释放后可被 GC。
+ * - 发布期：没有 loader，从 bundle.cjs 读取（整体打包，导出 { units }）。
  *
  * 每个单元有一个稳定的 wrapper 插件：
  * - 标记 fiber → 单元名（state/data/scene 据此识别归属）
@@ -10,7 +11,6 @@
  */
 import { Context, Fiber, Inject, Service } from 'cordis'
 import type { Host } from './host'
-import { hash } from './serialize'
 import { markFiber } from './units'
 
 declare module 'cordis' {
@@ -22,6 +22,21 @@ declare module 'cordis' {
 }
 
 export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'plugins']
+
+export interface UnitSource {
+  exports: any
+  /** 单元及其依赖闭包的内容 hash，未变化的单元热重载时跳过 */
+  hash: string
+  /** 来源文件（如 src/plugins/player.ts） */
+  source: string
+}
+
+/** 单元源码加载器（devtools 的 SourceLoader 实现）。没有源码时返回 null */
+export interface UnitLoader {
+  load(name: string, modules: Record<string, any>): UnitSource | null
+  /** 文件变化后清缓存，返回受影响的单元 */
+  invalidate?(paths: string[]): string[]
+}
 
 export interface Unit {
   name: string
@@ -39,7 +54,7 @@ export interface Unit {
 
 export type ModuleFactory = (exports: any, require: (id: string) => any, module: { exports: any }, filename: string) => void
 
-/** 把 CommonJS 源码编译成工厂函数；sourceURL 让报错栈带上文件名，Dev Server 再用 sourcemap 映射回 TS */
+/** 把 CommonJS 源码编译成工厂函数；代码与包装头同一行，行号不变；sourceURL 让报错栈带上文件名 */
 export function compileModule(code: string, filename: string): ModuleFactory {
   const indirectEval = eval
   return indirectEval(`(function (exports, require, module, __filename) {${code}\n})\n//# sourceURL=${filename}`)
@@ -100,39 +115,35 @@ export function createUnit(name: string, exports: any, contentHash: string, sour
 
 export class PluginsService extends Service {
   readonly units = new Map<string, Unit>()
-  private _bundle: Record<string, ModuleFactory> | null | undefined
+  private _bundle: Record<string, any> | null | undefined
 
-  constructor(ctx: Context, private _host: Host, private _modules: Record<string, any>) {
+  constructor(ctx: Context, private _host: Host, private _modules: Record<string, any>, readonly loader?: UnitLoader) {
     super(ctx, 'plugins')
     ctx.mixin('plugins', ['use'])
   }
 
-  /** 发布期：bundle.cjs 导出 { 单元名: 工厂函数 } */
+  /** 发布期：bundle.cjs 是一个整体打包的模块，导出 { units: { 单元名: 模块导出 } }，共享代码只有一份 */
   private _getBundle() {
     if (this._bundle !== undefined) return this._bundle
     const code = this._host.readText('bundle.cjs')
     this._bundle = null
     if (code) {
       const exports = runModule(compileModule(code, 'bundle.cjs'), 'bundle.cjs', this._modules)
-      this._bundle = exports
+      if (!exports?.units) throw new Error('bundle.cjs 格式不对（缺少 units），请用当前版本的 pot build 重新构建')
+      this._bundle = exports.units
     }
     return this._bundle
   }
 
-  /** 编译单元但不登记（热重载预加载用） */
+  /** 编译单元但不登记（热重载预加载用）。有源码（Runner）读源码，否则读发布包 bundle.cjs */
   compile(name: string): Unit {
-    const filename = `units/${name}.cjs`
-    const code = this._host.readText(filename)
-    if (code !== null && code !== undefined) {
-      const exports = runModule(compileModule(code, filename), filename, this._modules)
-      return createUnit(name, exports, hash(code), filename)
+    const source = this.loader?.load(name, this._modules)
+    if (source) return createUnit(name, source.exports, source.hash, source.source)
+    const bundle = this._getBundle()
+    if (bundle && Object.prototype.hasOwnProperty.call(bundle, name)) {
+      return createUnit(name, bundle[name], `bundle:${name}`, 'bundle.cjs')
     }
-    const factory = this._getBundle()?.[name]
-    if (factory) {
-      const exports = runModule(factory, filename, this._modules)
-      return createUnit(name, exports, hash(factory.toString()), 'bundle.cjs')
-    }
-    throw new Error(`找不到单元 "${name}"（${filename}）`)
+    throw new Error(`找不到单元 "${name}"（src/plugins/${name}.ts）`)
   }
 
   /** 取已加载的单元，未加载则编译并登记 */

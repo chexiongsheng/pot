@@ -21,7 +21,6 @@ export function createUnityHost(): Host {
       const text = FS.ReadText(path)
       return text === null || text === undefined ? null : text
     },
-    writeText: (path, content) => FS.WriteText(path, content),
     gc: () => H.RequestGC(),
     send: (message) => H.Send(message),
     engine: {
@@ -55,7 +54,9 @@ export const unity = {
   /** 启动：异步完成后回调 PotHost.OnBooted(ok, error) */
   boot(stateJson?: string) {
     const host = createUnityHost()
-    createRuntime(host, { state: stateJson || undefined })
+    // Runner 带 devtools：直接从游戏源码加载；发布包没有 devtools，只读 bundle.cjs
+    const loader = (globalThis as any).pot?.devtools?.createLoader?.(host)
+    createRuntime(host, { state: stateJson || undefined, loader })
       .then((runtime) => {
         unity.runtime = runtime
         ;(globalThis as any).pot?.devtools?.attach?.(runtime)

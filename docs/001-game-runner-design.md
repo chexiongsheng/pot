@@ -254,10 +254,11 @@ pot/
 | 游戏包 | `entry: src/main.ts` | `manifest.plugins` 列出根单元，`src/plugins/*.ts` 每个文件一个单元 |
 | 绑定 | Puerts 静态绑定 | 反射模式：JS 只调用 `CS.Pot.*` 的少量静态方法，参数为数字和字符串；用 `link.xml` + `[Preserve]` 防裁剪 |
 | devtools 隔离 | asmdef `defineConstraints` | 发布工程不引入该包；`core` 通过事件和钩子暴露扩展点，不引用 devtools |
-| GameFS | Dev Server / StreamingAssets | 内存覆盖层（开发期推送）→ 磁盘目录（`-potGame=`）→ `Resources/pot-game` |
-| 连接 | 多设备 | 同一时间一个 Runner，后连接的替换先连接的 |
-| MCP 工具 | `devices`、`reload`、`perf`、`record` 等 | `pot_status/logs/sync/load/eval/state/query/plugins/leaks/time/input/screenshot`；文件保存即自动热重载 |
-| Runner 界面 | 项目列表、扫码 | IMGUI 状态条、错误浮层、地址面板（F1 或三指触摸） |
+| GameFS | Dev Server / StreamingAssets | 磁盘目录 `Root`（Runner：游戏源码目录、.potg 解压目录或 HTTP 镜像目录）→ `Resources/pot-game`（发布包） |
+| 加载与热重载 | Dev Server 构建并推送 | Runner 自己读源码（devtools 内置 sucrase 转译 TS，保留行号）、自己监听变化并热重载；Dev Server 只是 AI 通道，启动不需要游戏路径 |
+| 连接 | 多设备 | 同一时间一个 Runner，后连接的替换先连接的；Runner 后台静默连接与重连 |
+| MCP 工具 | `devices`、`reload`、`perf`、`record` 等 | `pot_status/logs/open/restart/reload/check/eval/state/query/plugins/leaks/time/input/screenshot` |
+| Runner 界面 | 项目列表、扫码 | IMGUI 首页（输入框 + 最近打开）、游戏中状态条、错误浮层、面板（F1 或三指触摸） |
 
 ### 16.1 Runner 协议
 
@@ -265,17 +266,19 @@ WebSocket 路径 `/runner`，JSON 文本帧。
 
 | 方向 | 消息 |
 |---|---|
-| Runner → Dev | `{type:'hello', platform, unity, device}` |
-| Runner → Dev | `{type:'log', level, text, source}`，JS 报错栈由 Dev Server 用 sourcemap 映射 |
-| Dev → Runner | `{type:'load', id, files:[{path,content}], resetState}`：写入覆盖层并冷启动 |
-| Dev → Runner | `{type:'cold'|'screenshot'|'input', id, ...}`：由 C# 处理 |
-| Dev → Runner | 其他命令（`reload`、`eval`、`state`、`query`、`time`、`leaks` 等）：交给 JS `pot.devtools.handle` |
+| Runner → Dev | `{type:'hello', platform, unity, device, game}` |
+| Runner → Dev | `{type:'log', level, text}`；`{type:'event', name:'reload'|'game', data}` |
+| Dev → Runner | `{type:'open', id, path?, files?, url?, reset}`：同机用 `path`，否则用 `url`，或 Runner 拼出 `http://<Dev 地址>` + `files` 镜像 |
+| Dev → Runner | `{type:'restart'|'home'|'screenshot'|'input', id, ...}`：由 C# 处理 |
+| Dev → Runner | 其他命令（`reload`、`changed`、`eval`、`state`、`query`、`time`、`leaks` 等）：交给 JS `pot.devtools.handle` |
 | Runner → Dev | `{type:'result', id, ok, data|error}` |
+
+HTTP：`GET /files/<相对 root 的路径>`，目录返回递归清单 `{files:[{path,size,mtime}]}`，文件直接返回内容（忽略 `.pot`、`node_modules`、`.git`，越界 403）。
 
 ### 16.2 验证情况
 
-- JS：4 个测试文件、27 项用例（运行时、热重载事务与回滚、泄漏检查、Dev Server 端到端）。
-- Unity：Win64 Runner 构建成功（约 86 MB，主要是 Mono 运行时和 V8）。真机验证了连接、加载、热重载保留 state、运行时错误映射到 `src/plugins/player.ts:行:列` 并回滚、`load` 保留 state、`load --reset` 清空、泄漏检查、虚拟输入。
-- 发布：`Pot.Build.PotBuild.Build` 构建 `games/hello` 为独立 exe，启动后从 Resources 加载游戏。
+- JS：32 项用例（运行时、源码加载与共享模块、热重载事务与回滚、启动失败单元自动恢复、泄漏检查、Dev Server 转发与 `/files`）。
+- Unity：Win64 Runner 实测：`PotRunner.exe games/hello` 不开 Dev Server 直接运行并热重载；无参数 `pot dev` 后 Runner 自动连上，`pot open` 本地目录、`http://127.0.0.1:7788/files/games/hello/` 镜像（轮询热重载）、`.potg` 均可打开；启动时语法错误的单元修好后自动挂载；截图、eval 正常。
+- 发布：`Pot.Build.PotBuild.Build` 构建 `games/hello` 为独立 exe，启动后从 Resources 加载 `bundle.cjs`。
 
 尚未实现：Android/iOS 真机验证、程序化网格与 uber 材质、物理、UI、音频、`record`/`replay`、多设备。

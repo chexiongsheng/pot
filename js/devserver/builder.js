@@ -1,12 +1,14 @@
 /**
- * 游戏构建：src/plugins/*.ts → units/<name>.cjs（每个单元一个 CJS 文件 + sourcemap）。
- * - @pot/core / cordis 保持 require，由运行时注入
- * - 开发期：Dev Server 把 units/*.cjs、manifest.json、data/** 推送到 Runner
- * - 发布期：合并为 bundle.cjs（{ 单元名: 工厂函数 }），连同 manifest/data 写入输出目录
+ * 游戏发布构建（开发期 Runner 直接读源码，不需要构建）：
+ * - buildRelease：src/plugins/*.ts 整体打包为一个 bundle.cjs（导出 { units }，共享代码只有一份，与 Runner 中行为一致），
+ *   连同 manifest.json、data/** 写入输出目录。@pot/core / cordis 保持 require，由运行时注入。
+ * - packGame：再压成 .potg（zip），Runner 可直接打开 / 安装。
+ * - checkGame：tsc 类型检查 + 试打包，发现 Runner 运行前就能看出的错误。
  */
 const esbuild = require('esbuild')
 const fs = require('fs')
 const path = require('path')
+const { spawnSync } = require('child_process')
 
 const externalPot = {
   name: 'pot-external',
@@ -15,9 +17,12 @@ const externalPot = {
   },
 }
 
+const IGNORED_DIRS = new Set(['.pot', 'node_modules', '.git'])
+
 function walk(dir, base = dir, out = []) {
   if (!fs.existsSync(dir)) return out
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (IGNORED_DIRS.has(entry.name)) continue
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) walk(full, base, out)
     else out.push(path.relative(base, full).replace(/\\/g, '/'))
@@ -33,97 +38,109 @@ function listUnits(gameDir) {
     .map((f) => ({ name: f.replace(/\.(ts|js)$/, ''), file: path.join(dir, f) }))
 }
 
-/**
- * 构建一次。返回：
- *   files: Map<GameFS 路径, 内容>（manifest.json、units/*.cjs、data/**）
- *   maps:  Map<units/x.cjs, sourcemap 对象>
- *   inputs: Map<单元名, 依赖的源文件绝对路径[]>
- *   errors: 构建错误（字符串）
- */
-async function buildGame(gameDir) {
-  gameDir = path.resolve(gameDir)
-  const files = new Map()
-  const maps = new Map()
-  const inputs = new Map()
-  const errors = []
+function formatErrors(error) {
+  const list = error.errors ?? [{ text: String(error?.stack ?? error) }]
+  return list.map((e) => {
+    const loc = e.location ? `${e.location.file}:${e.location.line}:${e.location.column + 1} ` : ''
+    return `${loc}${e.text}`
+  })
+}
 
-  const manifestPath = path.join(gameDir, 'manifest.json')
-  if (!fs.existsSync(manifestPath)) {
-    errors.push(`找不到 ${manifestPath}`)
-    return { files, maps, inputs, errors }
-  }
-  files.set('manifest.json', fs.readFileSync(manifestPath, 'utf8'))
+function readManifest(gameDir) {
+  const file = path.join(gameDir, 'manifest.json')
+  if (!fs.existsSync(file)) throw new Error(`找不到 ${file}`)
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'))
+  if (!manifest.id) throw new Error('manifest.json 缺少 id')
+  return manifest
+}
 
-  for (const rel of walk(path.join(gameDir, 'data'))) {
-    files.set(`data/${rel}`, fs.readFileSync(path.join(gameDir, 'data', rel), 'utf8'))
-  }
-
+/** 把全部单元打成一个 CJS 模块：module.exports = { units: { 名字: 模块导出 } } */
+async function bundleUnits(gameDir) {
   const units = listUnits(gameDir)
-  if (units.length) {
-    try {
-      const result = await esbuild.build({
-        entryPoints: Object.fromEntries(units.map((u) => [u.name, u.file])),
-        outdir: path.join(gameDir, '.pot/units'),
-        bundle: true,
-        format: 'cjs',
-        platform: 'neutral',
-        target: 'es2020',
-        charset: 'utf8',
-        sourcemap: 'external',
-        sourcesContent: false,
-        metafile: true,
-        write: false,
-        logLevel: 'silent',
-        outExtension: { '.js': '.cjs' },
-        plugins: [externalPot],
-      })
-      for (const out of result.outputFiles) {
-        const base = path.basename(out.path)
-        if (base.endsWith('.cjs.map')) {
-          const map = JSON.parse(out.text)
-          // sources 改为绝对路径，便于映射报错栈
-          map.sources = map.sources.map((s) => path.resolve(path.dirname(out.path), s))
-          maps.set(`units/${base.replace(/\.map$/, '')}`, map)
-        } else if (base.endsWith('.cjs')) {
-          // 去掉 esbuild 追加的 sourceMappingURL（运行时用 sourceURL 标记文件名）
-          files.set(`units/${base}`, out.text.replace(/\n\/\/# sourceMappingURL=.*\n?$/, '\n'))
-        }
-      }
-      for (const [out, meta] of Object.entries(result.metafile.outputs)) {
-        if (!meta.entryPoint) continue
-        const name = path.basename(out).replace(/\.cjs$/, '')
-        inputs.set(name, Object.keys(meta.inputs).map((p) => path.resolve(p)))
-      }
-    } catch (error) {
-      const list = error.errors ?? [{ text: String(error) }]
-      for (const e of list) {
-        const loc = e.location ? `${e.location.file}:${e.location.line}:${e.location.column + 1} ` : ''
-        errors.push(`${loc}${e.text}`)
-      }
-    }
-  }
-  return { files, maps, inputs, errors }
+  const lines = units.map((u, i) => `import * as u${i} from ${JSON.stringify('./' + path.relative(gameDir, u.file).replace(/\\/g, '/'))}`)
+  lines.push(`export const units = { ${units.map((u, i) => `${JSON.stringify(u.name)}: u${i}`).join(', ')} }`)
+  const result = await esbuild.build({
+    stdin: { contents: lines.join('\n'), resolveDir: gameDir, sourcefile: 'pot-units.js', loader: 'js' },
+    bundle: true,
+    format: 'cjs',
+    platform: 'neutral',
+    target: 'es2020',
+    charset: 'utf8',
+    write: false,
+    logLevel: 'silent',
+    plugins: [externalPot],
+  })
+  return { code: result.outputFiles[0].text, units: units.map((u) => u.name) }
 }
 
 /** 发布构建：manifest.json + bundle.cjs + data/** 写入 outDir（先清空） */
 async function buildRelease(gameDir, outDir) {
-  const { files, errors } = await buildGame(gameDir)
-  if (errors.length) throw new Error(`构建失败：\n${errors.join('\n')}`)
+  gameDir = path.resolve(gameDir)
+  readManifest(gameDir)
+  let bundle
+  try {
+    bundle = await bundleUnits(gameDir)
+  } catch (error) {
+    throw new Error(`构建失败：\n${formatErrors(error).join('\n')}`)
+  }
   fs.rmSync(outDir, { recursive: true, force: true })
   fs.mkdirSync(outDir, { recursive: true })
-  const parts = []
-  for (const [file, content] of files) {
-    const unit = /^units\/(.+)\.cjs$/.exec(file)
-    if (unit) {
-      parts.push(`${JSON.stringify(unit[1])}: function (exports, require, module, __filename) {\n${content}\n}`)
-      continue
-    }
+  const copy = ['manifest.json', ...walk(path.join(gameDir, 'data')).map((f) => `data/${f}`)]
+  for (const file of copy) {
     const target = path.join(outDir, file)
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.writeFileSync(target, content)
+    fs.copyFileSync(path.join(gameDir, file), target)
   }
-  fs.writeFileSync(path.join(outDir, 'bundle.cjs'), `module.exports = {\n${parts.join(',\n')}\n}\n`)
-  return { outDir, units: parts.length }
+  fs.writeFileSync(path.join(outDir, 'bundle.cjs'), bundle.code)
+  return { outDir, units: bundle.units.length }
 }
 
-module.exports = { buildGame, buildRelease, listUnits }
+/**
+ * 打包为 .potg（zip：manifest.json + bundle.cjs + data/**），Runner 可打开本地文件或 http URL 安装试玩。
+ * outFile 缺省为 <游戏目录>/.pot/<id>-<version>.potg
+ */
+async function packGame(gameDir, outFile) {
+  gameDir = path.resolve(gameDir)
+  const temp = path.join(gameDir, '.pot/pack')
+  await buildRelease(gameDir, temp)
+  const manifest = JSON.parse(fs.readFileSync(path.join(temp, 'manifest.json'), 'utf8'))
+  const target = path.resolve(outFile ?? path.join(gameDir, '.pot', `${manifest.id}-${manifest.version ?? '0.0.0'}.potg`))
+  const { createZip } = require('./zip')
+  const entries = walk(temp).sort().map((name) => ({ name, data: fs.readFileSync(path.join(temp, name)) }))
+  const zip = createZip(entries)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, zip)
+  fs.rmSync(temp, { recursive: true, force: true })
+  return { file: target, id: manifest.id, version: manifest.version, files: entries.length, bytes: zip.length }
+}
+
+/** 检查：manifest、单元与 manifest 对应、试打包（语法/模块解析）、tsc 类型检查（有 tsconfig.json 时） */
+async function checkGame(gameDir) {
+  gameDir = path.resolve(gameDir)
+  const errors = []
+  let manifest
+  try {
+    manifest = readManifest(gameDir)
+  } catch (error) {
+    return { ok: false, errors: [error.message] }
+  }
+  const names = new Set(listUnits(gameDir).map((u) => u.name))
+  for (const item of manifest.plugins ?? []) {
+    const name = typeof item === 'string' ? item : item?.name
+    if (!names.has(name)) errors.push(`manifest.plugins 中的 "${name}" 没有对应的 src/plugins/${name}.ts`)
+  }
+  try {
+    await bundleUnits(gameDir)
+  } catch (error) {
+    errors.push(...formatErrors(error))
+  }
+  if (fs.existsSync(path.join(gameDir, 'tsconfig.json'))) {
+    const tsc = require.resolve('typescript/bin/tsc')
+    const result = spawnSync(process.execPath, [tsc, '--noEmit', '--pretty', 'false', '-p', gameDir], { encoding: 'utf8' })
+    const out = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim()
+    if (result.status !== 0) errors.push(...out.split(/\r?\n/).filter(Boolean))
+  }
+  return { ok: errors.length === 0, errors }
+}
+
+module.exports = { buildRelease, packGame, checkGame, listUnits, walk }

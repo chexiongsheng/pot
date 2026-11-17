@@ -1,44 +1,71 @@
 /**
- * pot Dev Server：
- * - 构建游戏（esbuild），监听文件变化，按单元 hash 差异向 Runner 推送热重载
- * - Runner 通过 WebSocket 连接 ws://<host>:<port>/runner
- * - CLI / MCP 通过 HTTP 调用：GET /status、GET /logs、POST /call、POST /sync、POST /load
- * - 报错栈经 sourcemap 映射回 TS 源文件
+ * pot Dev Server：AI（CLI / MCP）与 Runner 之间的通道。它不读、不编译、不推送游戏。
+ * - Runner 通过 WebSocket 连接 ws://<host>:<port>/runner（可选；Runner 不连也能自己打开游戏试玩）
+ * - CLI / MCP 通过 HTTP：GET /status、GET /logs、POST /call（转发命令）、POST /open（让 Runner 打开游戏）
+ * - 静态文件：GET /files/<相对 root 的路径>，目录加 ?list 返回递归清单。手机上的 Runner 据此镜像游戏目录并轮询变化
  */
 const fs = require('fs')
 const http = require('http')
 const path = require('path')
 const { WebSocketServer } = require('ws')
-const { buildGame } = require('./builder')
-const { SourceMapIndex } = require('./sourcemap')
 
-const JS_SIDE = new Set(['reload', 'eval', 'state', 'leaks', 'plugins', 'query', 'time'])
-const RUNNER_SIDE = new Set(['load', 'cold', 'screenshot', 'input'])
+/** 由 Runner 的 JS 运行时处理 */
+const JS_SIDE = new Set(['reload', 'changed', 'eval', 'state', 'leaks', 'plugins', 'query', 'time'])
+/** 由 Runner 的 C# 侧处理 */
+const RUNNER_SIDE = new Set(['open', 'restart', 'home', 'screenshot', 'input'])
+
+const IGNORED = new Set(['.pot', 'node_modules', '.git'])
+
+const MIME = {
+  '.json': 'application/json; charset=utf-8',
+  '.ts': 'text/plain; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.cjs': 'text/javascript; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.potg': 'application/zip',
+}
+
+/** 递归列出目录文件（相对路径、大小、修改时间） */
+function listFiles(dir, base = dir, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (IGNORED.has(entry.name)) continue
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) listFiles(full, base, out)
+    else if (entry.isFile()) {
+      const stat = fs.statSync(full)
+      out.push({ path: path.relative(base, full).replace(/\\/g, '/'), size: stat.size, mtime: Math.floor(stat.mtimeMs) })
+    }
+  }
+  return out
+}
+
+function isInside(root, target) {
+  const rel = path.relative(root, target)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
 
 class DevServer {
-  constructor(options) {
-    this.gameDir = path.resolve(options.gameDir)
+  constructor(options = {}) {
+    this.root = path.resolve(options.root ?? process.cwd())
     this.port = options.port ?? 7788
     this.host = options.host ?? '0.0.0.0'
     this.quiet = !!options.quiet
-    this.files = new Map()
-    this.maps = new SourceMapIndex()
-    this.buildErrors = []
     this.logs = []
     this.logSn = 0
     this.maxLogs = 1000
     this.runner = null
     this.runnerInfo = null
+    this.game = null
     this.pending = new Map()
     this.callId = 0
     this.lastReload = null
-    this.lastLoad = null
-    this._syncing = Promise.resolve()
-    this._timer = null
   }
 
   log(level, text, source = 'server') {
-    const entry = { sn: ++this.logSn, ts: Date.now(), source, level, text: this.maps.mapText(String(text), this.gameDir) }
+    const entry = { sn: ++this.logSn, ts: Date.now(), source, level, text: String(text) }
     this.logs.push(entry)
     if (this.logs.length > this.maxLogs) this.logs.splice(0, this.logs.length - this.maxLogs)
     if (!this.quiet) {
@@ -49,79 +76,13 @@ class DevServer {
     return entry
   }
 
-  async build() {
-    const result = await buildGame(this.gameDir)
-    this.buildErrors = result.errors
-    if (result.errors.length) {
-      for (const e of result.errors) this.log('error', `构建失败：${e}`)
-      return null
-    }
-    this.maps.clear()
-    for (const [file, map] of result.maps) this.maps.set(file, map)
-    return result
-  }
-
-  filesArray(files = this.files) {
-    return [...files].map(([p, content]) => ({ path: p, content }))
-  }
-
-  /** 重新构建并推送差异；串行执行 */
-  sync(reason = 'change') {
-    this._syncing = this._syncing.then(() => this._sync(reason)).catch((e) => this.log('error', e.stack ?? e))
-    return this._syncing
-  }
-
-  async _sync(reason) {
-    const result = await this.build()
-    if (!result) return { ok: false, errors: this.buildErrors }
-    const changed = []
-    for (const [p, content] of result.files) {
-      if (this.files.get(p) !== content) changed.push({ path: p, content })
-    }
-    for (const p of this.files.keys()) {
-      if (!result.files.has(p)) changed.push({ path: p, content: null })
-    }
-    const first = this.files.size === 0
-    this.files = result.files
-    if (first || !changed.length || !this.runner) {
-      return { ok: true, changed: changed.map((c) => c.path), pushed: false }
-    }
-    if (changed.some((c) => c.path === 'manifest.json')) {
-      this.log('info', 'manifest.json 变化，冷重启')
-      const res = await this.load().catch((e) => ({ ok: false, error: String(e.message ?? e) }))
-      return { ok: res.ok, changed: changed.map((c) => c.path), mode: 'cold', result: res }
-    }
-    const res = await this.call({ type: 'reload', files: changed }).catch((e) => ({ ok: false, error: String(e.message ?? e) }))
-    const data = res.data ?? {}
-    this.lastReload = { ts: Date.now(), reason, files: changed.map((c) => c.path), ...res }
-    if (res.ok && data.ok) {
-      const leaks = data.leaks?.length ? `，疑似泄漏 ${data.leaks.length} 项：${data.leaks.join(', ')}` : ''
-      if (data.units.length) this.log(leaks ? 'warn' : 'info', `热重载 ${data.units.join(', ')} 完成（${data.durationMs}ms）${leaks}`)
-      else this.log('info', `已同步 ${changed.map((c) => c.path).join(', ')}（无需重载单元）`)
-    } else {
-      const error = res.error ?? data.error
-      this.log('error', `热重载失败（阶段 ${data.phase ?? '?'}${data.rolledBack ? '，已回滚' : ''}）：${error}`)
-    }
-    return this.lastReload
-  }
-
-  /** 全量下发文件并让 Runner 冷启动（state 由 Runner 保留） */
-  async load(options = {}) {
-    if (!this.files.size) await this.sync('load')
-    const res = await this.call({ type: 'load', files: this.filesArray(), resetState: !!options.resetState }, 60000)
-    this.lastLoad = { ts: Date.now(), ...res }
-    if (res.ok) this.log('info', `游戏已加载（${this.files.size} 个文件）`)
-    else this.log('error', `加载失败：${res.error}`)
-    return res
-  }
-
   /** 向 Runner 发命令并等待结果 */
   call(msg, timeout = 30000) {
     if (!this.runner || this.runner.readyState !== 1) {
-      return Promise.reject(new Error('Runner 未连接。请启动 Runner 并连接到本 Dev Server'))
+      return Promise.resolve({ ok: false, error: 'Runner 未连接。请启动 Runner，在 F1 面板中把 Dev Server 地址设为 ws://<本机IP>:' + this.port + '/runner' })
     }
     if (!JS_SIDE.has(msg.type) && !RUNNER_SIDE.has(msg.type)) {
-      return Promise.reject(new Error(`未知命令：${msg.type}`))
+      return Promise.resolve({ ok: false, error: `未知命令：${msg.type}` })
     }
     const id = ++this.callId
     return new Promise((resolve) => {
@@ -130,8 +91,37 @@ class DevServer {
         resolve({ ok: false, error: `命令 ${msg.type} 超时（${timeout}ms）` })
       }, timeout)
       this.pending.set(id, { resolve, timer })
-      this.runner.send(JSON.stringify({ ...msg, id }))
+      const { timeout: _t, ...payload } = msg
+      this.runner.send(JSON.stringify({ ...payload, id }))
     })
+  }
+
+  /**
+   * 让 Runner 打开游戏。target：本地目录 / .potg 文件（相对 root 或绝对路径），或 http(s) URL。
+   * Runner 与本机共享文件系统时直接用 path；否则（手机）用 url 从本服务拉取。
+   */
+  async open(target, options = {}) {
+    if (!target) return { ok: false, error: '缺少要打开的游戏路径或 URL' }
+    const msg = { type: 'open', reset: !!options.reset }
+    if (/^https?:\/\//i.test(target)) {
+      msg.url = target
+    } else {
+      const abs = path.resolve(this.root, target)
+      if (!fs.existsSync(abs)) return { ok: false, error: `找不到 ${abs}` }
+      const stat = fs.statSync(abs)
+      if (stat.isDirectory() && !fs.existsSync(path.join(abs, 'manifest.json'))) {
+        return { ok: false, error: `${abs} 下没有 manifest.json，不是游戏目录` }
+      }
+      msg.path = abs
+      if (isInside(this.root, abs)) {
+        const rel = path.relative(this.root, abs).split(path.sep).map(encodeURIComponent).join('/')
+        msg.files = `/files/${rel}${stat.isDirectory() && rel ? '/' : ''}`
+      }
+    }
+    const res = await this.call(msg, 120000)
+    if (res.ok) this.log('info', `Runner 已打开 ${target}`)
+    else this.log('error', `打开 ${target} 失败：${res.error}`)
+    return res
   }
 
   _onRunnerMessage(raw) {
@@ -144,8 +134,8 @@ class DevServer {
     switch (msg.type) {
       case 'hello':
         this.runnerInfo = msg
-        this.log('info', `Runner 已连接：${msg.platform ?? ''} ${msg.unity ?? ''}`)
-        this._syncing.then(() => this.load()).catch((e) => this.log('error', e.stack ?? e))
+        this.game = msg.game ?? null
+        this.log('info', `Runner 已连接：${msg.platform ?? ''} ${msg.device ?? ''}${this.game?.id ? `，正在运行 ${this.game.id}` : ''}`)
         break
       case 'log':
         this.log(msg.level ?? 'info', msg.text, 'runner')
@@ -155,47 +145,63 @@ class DevServer {
         if (!pending) return
         this.pending.delete(msg.id)
         clearTimeout(pending.timer)
-        pending.resolve(this._mapResult(msg))
+        pending.resolve(msg.ok ? { ok: true, data: msg.data } : { ok: false, error: String(msg.error ?? '') })
         break
       }
       case 'event':
-        this.log('debug', `事件 ${msg.name}：${JSON.stringify(msg.data)}`, 'runner')
+        if (msg.name === 'reload') this.lastReload = { ts: Date.now(), ...msg.data }
+        else if (msg.name === 'game') this.game = msg.data ?? null
+        else this.log('debug', `事件 ${msg.name}：${JSON.stringify(msg.data)}`, 'runner')
         break
       default:
         this.log('warn', `未知 Runner 消息：${msg.type}`)
     }
   }
 
-  _mapResult(msg) {
-    const mapped = { ok: !!msg.ok }
-    if (msg.ok) mapped.data = msg.data
-    else mapped.error = this.maps.mapText(String(msg.error ?? ''), this.gameDir)
-    if (mapped.data && typeof mapped.data === 'object' && typeof mapped.data.error === 'string') {
-      mapped.data.error = this.maps.mapText(mapped.data.error, this.gameDir)
-    }
-    return mapped
-  }
-
   status() {
+    const info = this.runnerInfo ? { ...this.runnerInfo } : {}
+    delete info.type
+    delete info.game
     return {
-      game: this.gameDir,
+      root: this.root,
       port: this.port,
-      runner: this.runner ? { connected: true, ...this.runnerInfo, type: undefined } : { connected: false },
-      files: this.files.size,
-      units: [...this.files.keys()].filter((p) => p.startsWith('units/')).map((p) => p.slice(6, -4)),
-      buildErrors: this.buildErrors,
+      runner: this.runner ? { connected: true, ...info } : { connected: false },
+      game: this.game,
       lastReload: this.lastReload,
-      lastLoad: this.lastLoad && { ts: this.lastLoad.ts, ok: this.lastLoad.ok, error: this.lastLoad.error },
     }
   }
 
-  _watch() {
-    const ignore = /(^|[\\/])(\.pot|node_modules|\.git)([\\/]|$)/
-    this.watcher = fs.watch(this.gameDir, { recursive: true }, (_event, file) => {
-      if (!file || ignore.test(file)) return
-      clearTimeout(this._timer)
-      this._timer = setTimeout(() => this.sync('watch'), 80)
+  /** GET /files/<rel>[?list] */
+  _serveFile(url, res) {
+    let rel
+    try {
+      rel = decodeURIComponent(url.pathname.slice('/files/'.length))
+    } catch {
+      res.writeHead(400).end()
+      return
+    }
+    const target = path.resolve(this.root, rel)
+    if (!isInside(this.root, target) || rel.split(/[\\/]/).some((p) => IGNORED.has(p))) {
+      res.writeHead(403).end('forbidden')
+      return
+    }
+    if (!fs.existsSync(target)) {
+      res.writeHead(404).end('not found')
+      return
+    }
+    const stat = fs.statSync(target)
+    if (stat.isDirectory()) {
+      const body = JSON.stringify({ files: listFiles(target) })
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(body)
+      return
+    }
+    res.writeHead(200, {
+      'content-type': MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream',
+      'content-length': stat.size,
+      'cache-control': 'no-store',
     })
+    fs.createReadStream(target).pipe(res)
   }
 
   async _http(req, res) {
@@ -205,6 +211,7 @@ class DevServer {
       res.end(JSON.stringify(body))
     }
     try {
+      if (req.method === 'GET' && url.pathname.startsWith('/files/')) return this._serveFile(url, res)
       if (req.method === 'GET' && url.pathname === '/status') return send(200, this.status())
       if (req.method === 'GET' && url.pathname === '/logs') {
         const since = Number(url.searchParams.get('since') ?? 0)
@@ -218,12 +225,13 @@ class DevServer {
         const body = await new Promise((resolve, reject) => {
           let data = ''
           req.on('data', (c) => { data += c })
-          req.on('end', () => resolve(data ? JSON.parse(data) : {}))
+          req.on('end', () => {
+            try { resolve(data ? JSON.parse(data) : {}) } catch (e) { reject(e) }
+          })
           req.on('error', reject)
         })
         if (url.pathname === '/call') return send(200, await this.call(body, body.timeout ?? 30000))
-        if (url.pathname === '/sync') return send(200, await this.sync('manual'))
-        if (url.pathname === '/load') return send(200, await this.load(body))
+        if (url.pathname === '/open') return send(200, await this.open(body.target, body))
       }
       send(404, { ok: false, error: `未知接口 ${req.method} ${url.pathname}` })
     } catch (error) {
@@ -232,7 +240,6 @@ class DevServer {
   }
 
   async start() {
-    await this.sync('start')
     this.http = http.createServer((req, res) => this._http(req, res))
     this.wss = new WebSocketServer({ server: this.http, path: '/runner', maxPayload: 64 * 1024 * 1024 })
     this.wss.on('connection', (socket) => {
@@ -246,6 +253,7 @@ class DevServer {
         if (this.runner !== socket) return
         this.runner = null
         this.runnerInfo = null
+        this.game = null
         for (const [id, p] of this.pending) {
           clearTimeout(p.timer)
           p.resolve({ ok: false, error: 'Runner 连接已断开' })
@@ -259,18 +267,15 @@ class DevServer {
       this.http.listen(this.port, this.host, resolve)
     })
     this.port = this.http.address().port
-    this._watch()
-    this.log('info', `Dev Server 已启动：http://127.0.0.1:${this.port}  Runner 地址 ws://<本机IP>:${this.port}/runner  游戏 ${this.gameDir}`)
+    this.log('info', `Dev Server 已启动：http://127.0.0.1:${this.port}  Runner 地址 ws://<本机IP>:${this.port}/runner  文件根目录 ${this.root}`)
     return this
   }
 
   async close() {
-    this.watcher?.close()
-    clearTimeout(this._timer)
     for (const client of this.wss?.clients ?? []) client.terminate()
     await new Promise((r) => this.wss ? this.wss.close(() => r()) : r())
     await new Promise((r) => this.http ? this.http.close(() => r()) : r())
   }
 }
 
-module.exports = { DevServer, JS_SIDE, RUNNER_SIDE }
+module.exports = { DevServer, JS_SIDE, RUNNER_SIDE, listFiles }

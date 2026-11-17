@@ -9,6 +9,7 @@ import { DataService } from './data'
 import type { Host, LogLevel } from './host'
 import { InputService } from './input'
 import { PluginsService } from './plugins'
+import type { UnitLoader } from './plugins'
 import { SceneService } from './scene'
 import { StateService } from './state'
 import { TimerService } from './timer'
@@ -37,6 +38,8 @@ export interface RuntimeOptions {
   state?: string
   /** 单元 require 可见的模块，默认 { '@pot/core': globalThis.pot } */
   modules?: Record<string, any>
+  /** 源码加载器（Runner 由 devtools 提供）；不提供则只从 bundle.cjs 加载 */
+  loader?: UnitLoader
 }
 
 let current: Runtime | undefined
@@ -100,7 +103,7 @@ export class Runtime {
     await install(bind(DataService, host))
     await install(bind(SceneService, host))
     await install(bind(InputService, host))
-    await install(bind(PluginsService, host, modules))
+    await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this
   }

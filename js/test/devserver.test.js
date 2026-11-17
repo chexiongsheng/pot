@@ -1,30 +1,31 @@
 /**
- * Dev Server 端到端测试：用 Node 版“假 Runner”（与 C# PotDevClient 协议一致）
- * 连接 Dev Server，验证 加载 → 改文件 → 自动热重载 → 报错栈映射 → CLI 调用。
+ * Dev Server 测试：Dev Server 只是 AI ↔ Runner 的通道。
+ * 用 Node 版“假 Runner”（协议与 C# PotDevClient 一致）验证：open 转发、命令转发、reload 事件、静态文件与清单。
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
+const http = require('http')
 const os = require('os')
 const path = require('path')
 const WebSocket = require('ws')
 const { DevServer } = require('../devserver/server')
 const { client } = require('../devserver/client')
-const { loadPot, createHost, helloDir } = require('./helpers')
+const { loadPot, createHost, readGameFiles, helloDir } = require('./helpers')
 
 class FakeRunner {
   constructor(port) {
     this.pot = loadPot()
     this.port = port
     this.runtime = null
-    this.loads = 0
+    this.opened = []
   }
 
   connect() {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(`ws://127.0.0.1:${this.port}/runner`)
       this.ws.on('open', () => {
-        this.ws.send(JSON.stringify({ type: 'hello', platform: 'node', unity: 'fake' }))
+        this.ws.send(JSON.stringify({ type: 'hello', platform: 'node', unity: 'fake', device: 'test', game: null }))
         resolve()
       })
       this.ws.on('error', reject)
@@ -37,35 +38,37 @@ class FakeRunner {
     this.ws.send(JSON.stringify({ type: 'result', id, ok, ...(ok ? { data: payload } : { error: payload }) }))
   }
 
-  async boot(files, resetState) {
-    let state = ''
-    if (this.runtime) {
-      if (!resetState) state = this.runtime.exportState()
-      await this.runtime.stop()
-    }
-    const host = createHost(new Map(files.map((f) => [f.path, f.content])))
+  async boot(files) {
+    if (this.runtime) await this.runtime.stop()
+    const host = createHost(files)
     host.send = (m) => this.ws.send(m)
     host.log = (level, text) => this.ws.send(JSON.stringify({ type: 'log', level, text }))
     this.host = host
-    this.runtime = await this.pot.createRuntime(host, { state })
+    this.runtime = await this.pot.createRuntime(host, { loader: this.pot.devtools.createLoader(host) })
     this.pot.devtools.attach(this.runtime)
     await this.runtime.start()
-    this.loads++
+    const game = { id: this.runtime.manifest.id, source: this.source, status: this.runtime.status }
+    this.ws.send(JSON.stringify({ type: 'event', name: 'game', data: game }))
+    return game
   }
 
   async onMessage(msg) {
     try {
       switch (msg.type) {
-        case 'load':
-          await this.boot(msg.files, msg.resetState)
-          return this.reply(msg.id, true, { files: msg.files.length })
+        case 'open': {
+          this.opened.push(msg)
+          // 与真 Runner 一致：本地存在 path 就直接读，否则走 files URL
+          this.source = msg.path
+          this.files = readGameFiles(msg.path)
+          return this.reply(msg.id, true, await this.boot(this.files))
+        }
         case 'screenshot':
           return this.reply(msg.id, true, { png: Buffer.from('fake').toString('base64'), width: 1, height: 1 })
         case 'input':
           if (msg.action === 'axis') this.host.engine.axes[msg.name] = [msg.x, msg.y]
           return this.reply(msg.id, true, {})
-        case 'cold':
-          return this.reply(msg.id, false, 'not supported')
+        case 'restart':
+          return this.reply(msg.id, true, await this.boot(this.files))
         default:
           // JS 侧命令：agent 通过 host.send 自行回复
           await this.pot.devtools.handle(msg)
@@ -91,86 +94,105 @@ async function until(fn, timeout = 5000) {
   }
 }
 
-test('Dev Server：加载、自动热重载、报错映射、CLI 调用', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-hello-'))
-  fs.cpSync(helloDir, dir, { recursive: true })
-  const server = new DevServer({ gameDir: dir, port: 0, host: '127.0.0.1', quiet: true })
+function get(port, p) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port, path: p }, (res) => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { text += c })
+      res.on('end', () => resolve({ status: res.statusCode, text }))
+    }).on('error', reject)
+  })
+}
+
+test('Dev Server：无游戏路径启动，转发 open / 命令，记录 Runner 的热重载事件', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-root-'))
+  const gameDir = path.join(root, 'games/hello')
+  fs.cpSync(helloDir, gameDir, { recursive: true })
+  const server = new DevServer({ root, port: 0, host: '127.0.0.1', quiet: true })
   await server.start()
   const runner = new FakeRunner(server.port)
   t.after(async () => {
     runner.close()
     await server.close()
-    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
   })
-  await runner.connect()
-  await until(() => runner.loads === 1 && runner.runtime?.status === 'running')
   const api = client(server.port)
 
-  const status = await api.status()
-  assert.equal(status.runner.connected, true)
-  assert.deepEqual(status.units.sort(), ['coins', 'player', 'world'])
+  // Runner 未连接时给出明确错误
+  assert.match((await api.open(gameDir)).error, /Runner 未连接/)
 
-  // CLI/HTTP 调用
-  const evalRes = await api.call({ type: 'eval', code: 'runtime.plugins.list().length' })
-  assert.deepEqual(evalRes, { ok: true, data: 3 })
+  await runner.connect()
+  await until(async () => (await api.status()).runner.connected)
+
+  // 不存在 / 不是游戏目录
+  assert.match((await api.open(path.join(root, 'nope'))).error, /找不到/)
+  assert.match((await api.open(root)).error, /没有 manifest\.json/)
+
+  const opened = await api.open('games/hello', { reset: true })
+  assert.equal(opened.ok, true, opened.error)
+  assert.equal(opened.data.id, 'pot.hello')
+  assert.equal(runner.opened[0].path, gameDir)
+  assert.equal(runner.opened[0].files, '/files/games/hello/')
+  assert.equal(runner.opened[0].reset, true)
+  await until(async () => (await api.status()).game?.id === 'pot.hello')
+
+  // 命令转发
+  assert.deepEqual(await api.call({ type: 'eval', code: 'runtime.plugins.list().length' }), { ok: true, data: 3 })
   await api.call({ type: 'input', action: 'axis', name: 'move', x: 1, y: 0 })
   await until(async () => (await api.call({ type: 'state', action: 'get', key: 'player' })).data.position[0] > 1)
   await api.call({ type: 'input', action: 'axis', name: 'move', x: 0, y: 0 })
+  assert.equal((await api.call({ type: 'nope' })).ok, false)
 
-  // 改 player.ts → 自动热重载，state 保留
-  const playerFile = path.join(dir, 'src/plugins/player.ts')
-  const original = fs.readFileSync(playerFile, 'utf8')
-  const x = runner.runtime.state.get('player').position[0]
-  fs.writeFileSync(playerFile, original.replace('#4fc3f7', '#ff0000'))
-  await until(() => server.lastReload?.data?.units?.includes('player'))
-  assert.equal(server.lastReload.data.ok, true, server.lastReload.data.error)
-  assert.deepEqual(runner.host.engine.byName('player')[0].color, [1, 0, 0, 1])
-  assert.ok(Math.abs(runner.runtime.state.get('player').position[0] - x) < 1e-9)
+  // Runner 自己发现文件变化后热重载，结果以事件上报，Dev Server 记录为 lastReload
+  runner.files.set('src/plugins/player.ts', runner.files.get('src/plugins/player.ts').replace('#4fc3f7', '#ff0000'))
+  await runner.pot.devtools.changed(['src/plugins/player.ts'])
+  await until(() => server.lastReload?.units?.includes('player'))
+  assert.equal((await api.status()).lastReload.ok, true)
 
-  // 运行时报错：栈映射回 TS 源文件，且回滚
-  server.lastReload = null
-  fs.writeFileSync(playerFile, original.replace('const body =', 'if (speed > 0) throw new Error("坏了")\n  const body ='))
-  await until(() => server.lastReload)
-  const failed = server.lastReload.data
-  assert.equal(failed.ok, false)
-  assert.equal(failed.rolledBack, true)
-  assert.match(failed.error, /src\/plugins\/player\.ts:\d+:\d+/, failed.error)
-  assert.equal(runner.host.engine.byName('player').length, 1)
-
-  // 构建错误：不推送，状态里可见
-  server.lastReload = null
-  fs.writeFileSync(playerFile, original.replace('export function apply', 'export function apply(('))
-  await until(async () => (await api.status()).buildErrors.length > 0)
-  assert.equal(server.lastReload, null)
-
-  // 修好后恢复
-  fs.writeFileSync(playerFile, original)
-  await until(async () => (await api.status()).buildErrors.length === 0 && server.lastReload?.data?.ok)
-
-  // 改 manifest → 冷重启，state 保留
-  const score = runner.runtime.state.get('player')
-  score.score = 7
-  const manifestFile = path.join(dir, 'manifest.json')
-  fs.writeFileSync(manifestFile, fs.readFileSync(manifestFile, 'utf8').replace('0.1.0', '0.1.1'))
-  await until(() => runner.loads === 2 && runner.runtime?.status === 'running')
-  assert.equal(runner.runtime.state.get('player').score, 7)
-
-  // 截图
-  const shot = await api.call({ type: 'screenshot' })
-  assert.equal(shot.ok, true)
+  // 冷重启 / 截图
+  assert.equal((await api.call({ type: 'restart' })).ok, true)
+  assert.equal((await api.call({ type: 'screenshot' })).ok, true)
 
   const logs = await api.logs(0)
-  assert.ok(logs.some((l) => /热重载 player 完成/.test(l.text)))
+  assert.ok(logs.some((l) => l.source === 'runner' && /热重载 player/.test(l.text)))
 })
 
-test('发布构建：bundle.cjs 可在无 units/ 的情况下运行', async () => {
+test('Dev Server：/files 静态文件与递归清单，拒绝越界访问', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-files-'))
+  fs.cpSync(helloDir, path.join(root, 'hello'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'hello/.pot'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'hello/.pot/junk.txt'), 'x')
+  const server = new DevServer({ root, port: 0, host: '127.0.0.1', quiet: true })
+  await server.start()
+  t.after(async () => {
+    await server.close()
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+  const list = await get(server.port, '/files/hello/?list')
+  assert.equal(list.status, 200)
+  const files = JSON.parse(list.text).files
+  const paths = files.map((f) => f.path).sort()
+  assert.ok(paths.includes('manifest.json'))
+  assert.ok(paths.includes('src/plugins/player.ts'))
+  assert.ok(!paths.some((p) => p.startsWith('.pot')), '忽略 .pot')
+  assert.ok(files.every((f) => f.size > 0 && f.mtime > 0))
+
+  const manifest = await get(server.port, '/files/hello/manifest.json')
+  assert.equal(JSON.parse(manifest.text).id, 'pot.hello')
+  assert.equal((await get(server.port, '/files/hello/nope.txt')).status, 404)
+  assert.equal((await get(server.port, '/files/..%2F..%2Fetc')).status, 403)
+  assert.equal((await get(server.port, '/files/hello/.pot/junk.txt')).status, 403)
+})
+
+test('发布构建：bundle.cjs 在没有源码加载器（发布包）时运行，共享模块只有一份', async () => {
   const { buildRelease } = require('../devserver/builder')
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-release-'))
   try {
     const result = await buildRelease(helloDir, out)
     assert.equal(result.units, 3)
     assert.ok(fs.existsSync(path.join(out, 'bundle.cjs')))
-    assert.ok(!fs.existsSync(path.join(out, 'units')))
+    assert.ok(!fs.existsSync(path.join(out, 'src')))
     const files = new Map()
     for (const f of ['manifest.json', 'bundle.cjs', 'data/coins.json']) files.set(f, fs.readFileSync(path.join(out, f), 'utf8'))
     const pot = loadPot()
@@ -181,6 +203,30 @@ test('发布构建：bundle.cjs 可在无 units/ 的情况下运行', async () =
     await runtime.stop()
   } finally {
     fs.rmSync(out, { recursive: true, force: true })
+  }
+})
+
+test('pot check：hello 通过；缺单元、语法错误、类型错误都能报出', async () => {
+  const { checkGame } = require('../devserver/builder')
+  const ok = await checkGame(helloDir)
+  assert.deepEqual(ok.errors, [])
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-check-'))
+  try {
+    fs.cpSync(helloDir, dir, { recursive: true })
+    // tsconfig 里的 paths 是相对 games/hello 的，复制后改成绝对路径
+    const tsconfig = path.join(dir, 'tsconfig.json')
+    const runtimeIndex = path.resolve(__dirname, '../runtime/src/index.ts').replace(/\\/g, '/')
+    fs.writeFileSync(tsconfig, fs.readFileSync(tsconfig, 'utf8').replace(/"[^"]*js\/runtime\/src\/index\.ts"/, JSON.stringify(runtimeIndex)))
+    const manifest = path.join(dir, 'manifest.json')
+    fs.writeFileSync(manifest, fs.readFileSync(manifest, 'utf8').replace('"world"', '"world", "ghost"'))
+    const player = path.join(dir, 'src/plugins/player.ts')
+    fs.writeFileSync(player, fs.readFileSync(player, 'utf8').replace('const speed = config.speed ?? 4', 'const speed: string = config.speed ?? 4'))
+    const bad = await checkGame(dir)
+    assert.equal(bad.ok, false)
+    assert.ok(bad.errors.some((e) => /ghost/.test(e)), bad.errors.join('\n'))
+    assert.ok(bad.errors.some((e) => /player\.ts/.test(e) && /TS\d+/.test(e)), bad.errors.join('\n'))
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
 
@@ -197,6 +243,8 @@ test('MCP：initialize / tools/list', async () => {
   child.kill()
   const [init, list, call] = lines.map((l) => JSON.parse(l))
   assert.equal(init.result.serverInfo.name, 'pot')
-  assert.ok(list.result.tools.some((t) => t.name === 'pot_eval'))
+  const names = list.result.tools.map((t) => t.name)
+  assert.ok(names.includes('pot_open') && names.includes('pot_restart') && names.includes('pot_eval'))
+  assert.ok(!names.includes('pot_load') && !names.includes('pot_sync'))
   assert.equal(call.result.isError, true, '端口 1 上没有 Dev Server，应返回错误而不是崩溃')
 })

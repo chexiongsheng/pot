@@ -28,6 +28,8 @@ export interface ReloadResult {
   durationMs: number
   error?: string
   leaks?: string[]
+  /** 本次重新挂载成功的、之前启动失败的入口单元 */
+  mounted?: string[]
 }
 
 interface Mount {

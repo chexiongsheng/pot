@@ -54,8 +54,8 @@ test('state 跨冷重启保留：exportState → 新运行时 importState', asyn
 test('单元启动失败不影响其他单元', async () => {
   const files = new Map([
     ['manifest.json', JSON.stringify({ id: 't', apiVersion: '0.1', plugins: ['bad', 'good'] })],
-    ['units/bad.cjs', unit('bad', 'throw new Error("boom")')],
-    ['units/good.cjs', unit('good', 'ctx.scene.spawn({ name: "ok" })')],
+    ['src/plugins/bad.js', unit('bad', 'throw new Error("boom")')],
+    ['src/plugins/good.js', unit('good', 'ctx.scene.spawn({ name: "ok" })')],
   ])
   const { runtime, engine } = await startGame(files)
   assert.equal(runtime.failures.length, 1)
@@ -67,7 +67,7 @@ test('单元启动失败不影响其他单元', async () => {
 test('导出名与文件名不一致时报错', async () => {
   const files = new Map([
     ['manifest.json', JSON.stringify({ id: 't', plugins: ['a'] })],
-    ['units/a.cjs', unit('b', '')],
+    ['src/plugins/a.js', unit('b', '')],
   ])
   const { runtime } = await startGame(files)
   assert.match(runtime.failures[0].error, /必须一致/)
@@ -76,7 +76,7 @@ test('导出名与文件名不一致时报错', async () => {
 test('timer 走游戏时间，暂停/冻结时不走，插件卸载时清理', async () => {
   const files = new Map([
     ['manifest.json', JSON.stringify({ id: 't', plugins: ['t'] })],
-    ['units/t.cjs', unit('t', `
+    ['src/plugins/t.js', unit('t', `
       const s = ctx.state.define('t', { init: () => ({ fired: 0, ticks: 0 }) })
       ctx.timeout(() => s.fired++, 500)
       ctx.interval(() => s.ticks++, 125)
@@ -107,7 +107,7 @@ test('timer 走游戏时间，暂停/冻结时不走，插件卸载时清理', a
 test('ctx.timeout(ms) 返回 Promise，waitFrames 按宿主帧计数', async () => {
   const files = new Map([
     ['manifest.json', JSON.stringify({ id: 't', plugins: ['t'] })],
-    ['units/t.cjs', unit('t', `
+    ['src/plugins/t.js', unit('t', `
       const s = ctx.state.define('t', { init: () => ({ done: false }) })
       ctx.timeout(200).then(() => { s.done = true })
     `)],
