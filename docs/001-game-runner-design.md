@@ -1,0 +1,229 @@
+# 001 pot：Game Runner 设计文档（草案）
+
+状态：草案，热重载见 002
+引擎：Unity + Puerts（UE 作为远期可选内核）
+
+## 1. 背景与目标
+
+现在的游戏动辄几个 G。程序化生成可以做到“资产即代码”，用算力换存储：资源不存成文件，存的是生成它的代码和参数，在运行时生成。AI 写代码的成本很低，这个思路因此变得实用。参考样例：`几猫国产3A大作_V1.html` 是单个 HTML 文件，原始 1.36 MB，gzip 后约 437 KB（其中包含 Three.js），所有内容都在运行时生成。
+
+商业引擎的编辑器是给人用的，让 AI 通过 Computer Use 操作编辑器既慢又不可靠。引擎真正有价值的是运行时系统（动画、物理、寻路、渲染、LOD 等）和资源管线，这些跟编辑器界面无关。
+
+目标：
+
+- 原生支持 AI 快速开发游戏：游戏就是 JS/TS 代码加 JSON 配置，AI 改完能马上加载运行，通过 MCP/CLI 拿到日志和截图、操作角色，再修改，形成闭环。
+- 人可以轻量预览：电脑或手机上实时看效果、试玩、提意见，不需要打开 Unity 编辑器。
+- 保留商业引擎的运行时内核、性能和多平台能力。
+
+## 2. 定位与非目标
+
+- Runner 只当开发工具，类比 Expo Go。它是一个 Unity 工程，可以运行在 PC 和手机上，用来加载和调试游戏包。
+- 发布由游戏开发者用 Unity 正常打包，产物是普通的独立 App，类比 Electron 模式或 Expo 的 EAS Build。
+- 不做“通用游戏平台”，即一个运行器在线加载任意第三方游戏。这样可以避开版号和平台资质、iOS 动态代码审核、引擎授权、第三方代码沙箱这些问题。
+- 不追求 Runner 里能现写任意着色器，原因见第 8 节。
+
+## 3. 先例参考
+
+| 先例 | 可借鉴点 |
+|---|---|
+| Expo Go / EAS Build | 开发运行器加独立打包的模式；“自定义开发客户端”的教训 |
+| LÖVE | 原生运行器加脚本包的最小形态 |
+| Roblox | 单一运行器、脚本化、高层 API 设计 |
+| 微信小游戏 | 宿主加 JS 包的分发模式 |
+| OneJS | Unity 加 JS、热重载、UI 方案 |
+
+## 4. 总体架构
+
+```plantuml
+@startuml
+package "游戏包（文本为主）" {
+  [TS/JS 逻辑]
+  [JSON 配置/关卡/生成配方]
+  [少量二进制资产 KTX2/glb/ogg]
+  [manifest.json]
+}
+package "Unity Packages" {
+  [core: Game API / 生成器 / 材质 / GameFS / 加载器]
+  [devtools: 热重载 / 截图 / 输入 / query / eval / time / perf]
+  [build: 导入 / 打包 / 绑定 / link.xml / CLI 构建]
+  [runner-shell: 项目列表 / 扫码连接 / 错误浮层]
+}
+node "PC" {
+  [Dev Server + MCP/CLI]
+  [Runner (PC 或 Editor Play Mode)]
+}
+node "手机" {
+  [Runner (Android/iOS)]
+}
+actor AI
+actor 人类
+AI --> [Dev Server + MCP/CLI]
+[Dev Server + MCP/CLI] <--> [Runner (Android/iOS)] : WebSocket
+[Dev Server + MCP/CLI] <--> [Runner (PC 或 Editor Play Mode)] : WebSocket
+人类 --> [Runner (Android/iOS)] : 试玩/反馈
+@enduml
+```
+
+分层原则：
+
+- 原生层（C# + Burst/Jobs，必要时 C++ 插件）：通用生成器和引擎运行时，基本不变。
+- GPU 层：通用 uber 材质和“着色器即数据”解释器，JS 只传参数和数据。
+- JS 层：玩法逻辑、内容配方、组合编排。批量数据用 `ArrayBuffer` 一次性传给原生层，避免逐顶点跨语言调用。
+
+## 5. 包划分
+
+| 包 | 类型 | Runner | 发布工程 | 内容 |
+|---|---|---|---|---|
+| `core` | Runtime | 有 | 有 | Game API、Puerts 静态绑定、原生生成器、uber 材质和变体集、`GameFS`、游戏加载器 |
+| `devtools` | Runtime | 有 | 无 | 与 Dev Server 的连接、热重载、截图、输入注入、`query`/`eval`、时间控制、性能统计 |
+| `build` | Editor | 可选 | 有 | 导入游戏目录、打包 JS、处理资源、生成 `link.xml` 和绑定、命令行构建（`-batchmode`） |
+| `runner-shell` | Runtime | 有 | 无 | Runner 自身界面：项目列表、扫码连接、错误浮层 |
+
+约束：
+
+- Runner 工程等于 `core` + `devtools` + `runner-shell`（可加 `build`）；发布工程等于 `core` + `build` + 游戏包。
+- `devtools` 用独立程序集，通过 asmdef 的 `defineConstraints` 控制，保证发布包里不带任何开发代码。
+- Runner 工程可以直接在 Unity Editor 的 Play Mode 里运行，需要深度调试时可用 Profiler 和 Frame Debugger。
+
+## 6. 游戏包格式
+
+```
+my-game/
+  manifest.json
+  src/            TS 源码，入口 main.ts
+  data/           JSON：关卡、生成配方、动画状态机、UI 描述
+  assets/         少量二进制资产（KTX2/Basis、glb+meshopt、ogg/opus）
+  types/          Game API 的 d.ts（由 core 包提供，版本锁定）
+```
+
+`manifest.json` 示例：
+
+```json
+{
+  "id": "com.example.mygame",
+  "name": "My Game",
+  "version": "0.1.0",
+  "entry": "src/main.ts",
+  "apiVersion": "1.0",
+  "unityVersion": "2022.3.x",
+  "packages": {
+    "com.xxx.pot.core": "1.0.0"
+  },
+  "capabilities": ["mesh.procedural", "material.uber", "physics", "audio.synth"],
+  "extraPackages": []
+}
+```
+
+- `apiVersion` 和 `packages` 用于校验 Runner 与发布工程使用同一组包版本。
+- `capabilities` 用于能力检查，构建时也据此裁剪着色器变体。
+- `extraPackages` 声明额外的 Unity 包，需要时构建自定义 Runner（见第 12 节）。
+
+## 7. Game API 设计原则
+
+1. 高层、声明式：把引擎内核封装成高层能力，比如实体、角色控制器、动画状态机（JSON 描述）、物理、寻路、地形、光照预设、粒子预设、相机、输入、UI、音频。不要只暴露底层的网格和 Draw 接口，否则等于在引擎上重写一遍 Three.js。
+2. 版本化：API 发布后长期向后兼容，并通过能力等级声明，类似浏览器的 feature level。
+3. 只走 Game API：游戏不直接反射访问 Unity 或 .NET 类型。所有 API 都有 Puerts 静态绑定，并在 `link.xml` 中保留，确保 IL2CPP 裁剪后依然可用。
+4. 对 AI 友好：完整的 `d.ts` 和注释，错误信息结构化，参数尽量是可序列化的数据。
+5. 可复现：固定步长、全局随机种子、时间缩放，为自动化测试和截图比对服务。
+
+首批 API（20 到 30 个，MVP 范围）：场景与实体、Transform、程序化网格、uber 材质、程序化贴图、相机、灯光预设、角色控制器、物理（刚体、碰撞、射线）、输入（键鼠、触屏、摇杆）、UI 文本和按钮、音效合成、计时器、随机数、存储、日志。
+
+## 8. 渲染与着色器策略
+
+Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLSL 源码提交，浏览器自带编译链路（如 ANGLE）。Unity 和 UE 出于变体规模、PSO 卡顿、编译器体积、平台限制和材质元数据等原因选择离线预编译。本项目的策略：
+
+- 通用 uber 材质加参数和开关：主力方案，保留引擎的光照、阴影和后处理。
+- 着色器即数据：固定的解释器着色器，读取 Buffer 或贴图中的表达式字节码（SDF、噪声、颜色运算），用于程序化贴图、材质和特效。JS 端负责生成字节码。
+- 运行时编译 GLSL（GLES/WebGL 原生插件）：暂不做，只作为远期选项。
+
+变体管理：`core` 自带 `ShaderVariantCollection` 和 Always Included 配置；`build` 根据 `capabilities` 裁剪变体，并预热 PSO。
+
+## 9. 资产即代码
+
+- 优先生成：地形、建筑、低多边形模型、材质和贴图、粒子、合成音效。
+- 不适合生成的内容：角色动画、配音、音乐、写实贴图等，以压缩格式放进 `assets/` 或通过 CDN 按需下载。
+- 生成耗时：分帧生成，优先生成玩家附近的内容。生成结果缓存到本地（原始网格和贴图数据），第二次启动直接读缓存。
+- 发布时可选烘焙：在编辑器里用同一份脚本预先生成，产出普通 Unity 资源，交给引擎管线压缩和优化。一份代码两种用法。
+
+## 10. 开发闭环
+
+### 10.1 连接拓扑
+
+MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 WebSocket 连到电脑上的 Dev Server，Android 也可以用 `adb reverse`。
+
+- AI 只面对一个 MCP，不需要关心目标设备是哪台。
+- 多台设备（PC、Android、iOS）可以同时连接，对比效果和真机性能。
+- 人在手机上试玩时，AI 能同时读取这台设备的日志和截图。
+
+### 10.2 MCP/CLI 工具集（初版）
+
+| 工具 | 作用 |
+|---|---|
+| `devices` | 列出已连接的 Runner |
+| `load` | 加载或切换游戏包 |
+| `reload` | 触发热重载（细节见第 14 节） |
+| `logs` | 结构化日志与错误，含 source map 映射后的 TS 栈 |
+| `screenshot` | 截图，可指定相机和分辨率 |
+| `input` | 注入按键、摇杆、点击，或高层指令（如“移动到 X”） |
+| `query` | 读取场景树、实体和游戏状态（结构化，优先于截图） |
+| `eval` | 在游戏上下文中执行 JS |
+| `time` | 暂停、单步、加速、设置种子 |
+| `perf` | 帧时间、DrawCall、内存 |
+| `record` / `replay` | 输入录制与回放，用于复现问题和回归测试 |
+
+原则：判断状态和逻辑用 `query`，判断视觉效果才用 `screenshot`。
+
+### 10.3 人类协作
+
+- 人在 Runner 里试玩，可以在错误浮层或反馈入口留下意见（文本加当前截图加状态快照），由 Dev Server 转给 AI。
+- 人的参数微调最好写回 JSON，让 AI 下一轮能读到。
+
+## 11. 开发期与发布一致性
+
+核心原则：发布工程和 Runner 用同一份 `core`，Runner 只比它多 `devtools` 和 `runner-shell`。
+
+| 风险 | 对策 |
+|---|---|
+| IL2CPP 裁剪掉 JS 反射访问的成员 | 只走 Game API；静态绑定；`core` 自带 `link.xml` |
+| 着色器变体被裁导致材质变粉、PSO 卡顿 | 变体集加按能力裁剪加 PSO 预热 |
+| 资源路径不同 | 统一的 `GameFS` 抽象：开发期从 Dev Server 读，发布期从 StreamingAssets 或 Addressables 读 |
+| JS 形态不同 | 开发期按模块加载，发布期用 esbuild 打成单文件（可选字节码），模块解析规则保持一致 |
+| 版本不一致 | `manifest` 锁定 Unity 版本和包版本，`build` 校验 |
+
+建议在 CI 中对发布包跑同一套 `record`/`replay` 回归，提前发现差异。
+
+## 12. 发布流程与自定义 Runner
+
+发布：新建或使用模板发布工程，引入 `core` 和 `build`，导入游戏包，然后用命令行 `-batchmode` 构建各平台产物。
+
+自定义 Runner：游戏需要通用 Runner 没有的原生能力（SDK、自定义着色器、C# 插件）时，在 `manifest.extraPackages` 中声明，再用 `build` 一键构建包含这些扩展的专属 Runner。这样可以避开 Expo Go 早期“通用客户端跑不了自定义原生代码”的问题。
+
+## 13. 风险与待定事项
+
+- API 覆盖面不足：初期的主要瓶颈，靠实际游戏需求反向推动 API 迭代。
+- 跨语言开销：热路径必须留在原生层，需要在原型阶段测量。
+- iOS 上 Runner 的安装：走 TestFlight，或开发者用自己的证书从 Runner 工程编译安装。
+- 微信小游戏：Unity WebGL 或团结引擎的转换路径可行，Puerts 在小游戏上的支持程度待实测。
+- UE 内核：包体大，没有 Web 和小游戏平台，远期作为“高画质原生 Runner”考虑。API 层尽量设计成与引擎无关。
+
+## 14. 热重载
+
+详见 `002-hot-reload-design.md`。要点：
+
+- 用 cordis 管理生命周期：每个游戏插件是一个 fiber，`dispose` 自动回收它注册的一切；Game API 以 `ctx` 服务的形式提供，原生资源也归属到 fiber。
+- 持久数据统一放在常驻的 `state` 服务里，插件只放逻辑，场景是状态的投影。热重载只替换插件，状态保留。
+- 重载是事务：先预加载新代码，再替换，失败自动回滚；提交后做泄漏检查。
+- 处理不了的变化走冷重启，状态通过快照保留。
+
+## 14.1 经验积累
+
+框架面向 AI，开发约定、模板和踩过的坑都积累在随 Runner 发布的 Skill（`pot-game-dev`）中，版本与 `apiVersion` 一起管理。能由框架保证的坑，优先改框架。
+
+## 15. MVP 里程碑
+
+1. 最小 Runner：Unity + Puerts，加载本地目录中的游戏包，文件变动后热重载。
+2. 首批 20 到 30 个高层 Game API 及 `d.ts`。
+3. Dev Server 加 MCP，先做 `reload`、`logs`、`screenshot`、`input`、`query`、`time` 六个工具。
+4. 手机 Runner 通过 WebSocket 连接 Dev Server。
+5. 让 AI 用 Runner 开发一个小游戏（例如移植 `几猫国产3A大作_V1.html`），记录卡点，指导下一轮 API 和工具迭代。
+6. `build` 包跑通发布流程，并对发布包做一致性回归。
