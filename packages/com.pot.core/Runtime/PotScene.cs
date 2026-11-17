@@ -20,6 +20,27 @@ namespace Pot
 
         [Preserve] public static float vx, vy, vz;
 
+        static Material defaultMaterial;
+
+        /// <summary>所有图元共用的基础材质；着色器来自 core 包 Resources/pot/PotLit.shader，构建一定包含</summary>
+        public static Material DefaultMaterial
+        {
+            get
+            {
+                if (defaultMaterial == null)
+                {
+                    var shader = Resources.Load<Shader>("pot/PotLit");
+                    if (shader == null || !shader.isSupported)
+                    {
+                        Debug.LogWarning("[pot] Pot/Lit 着色器不可用，回退到 Legacy Diffuse");
+                        shader = Shader.Find("Legacy Shaders/Diffuse");
+                    }
+                    defaultMaterial = new Material(shader) { name = "PotDefault" };
+                }
+                return defaultMaterial;
+            }
+        }
+
         static Transform Root
         {
             get
@@ -78,6 +99,8 @@ namespace Pot
             }
             var id = nextId++;
             go.name = string.IsNullOrEmpty(name) ? shape + "#" + id : name;
+            var meshRenderer = go.GetComponent<Renderer>();
+            if (meshRenderer != null) meshRenderer.sharedMaterial = DefaultMaterial;
             var parentGo = parent != 0 ? Get(parent) : null;
             go.transform.SetParent(parentGo != null ? parentGo.transform : Root, false);
             objects[id] = go;

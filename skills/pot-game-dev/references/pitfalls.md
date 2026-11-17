@@ -47,3 +47,8 @@
 ## Unity 侧
 
 见 `unity-side.md`。
+
+## 画面全是洋红（粉紫色）
+
+现象：物体都是纯洋红色，日志无报错。原因：着色器没被打进构建（CreatePrimitive 默认用 Standard，会被裁剪）。core 已统一用 `Resources/pot/PotLit.shader`（Pot/Lit），新增着色器也必须放进 Resources 或 Always Included Shaders。另外 `-nographics` 构建不会编译着色器，Runner 构建不要加此参数。
+
