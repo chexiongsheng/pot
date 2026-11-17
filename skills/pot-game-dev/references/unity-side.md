@@ -1,0 +1,48 @@
+# Runner、Unity 包与发布
+
+## 包
+
+| 包 | 内容 | 发布包含 |
+|---|---|---|
+| `com.pot.core` | PotRuntime（JS 环境、帧驱动、冷重启）、GameFS、PotScene、PotInput、PotBoot、`Resources/pot/core.cjs` | 是 |
+| `com.pot.devtools` | PotDevClient（WebSocket 连接 Dev Server、命令处理、截图、虚拟输入）、`devtools.cjs` | 否 |
+| `com.pot.runner-shell` | PotRunner（自动创建、地址设置、IMGUI 面板，F1 或三指触摸打开） | 否 |
+| `com.pot.build` | 编辑器构建：导入游戏包、生成启动场景、BuildPlayer | 编辑器 |
+
+依赖 Puerts 3.0.3 core + v8，放在 `third_party/puerts/`（`tools/install-puerts.ps1 -Source <含 core 和 v8 的目录>`）。
+
+## Runner
+
+- 构建：`Unity -batchmode -quit -projectPath runner -executeMethod RunnerBuild.BuildWin64`（或 `BuildAndroid`）。
+- 地址优先级：命令行 `-potServer=ws://ip:port/runner` > 面板中保存的地址 > `ws://127.0.0.1:7788/runner`。输入 `192.168.1.5` 会自动补全端口和路径。
+- 手机连接时 Dev Server 所在电脑要放行端口，Android 需要允许明文 ws（Runner 已设置）。
+
+## 发布构建
+
+```powershell
+Unity -batchmode -quit -projectPath <Unity 工程> -executeMethod Pot.Build.PotBuild.Build `
+  -potGame=<游戏目录> -potOut=<输出路径，如 release\hello\Hello.exe> -potTarget=Win64
+```
+
+流程：`pot build` 产出 manifest.json + bundle.cjs + data → 复制到 `Assets/PotGame/Resources/pot-game` → 生成只含 PotBoot 的场景 → 生成 Puerts 必需文件 → BuildPlayer。也可在编辑器菜单 `pot/Build Game...` 执行。
+
+## C# 侧的坑
+
+### 构建报 Puerts_il2cpp.cpp not found
+- 原因：Puerts 的构建前检查要求 `Assets/Gen/Plugins/puerts_il2cpp/Puerts_il2cpp.cpp` 存在，Mono 后端也一样。
+- 做法：构建前调用 `Pot.Build.PotBuild.EnsurePuertsGenerated()`（已由构建脚本保证）。
+
+### 包里的 link.xml 不生效
+- 原因：Unity 只读取 Assets 下的 link.xml。
+- 做法：构建时复制到 `Assets/PotGame/link.xml`（已由构建脚本保证）。JS 通过反射访问的 C# 类型都要在 link.xml 中保留或标 `[Preserve]`。
+
+### 在后台线程调用 Unity API 报错
+- 原因：WebSocket 收发在线程池，`Application.platform` 等只能在主线程调用。
+- 做法：线程间只传字符串，命令统一在主线程 Update 中处理。
+
+### JS 回调 C# 时的日志死循环
+- 原因：JS 日志写 Debug.Log，devtools 又订阅 Unity 日志转发给 Dev Server。
+- 做法：`PotHost.InJsLog` 标记，转发时跳过 JS 自己产生的日志（已由框架保证）。
+
+### -nographics 下截图失败
+- 现象：screenshot 返回“当前没有图形设备”。属于预期行为，需要截图时不要带 `-nographics`。

@@ -27,6 +27,13 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# pot
+third_party/puerts/
+games/*/.pot/
+runner/Assets/PotGame/
+runner/Builds/
+release/
+
 # OS
 .DS_Store
 Thumbs.db

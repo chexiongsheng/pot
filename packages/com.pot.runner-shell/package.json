@@ -1,0 +1,13 @@
+{
+  "name": "com.pot.runner-shell",
+  "displayName": "pot Runner Shell",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "pot Runner 外壳：连接 Dev Server 的地址输入、状态面板与启动逻辑（场景由代码创建）。只用于 Runner 工程。",
+  "keywords": ["pot", "runner"],
+  "author": { "name": "pot" },
+  "dependencies": {
+    "com.pot.core": "0.1.0",
+    "com.pot.devtools": "0.1.0"
+  }
+}

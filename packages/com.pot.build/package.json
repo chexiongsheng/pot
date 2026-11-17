@@ -1,0 +1,12 @@
+{
+  "name": "com.pot.build",
+  "displayName": "pot Build",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "pot 发布构建：调用 pot build 生成 bundle，放入 Resources/pot-game，生成启动场景并用 Unity 正常打包。支持 batchmode：-executeMethod Pot.Build.PotBuild.Build -potGame=<游戏目录> -potOut=<输出路径> [-potTarget=Win64|Android|iOS|WebGL]",
+  "keywords": ["pot", "build"],
+  "author": { "name": "pot" },
+  "dependencies": {
+    "com.pot.core": "0.1.0"
+  }
+}

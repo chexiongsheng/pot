@@ -1,0 +1,13 @@
+{
+  "name": "com.pot.core",
+  "displayName": "pot Core",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "pot 运行时：Puerts + cordis 的游戏宿主。提供 JS 运行时（Resources/pot/core.cjs）、引擎桥（PotScene/PotInput）、GameFS 与 PotRuntime。",
+  "keywords": ["pot", "puerts", "cordis", "typescript"],
+  "author": { "name": "pot" },
+  "dependencies": {
+    "com.tencent.puerts.core": "3.0.3",
+    "com.tencent.puerts.v8": "3.0.3"
+  }
+}

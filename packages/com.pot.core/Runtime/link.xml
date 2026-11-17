@@ -1,0 +1,11 @@
+<linker>
+  <!-- JS 通过反射访问 CS.Pot.*，IL2CPP 裁剪时必须保留。
+       Unity 不读取包内的 link.xml：com.pot.build 构建时会把本文件复制到 Assets/PotGame/link.xml。 -->
+  <assembly fullname="Pot.Core" preserve="all" />
+  <assembly fullname="Pot.Devtools" preserve="all" ignoreIfMissing="1" />
+  <assembly fullname="com.tencent.puerts.core" preserve="all" />
+  <assembly fullname="com.tencent.puerts.v8" preserve="all" />
+  <assembly fullname="UnityEngine.CoreModule">
+    <type fullname="UnityEngine.Debug" preserve="all" />
+  </assembly>
+</linker>

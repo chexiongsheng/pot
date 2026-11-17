@@ -1,0 +1,167 @@
+{
+  "dependencies": {
+    "com.pot.build": {
+      "version": "file:../../packages/com.pot.build",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.pot.core": "0.1.0"
+      }
+    },
+    "com.pot.core": {
+      "version": "file:../../packages/com.pot.core",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.tencent.puerts.core": "3.0.3",
+        "com.tencent.puerts.v8": "3.0.3"
+      }
+    },
+    "com.pot.devtools": {
+      "version": "file:../../packages/com.pot.devtools",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.pot.core": "0.1.0"
+      }
+    },
+    "com.pot.runner-shell": {
+      "version": "file:../../packages/com.pot.runner-shell",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.pot.core": "0.1.0",
+        "com.pot.devtools": "0.1.0"
+      }
+    },
+    "com.tencent.puerts.core": {
+      "version": "file:../../third_party/puerts/core",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
+    "com.tencent.puerts.v8": {
+      "version": "file:../../third_party/puerts/v8",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.tencent.puerts.core": "3.0.3"
+      }
+    },
+    "com.unity.ext.nunit": {
+      "version": "1.0.6",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://packages.unity.cn"
+    },
+    "com.unity.ide.rider": {
+      "version": "3.0.36",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.ext.nunit": "1.0.6"
+      },
+      "url": "https://packages.unity.cn"
+    },
+    "com.unity.ide.visualstudio": {
+      "version": "2.0.22",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.test-framework": "1.1.9"
+      },
+      "url": "https://packages.unity.cn"
+    },
+    "com.unity.ide.vscode": {
+      "version": "1.2.5",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://packages.unity.cn"
+    },
+    "com.unity.test-framework": {
+      "version": "1.1.33",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.ext.nunit": "1.0.6",
+        "com.unity.modules.imgui": "1.0.0",
+        "com.unity.modules.jsonserialize": "1.0.0"
+      },
+      "url": "https://packages.unity.cn"
+    },
+    "com.unity.modules.androidjni": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.animation": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.audio": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.imageconversion": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.imgui": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.jsonserialize": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.physics": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.screencapture": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {
+        "com.unity.modules.imageconversion": "1.0.0"
+      }
+    },
+    "com.unity.modules.ui": {
+      "version": "1.0.0",
+      "depth": 1,
+      "source": "builtin",
+      "dependencies": {}
+    },
+    "com.unity.modules.uielements": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {
+        "com.unity.modules.ui": "1.0.0",
+        "com.unity.modules.imgui": "1.0.0",
+        "com.unity.modules.jsonserialize": "1.0.0"
+      }
+    },
+    "com.unity.modules.unitywebrequest": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {}
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # 002 pot：热重载设计（基于 cordis）
 
-状态：设计定稿 v1，待原型验证
+状态：设计定稿 v1；原型 v0.1 已实现，与本文的差异见第 16 节
 上级文档：`001-game-runner-design.md` 第 14 节
 参考实现：`D:\CordisPuertsDemo`（cordis 4.0.0-rc.8 + Puerts V8）
 
@@ -340,3 +340,22 @@ pot-game-dev/
 4. 接入 Dev Server（esbuild watch、metafile 计算影响范围、WebSocket 推送），在手机 Runner 上实测重载耗时。
 5. 实现冷重启时保留状态。
 6. 整理第一版 `pot-game-dev` Skill，让 AI 用它独立完成一个小游戏，把问题写进坑点库。
+
+## 16. 原型实现（v0.1）
+
+计划第 1 到 6 步均已完成最小版本（第 6 步的“AI 独立完成小游戏”待做）。与前文的差异：
+
+| 项 | 设计 | 原型 |
+|---|---|---|
+| 插件注册表 | `registry` | `plugins` 服务（`ctx.use(name, config)`）。每个单元有稳定的 wrapper 插件，自动注入全部核心服务，游戏代码不用写 `inject` |
+| 模块加载 | Puerts 模块缓存 + `deleteModuleCache` | 不用 Puerts 模块系统：单元源码用间接 eval 编译成工厂函数（带 `sourceURL`），旧版本释放引用即可回收 |
+| 定时器 | cordis timer | 改编自 `@cordisjs/timer`，走游戏时钟：暂停、时间缩放、热重载冻结都生效，不会“补跑” |
+| 变更推送 | `reload` 消息含 code 和 sourcemap | Dev Server 推送构建产物（`units/*.cjs`、data、manifest），sourcemap 留在 Dev Server 侧做栈映射 |
+| 阶段名 | preload/mount/commit | `preload`、`apply`、`commit`；内容 hash 未变的单元记入 `skipped` |
+| 冷重启 | 销毁 JsEnv | C# 侧 `PotRuntime.Restart(keepState)`：`exportState` → Dispose ScriptEnv → 新建 → `boot(state)` |
+| 泄漏检查 | WeakRef 哨兵 + GC | 同设计；GC 由 JS 请求、C# 下一帧调用 `LowMemoryNotification`；另比对 JS 登记对象数与引擎实际对象数 |
+| MCP | `reload`、`state`、`leaks`、`plugins` | 另有 `status`、`logs`、`sync`、`load`、`eval`、`query`、`time`、`input`、`screenshot`，统一 `pot_` 前缀 |
+
+实测（Win64 Runner，batchmode）：单个单元热重载约 16 ms；`apply` 抛错时栈映射到 `src/plugins/player.ts:20:18` 并回滚，场景对象数不变。
+
+Skill 初版位于 `skills/pot-game-dev`，坑点库已包含原型开发中遇到的 Unity 侧问题（Puerts 构建前检查、包内 `link.xml` 不生效、后台线程调用 Unity API、PowerShell 编码）。

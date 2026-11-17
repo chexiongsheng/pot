@@ -1,0 +1,12 @@
+{
+  "name": "com.pot.devtools",
+  "displayName": "pot Devtools",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "pot 开发通道：连接 Dev Server（WebSocket），处理加载、热重载、截图、虚拟输入与调试命令。只在 Runner 中使用，不进入发布包。",
+  "keywords": ["pot", "hot-reload", "devtools"],
+  "author": { "name": "pot" },
+  "dependencies": {
+    "com.pot.core": "0.1.0"
+  }
+}

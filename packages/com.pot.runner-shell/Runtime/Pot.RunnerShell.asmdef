@@ -1,0 +1,17 @@
+{
+    "name": "Pot.RunnerShell",
+    "rootNamespace": "Pot.Runner",
+    "references": [
+        "Pot.Core",
+        "Pot.Devtools"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

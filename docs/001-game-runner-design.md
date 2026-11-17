@@ -1,6 +1,6 @@
 # 001 pot：Game Runner 设计文档（草案）
 
-状态：草案，热重载见 002
+状态：草案；原型 v0.1 已实现，与本文的差异见第 16 节。热重载见 002
 引擎：Unity + Puerts（UE 作为远期可选内核）
 
 ## 1. 背景与目标
@@ -227,3 +227,55 @@ MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 W
 4. 手机 Runner 通过 WebSocket 连接 Dev Server。
 5. 让 AI 用 Runner 开发一个小游戏（例如移植 `几猫国产3A大作_V1.html`），记录卡点，指导下一轮 API 和工具迭代。
 6. `build` 包跑通发布流程，并对发布包做一致性回归。
+
+## 16. 原型实现（v0.1）
+
+已实现 MVP 里程碑 1、3、4、6 的最小版本，以及第 2 项中的场景、灯光、相机、输入、计时器、数据、状态。目录结构：
+
+```
+pot/
+  packages/com.pot.core          Runtime：PotRuntime、GameFS、PotScene、PotInput、PotBoot、core.cjs
+  packages/com.pot.devtools      Runtime：PotDevClient（WebSocket、命令、截图、虚拟输入）、devtools.cjs
+  packages/com.pot.runner-shell  Runtime：PotRunner（地址设置、状态与错误浮层）
+  packages/com.pot.build         Editor：PotBuild（导入游戏、启动场景、BuildPlayer）
+  runner/                        Runner Unity 工程（Unity 2022.3）
+  js/runtime                     @pot/core（cordis 服务）
+  js/devtools                    hmr、开发命令处理
+  js/devserver                   Dev Server、CLI、MCP（stdio）
+  games/hello                    示例游戏
+  skills/pot-game-dev            AI 开发用 Skill
+```
+
+与前文设计的差异：
+
+| 项 | 设计 | 原型 |
+|---|---|---|
+| 包名 | `core` 等 | `com.pot.core`、`com.pot.devtools`、`com.pot.runner-shell`、`com.pot.build` |
+| 游戏包 | `entry: src/main.ts` | `manifest.plugins` 列出根单元，`src/plugins/*.ts` 每个文件一个单元 |
+| 绑定 | Puerts 静态绑定 | 反射模式：JS 只调用 `CS.Pot.*` 的少量静态方法，参数为数字和字符串；用 `link.xml` + `[Preserve]` 防裁剪 |
+| devtools 隔离 | asmdef `defineConstraints` | 发布工程不引入该包；`core` 通过事件和钩子暴露扩展点，不引用 devtools |
+| GameFS | Dev Server / StreamingAssets | 内存覆盖层（开发期推送）→ 磁盘目录（`-potGame=`）→ `Resources/pot-game` |
+| 连接 | 多设备 | 同一时间一个 Runner，后连接的替换先连接的 |
+| MCP 工具 | `devices`、`reload`、`perf`、`record` 等 | `pot_status/logs/sync/load/eval/state/query/plugins/leaks/time/input/screenshot`；文件保存即自动热重载 |
+| Runner 界面 | 项目列表、扫码 | IMGUI 状态条、错误浮层、地址面板（F1 或三指触摸） |
+
+### 16.1 Runner 协议
+
+WebSocket 路径 `/runner`，JSON 文本帧。
+
+| 方向 | 消息 |
+|---|---|
+| Runner → Dev | `{type:'hello', platform, unity, device}` |
+| Runner → Dev | `{type:'log', level, text, source}`，JS 报错栈由 Dev Server 用 sourcemap 映射 |
+| Dev → Runner | `{type:'load', id, files:[{path,content}], resetState}`：写入覆盖层并冷启动 |
+| Dev → Runner | `{type:'cold'|'screenshot'|'input', id, ...}`：由 C# 处理 |
+| Dev → Runner | 其他命令（`reload`、`eval`、`state`、`query`、`time`、`leaks` 等）：交给 JS `pot.devtools.handle` |
+| Runner → Dev | `{type:'result', id, ok, data|error}` |
+
+### 16.2 验证情况
+
+- JS：4 个测试文件、27 项用例（运行时、热重载事务与回滚、泄漏检查、Dev Server 端到端）。
+- Unity：Win64 Runner 构建成功（约 86 MB，主要是 Mono 运行时和 V8）。真机验证了连接、加载、热重载保留 state、运行时错误映射到 `src/plugins/player.ts:行:列` 并回滚、`load` 保留 state、`load --reset` 清空、泄漏检查、虚拟输入。
+- 发布：`Pot.Build.PotBuild.Build` 构建 `games/hello` 为独立 exe，启动后从 Resources 加载游戏。
+
+尚未实现：Android/iOS 真机验证、程序化网格与 uber 材质、物理、UI、音频、`record`/`replay`、多设备。
