@@ -6,7 +6,7 @@ namespace Pot.Runner
 {
     /// <summary>
     /// Runner 外壳（类似 Expo Go）：启动后连接 Dev Server，由 Dev Server 推送游戏。
-    /// 地址来源：命令行 -potServer=ws://host:7788/runner（或 host:port）→ 上次使用的地址 → 默认本机。
+    /// 地址来源：命令行 -potServer=ws://host:7788/runner（仅本次生效，不保存）→ 面板里手动连接过的地址 → 默认本机。
     /// F1 或左上角按钮切换面板。
     /// </summary>
     public class PotRunner : MonoBehaviour
@@ -54,14 +54,18 @@ namespace Pot.Runner
             }
             address = Normalize(fromArgs ?? PlayerPrefs.GetString(PrefKey, DefaultUrl));
             showPanel = fromArgs == null && !PlayerPrefs.HasKey(PrefKey);
-            Connect();
+            Connect(false);
         }
 
-        void Connect()
+        /// <summary>save=true 仅用于面板里手动连接；命令行参数只对本次运行生效，不覆盖保存的地址</summary>
+        void Connect(bool save)
         {
             address = Normalize(address);
-            PlayerPrefs.SetString(PrefKey, address);
-            PlayerPrefs.Save();
+            if (save)
+            {
+                PlayerPrefs.SetString(PrefKey, address);
+                PlayerPrefs.Save();
+            }
             Debug.Log("[pot] 连接 Dev Server：" + address);
             client.Connect(address);
         }
@@ -82,7 +86,9 @@ namespace Pot.Runner
             var runtime = PotRuntime.Instance;
             var conn = client.State == PotDevClient.ConnectionState.Connected ? "已连接" : client.State == PotDevClient.ConnectionState.Connecting ? "连接中…" : "未连接";
             var status = runtime != null ? runtime.Status.ToString() : "-";
-            if (GUI.Button(new Rect(8, 8, 260, 26), "pot  " + conn + "  " + status + "  " + Mathf.RoundToInt(fps) + "fps")) showPanel = !showPanel;
+            var label = "pot  " + conn + "  " + status + "  " + Mathf.RoundToInt(fps) + "fps";
+            if (client.State != PotDevClient.ConnectionState.Connected) label += "  " + address + "（F1 修改）";
+            if (GUI.Button(new Rect(8, 8, Mathf.Min(width - 16, 560), 26), label)) showPanel = !showPanel;
 
             if (runtime != null && runtime.Status == PotRuntime.RuntimeStatus.Failed && !string.IsNullOrEmpty(runtime.LastError))
             {
@@ -99,7 +105,7 @@ namespace Pot.Runner
             GUILayout.Label("Dev Server 地址（ws://IP:端口/runner，或 IP:端口）");
             address = GUILayout.TextField(address ?? "");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("连接", GUILayout.Height(32))) Connect();
+            if (GUILayout.Button("连接", GUILayout.Height(32))) Connect(true);
             if (GUILayout.Button("断开", GUILayout.Height(32))) client.Disconnect();
             GUILayout.EndHorizontal();
             GUILayout.Label("连接：" + conn + (client.LastError != null ? "（" + client.LastError + "）" : ""));
