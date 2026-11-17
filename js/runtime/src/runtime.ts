@@ -13,6 +13,8 @@ import type { UnitLoader } from './plugins'
 import { SceneService } from './scene'
 import { StateService } from './state'
 import { TimerService } from './timer'
+import { UIService } from './ui'
+import { AudioService } from './audio'
 
 export const API_VERSION = '0.1'
 export const VERSION = '0.1.0'
@@ -103,6 +105,8 @@ export class Runtime {
     await install(bind(DataService, host))
     await install(bind(SceneService, host))
     await install(bind(InputService, host))
+    await install(bind(UIService, host))
+    await install(bind(AudioService, host))
     await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this
@@ -147,7 +151,11 @@ export class Runtime {
   }
 
   tick(dt: number) {
-    this.root.clock.tick(dt)
+    const clock = this.root.clock
+    const frame = clock.frame
+    clock.tick(dt)
+    // 只有游戏帧推进（update 执行过）才提交 UI；暂停/冻结时保留上一帧画面
+    if (clock.frame !== frame) this.root.ui.flush()
   }
 
   /** 卸载所有单元（服务保留，state 保留） */

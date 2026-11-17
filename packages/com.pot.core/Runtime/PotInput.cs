@@ -112,16 +112,77 @@ namespace Pot
             }
         }
 
+        // ---- 鼠标 / 屏幕 ----
+
+        /// <summary>Mouse()/Screen() 的返回值：鼠标位置（左上角为原点，像素）与屏幕尺寸</summary>
+        [Preserve] public static float mx, my, sw, sh;
+
+        /// <summary>锁定并隐藏鼠标（FPS 视角）；false 恢复</summary>
+        [Preserve]
+        public static void SetCursor(bool locked)
+        {
+            wantLock = locked;
+            Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
+            Cursor.visible = !locked;
+        }
+
+        [Preserve]
+        public static bool CursorLocked()
+        {
+            return Cursor.lockState == CursorLockMode.Locked || (Automated && wantLock);
+        }
+
+        [Preserve]
+        public static void Mouse()
+        {
+            var p = Input.mousePosition;
+            mx = p.x;
+            my = Screen.height - p.y;
+        }
+
+        [Preserve]
+        public static void ScreenSize()
+        {
+            sw = Screen.width;
+            sh = Screen.height;
+        }
+
+        [Preserve]
+        public static float Wheel()
+        {
+            return Input.mouseScrollDelta.y;
+        }
+
+        /// <summary>应用失去焦点时不应继续射击/移动（JS 用于自动暂停）</summary>
+        [Preserve]
+        public static bool Focused()
+        {
+            return Application.isFocused || Automated;
+        }
+
         // ---- 虚拟输入注入 ----
+
+        static bool wantLock;
+        static float automatedUntil = -1f;
+
+        /// <summary>
+        /// 自动化（AI 注入输入）期间窗口可能不在前台，拿不到真实焦点和鼠标锁定。
+        /// 最近 10 秒内有注入，或仍有按住的虚拟键/轴时，Focused 视为 true，CursorLocked 按游戏请求的锁定状态返回。
+        /// </summary>
+        public static bool Automated => held.Count > 0 || axes.Count > 0 || Time.unscaledTime < automatedUntil;
+
+        static void Touch() { automatedUntil = Time.unscaledTime + 10f; }
 
         public static void SetAxis(string name, float x, float y, int frames)
         {
+            Touch();
             axes[name] = new VirtualAxis { x = x, y = y, frames = Math.Max(0, frames) };
         }
 
         /// <summary>mode: down / up / tap（按下一帧后抬起）</summary>
         public static void InjectKey(string name, string mode)
         {
+            Touch();
             name = name.ToLowerInvariant();
             switch (mode)
             {
@@ -141,6 +202,7 @@ namespace Pot
 
         public static void ClearVirtual()
         {
+            automatedUntil = -1f;
             axes.Clear();
             held.Clear();
             down.Clear();

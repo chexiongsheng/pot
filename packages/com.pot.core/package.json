@@ -8,6 +8,8 @@
   "author": { "name": "pot" },
   "dependencies": {
     "com.tencent.puerts.core": "3.0.3",
-    "com.tencent.puerts.v8": "3.0.3"
+    "com.tencent.puerts.v8": "3.0.3",
+    "com.unity.render-pipelines.universal": "14.0.12",
+    "com.unity.modules.particlesystem": "1.0.0"
   }
 }

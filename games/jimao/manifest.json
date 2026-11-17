@@ -1,0 +1,7 @@
+{
+  "id": "pot.jimao",
+  "name": "几猫 · 港区突击",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "plugins": ["game"]
+}

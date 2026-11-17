@@ -57,6 +57,8 @@ namespace Pot
                 return;
             }
             Instance = this;
+            if (GetComponent<PotUIDrawer>() == null) gameObject.AddComponent<PotUIDrawer>();
+            PotRenderDriver.Ensure();
         }
 
         [Preserve]

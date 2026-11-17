@@ -49,6 +49,43 @@ class MockEngine {
   axis(name) { return this.axes[name] ?? [0, 0] }
   key(name, mode) { return mode === 0 ? this.keys.has(name) : false }
   count() { return this.objects.size }
+  material(id, mode, castShadows) { const o = this._get(id); if (mode) o.mode = mode; if (castShadows >= 0) o.shadows = !!castShadows }
+  surface(id, metallic, smoothness) { const o = this._get(id); if (metallic >= 0) o.metallic = metallic; if (smoothness >= 0) o.smoothness = smoothness }
+  emission(id, r, g, b) { this._get(id).emission = [r, g, b] }
+  collider(id, enabled) { this._get(id).collider = enabled }
+  layer(id, layer) { this._get(id).layer = layer }
+  raycast() { return this.nextHit ?? null }
+  view(fov, near, far) { if (fov > 0) this.camera.fov = fov; if (near > 0) this.camera.near = near; if (far > 0) this.camera.far = far }
+  fog(r, g, b, density) { this.fogState = { color: [r, g, b], density } }
+  ambient(r, g, b, reflection) { this.ambientState = { color: [r, g, b], reflection } }
+  lightOptions(id, spotAngle, shadows) { Object.assign(this._get(id), { spotAngle, lightShadows: shadows }) }
+  lightIntensity(id, intensity) { this._get(id).intensity = intensity }
+  cursor(locked) { this.locked = locked }
+  cursorLocked() { return !!this.locked }
+  mouse() { return this.mousePos ?? [0, 0] }
+  screen() { return [1280, 720] }
+  wheel() { return 0 }
+  focused() { return true }
+  uiSubmit(list) { this.ui = list; this.uiSubmits = (this.uiSubmits ?? 0) + 1 }
+  uiMeasure(text, size) { return [String(text).length * size * 0.6, size * 1.3] }
+  audioClip(name, rate, channels, data) { (this.clips ??= new Map()).set(name, { rate, channels, bytes: data.length }); return true }
+  audioHas(name) { return !!this.clips?.has(name) }
+  audioPlay(name, volume) { (this.played ??= []).push({ name, volume }) }
+  audioLoop(name) { this.loops ??= new Map(); const id = (this.loopId = (this.loopId ?? 0) + 1); this.loops.set(id, name); return id }
+  audioSetLoop() {}
+  audioStop(handle) { this.loops?.delete(handle) }
+  audioVolume(v) { this.volume = v }
+  audioPause(p) { this.audioPaused = p }
+  texture(data, width, height, linear) { this.textures ??= new Map(); const id = (this.texId = (this.texId ?? 0) + 1); this.textures.set(id, { bytes: data.byteLength, width, height, linear }); return id }
+  destroyTexture(id) { this.textures?.delete(id) }
+  textTexture(json) { this.textures ??= new Map(); const id = (this.texId = (this.texId ?? 0) + 1); this.textures.set(id, { text: JSON.parse(json) }); return id }
+  mesh(name, positions, normals, uvs, colors, indices) { (this.meshes ??= new Map()).set(name, { vertices: positions.byteLength / 12, indices: indices.byteLength / 4 }); return positions.byteLength / 12 }
+  matTexture(id, slot, tex) { const o = this._get(id); (o.textures ??= {})[slot] = tex }
+  matFloat(id, prop, value) { const o = this._get(id); (o.props ??= {})[prop] = value }
+  matVector(id, prop, x, y, z, w) { const o = this._get(id); (o.props ??= {})[prop] = [x, y, z, w] }
+  ambientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) { this.ambientState = { sky: [sr, sg, sb], equator: [er, eg, eb], ground: [gr, gg, gb], reflection } }
+  render(kind, json) { (this.renderState ??= {})[kind] = Object.assign((this.renderState[kind] ?? {}), JSON.parse(json)); return '' }
+  burst(json) { (this.bursts ??= []).push(JSON.parse(json)) }
   byName(name) { return [...this.objects.values()].filter((o) => o.name === name) }
 }
 

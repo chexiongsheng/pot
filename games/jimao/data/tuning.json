@@ -1,0 +1,64 @@
+{
+  "player": {
+    "eye": 1.68, "crouchEye": 1.05, "radius": 0.32, "height": 1.8, "crouchHeight": 1.15,
+    "fov": 74, "fovAds": 52, "fovSprint": 6,
+    "walk": 3.8, "sprint": 6.4, "crouch": 1.9, "ads": 2.4,
+    "accelGround": 34, "decelGround": 26, "accelAir": 9,
+    "gravity": 21, "jumpApex": 1, "coyote": 0.12, "jumpBuffer": 0.13,
+    "stepUp": 0.45, "eyeRate": 11,
+    "stride": { "walk": 1.55, "sprint": 2.1, "crouch": 1.05 },
+    "bobY": 0.024, "bobX": 0.013,
+    "regenDelay": 4, "regenRate": 25, "maxHealth": 100,
+    "pitchLimit": 86, "adsLook": 0.6,
+    "seaY": -1.2, "rescueDamage": 12
+  },
+  "weapon": {
+    "name": "KR-7", "mag": 30, "reserve": 150, "rpm": 720, "damage": 26, "range": 300,
+    "spread": 0.0125, "spreadAds": 0.0025, "spreadMove": 0.02, "bloomPerShot": 0.004, "bloomMax": 0.03,
+    "reloadTactical": 2.1, "reloadEmpty": 2.72, "weakMultiplier": 2.2,
+    "recoilPitch": 0.55, "recoilYaw": 0.22, "recoilRecover": 6.5,
+    "adsTime": 0.18
+  },
+  "enemy": {
+    "sightRange": 45, "sightCone": 200, "loseSight": 4, "searchTime": 8, "hearRadius": 45,
+    "maxTokens": 2, "maxTokensCrowd": 3, "tokenGap": 1.25
+  },
+  "gull": {
+    "hp": 45, "boltDamage": 7, "boltSpeed": 70, "burst": 3, "burstGap": 0.12, "telegraph": 0.55,
+    "cooldown": [1.9, 3.3], "rangeMin": 12, "rangeMax": 25, "altMin": 4, "altMax": 8,
+    "maxSpeed": 8, "patrolSpeed": 3, "accel": 11, "spreadFar": 0.065, "spreadNear": 0.018,
+    "fireRange": 42, "explodeRadius": 3, "explodeDamage": 30
+  },
+  "hound": {
+    "hp": 140, "shotDamage": 5, "shotSpeed": 55, "burst": 4, "burstGap": 0.11, "telegraph": 0.5,
+    "cooldown": [1.8, 3], "runSpeed": 4.5, "stalkSpeed": 2, "patrolSpeed": 1.5, "accel": 7,
+    "turnRate": 2.5, "rangeMin": 8, "rangeMax": 18, "spreadFar": 0.12, "spreadNear": 0.045,
+    "lungeRange": 3, "lungeDamage": 15, "lungeCooldown": 3.5, "lungeSpeed": 9.5, "fireRange": 30
+  },
+  "look": {
+    "sun": { "rotation": [13, -70, 0], "intensity": 3.8, "color": "#ffd2a0" },
+    "sky": {
+      "zenith": "#46597a", "horizon": "#f7b77c", "horizonAway": "#8a98aa", "ground": "#3a3a3c",
+      "sun": "#ffd29a", "sunIntensity": 22, "sunSize": 0.018, "sunGlow": 1.0,
+      "clouds": 0.6, "cloudColor": "#b8a08c", "cloudSpeed": 0.004, "horizonFog": 0.6, "exposure": 0.8
+    },
+    "ambient": { "sky": "#72829a", "equator": "#a8927c", "ground": "#45403a", "reflection": 0.8 },
+    "fog": { "color": "#b9a690", "density": 0.0062, "height": 0.05, "base": 0, "sun": 1.2 },
+    "weather": { "wetness": 0.85, "puddles": 0.6, "rain": 0.45, "rainColor": "#c9d2dc", "wind": [1.2, -0.5] },
+    "post": {
+      "tonemap": "aces", "exposure": 0.2, "contrast": 20, "saturation": 6, "temperature": 8, "tint": 2,
+      "bloom": 0.6, "bloomThreshold": 1.2, "bloomScatter": 0.72,
+      "vignette": 0.28, "vignetteSmooth": 0.45, "grain": 0.07, "chromatic": 0.03,
+      "shadows": [0.96, 1.0, 1.08, 0], "highlights": [1.06, 1.0, 0.92, 0]
+    }
+  },
+  "quality": {
+    "names": ["低", "中", "高", "极高"],
+    "levels": [
+      { "renderScale": 0.75, "shadowDistance": 45, "shadowResolution": 1024, "shadowCascades": 2, "reflection": 0, "drops": 3000, "ao": 0, "antialias": "fxaa", "reflectionShadows": false },
+      { "renderScale": 0.9, "shadowDistance": 70, "shadowResolution": 2048, "shadowCascades": 2, "reflection": 0.35, "drops": 5000, "ao": 0.9, "antialias": "smaa", "reflectionShadows": false },
+      { "renderScale": 1, "shadowDistance": 100, "shadowResolution": 2048, "shadowCascades": 4, "reflection": 0.5, "drops": 8000, "ao": 1.3, "antialias": "smaa", "reflectionShadows": false },
+      { "renderScale": 1.25, "shadowDistance": 140, "shadowResolution": 4096, "shadowCascades": 4, "reflection": 0.75, "drops": 12000, "ao": 1.5, "antialias": "smaa", "reflectionShadows": true }
+    ]
+  }
+}

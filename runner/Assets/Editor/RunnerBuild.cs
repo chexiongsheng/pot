@@ -32,6 +32,7 @@ public static class RunnerBuild
         {
             EnsureScene();
             Pot.Build.PotBuild.EnsurePuertsGenerated();
+            Pot.Build.PotPipeline.Ensure();
             PlayerSettings.productName = "pot Runner";
             PlayerSettings.companyName = "pot";
             PlayerSettings.runInBackground = true;

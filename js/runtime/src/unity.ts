@@ -14,6 +14,9 @@ export function createUnityHost(): Host {
   const FS = Pot.GameFS
   const S = Pot.PotScene
   const I = Pot.PotInput
+  const U = Pot.PotUI
+  const A = Pot.PotAudio
+  const R = Pot.PotRender
   return {
     platform: 'unity',
     log: (level, text) => H.Log(level, text),
@@ -44,6 +47,56 @@ export function createUnityHost(): Host {
       },
       key: (name, mode) => I.Key(name, mode),
       count: () => S.Count(),
+      material: (id, mode, castShadows) => S.SetMaterial(id, mode, castShadows),
+      surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
+      emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
+      collider: (id, enabled) => S.SetCollider(id, enabled),
+      layer: (id, layer) => S.SetLayer(id, layer),
+      raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
+        const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask)
+        if (!id) return null
+        return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist }
+      },
+      view: (fov, near, far) => S.SetCamera(fov, near, far),
+      fog: (r, g, b, density) => S.SetFog(r, g, b, density),
+      ambient: (r, g, b, reflection) => S.SetAmbient(r, g, b, reflection),
+      lightOptions: (id, spotAngle, shadows) => S.LightOptions(id, spotAngle, shadows),
+      lightIntensity: (id, intensity) => S.SetLightIntensity(id, intensity),
+      cursor: (locked) => I.SetCursor(locked),
+      cursorLocked: () => I.CursorLocked(),
+      mouse: () => {
+        I.Mouse()
+        return [I.mx, I.my]
+      },
+      screen: () => {
+        I.ScreenSize()
+        return [I.sw, I.sh]
+      },
+      wheel: () => I.Wheel(),
+      focused: () => I.Focused(),
+      uiSubmit: (list) => U.Submit(list),
+      uiMeasure: (text, size, bold) => {
+        U.Measure(text, size, bold)
+        return [U.tw, U.th]
+      },
+      audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),
+      audioHas: (name) => A.HasClip(name),
+      audioPlay: (name, volume, pitch, x, y, z, spatial) => A.Play(name, volume, pitch, x, y, z, spatial),
+      audioLoop: (name, volume, pitch) => A.Loop(name, volume, pitch),
+      audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => A.SetLoop(handle, volume, pitch, x, y, z, spatial),
+      audioStop: (handle) => A.StopLoop(handle),
+      audioVolume: (volume) => A.Volume(volume),
+      audioPause: (paused) => A.Pause(paused),
+      texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
+      destroyTexture: (id) => S.DestroyTexture(id),
+      textTexture: (json) => R.TextTexture(json),
+      mesh: (name, positions, normals, uvs, colors, indices) => S.Mesh(name, positions, normals, uvs, colors, indices),
+      matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
+      matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
+      matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
+      ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
+      render: (kind, json) => R.Configure(kind, json) ?? '',
+      burst: (json) => R.Burst(json),
     },
   }
 }

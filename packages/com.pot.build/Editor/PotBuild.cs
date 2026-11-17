@@ -73,6 +73,7 @@ namespace Pot.Build
             ImportGame(gameDir);
             CreateBootScene();
             EnsurePuertsGenerated();
+            PotPipeline.Ensure();
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },

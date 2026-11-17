@@ -48,3 +48,11 @@ Unity -batchmode -quit -projectPath <Unity 工程> -executeMethod Pot.Build.PotB
 
 ### -nographics 下截图失败
 - 现象：screenshot 返回“当前没有图形设备”。属于预期行为，需要截图时不要带 `-nographics`。
+
+## 渲染（URP）
+
+- Runner 使用 URP + Linear + HDR。`PotRender.cs` 负责天空、雾、天气、平面反射、后处理、画质、粒子；`PotLit.shader`、`PotUnlit.shader` 在 core 的 `Resources/pot/` 下。
+- 每个对象的参数（贴图、tiling、湿润、自发光等）走 MaterialPropertyBlock，材质只按 mode 共享一份，避免几千个材质实例。
+- SSAO 等 URP 内部类型（`ScreenSpaceAmbientOcclusion` 的设置类）是 internal，只能反射设置；升级 URP 版本后要先验证。
+- 天空的环境反射探针按脚本刷新（`cullingMask = 0` 只拍天空），改天空参数后自动重拍。
+- 新增后处理参数：`PostCfg` 加字段 → 在应用函数里 Override → JS `PostOptions` 加类型，颜色字段在 `post()` 里经 `rgb()` 转换。

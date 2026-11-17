@@ -224,6 +224,7 @@ namespace Pot.Runner
         {
             if (Input.GetKeyDown(KeyCode.F1)) showPanel = !showPanel;
             if (Input.touchCount >= 3 && Input.GetTouch(2).phase == TouchPhase.Began) showPanel = !showPanel;
+            if (showPanel && Cursor.lockState != CursorLockMode.None) PotInput.SetCursor(false);
             fps = Mathf.Lerp(fps, 1f / Mathf.Max(0.0001f, Time.unscaledDeltaTime), 0.05f);
         }
 
@@ -254,7 +255,7 @@ namespace Pot.Runner
             var height = Screen.height / scale;
 
             if (!session.IsOpen) DrawHome(width, height);
-            else DrawStatusBar(width);
+            else DrawStatusBar(width, height);
             if (showPanel) DrawPanel(width);
         }
 
@@ -297,13 +298,21 @@ namespace Pot.Runner
             GUILayout.EndArea();
         }
 
-        void DrawStatusBar(float width)
+        GUIStyle chipStyle;
+
+        void DrawStatusBar(float width, float height)
         {
             var runtime = PotRuntime.Instance;
             var status = runtime != null ? runtime.Status.ToString() : "-";
-            var label = (session.Name ?? "?") + "  " + status + "  " + Mathf.RoundToInt(fps) + "fps  " + DevStatus();
+            var label = (session.Name ?? "?") + "  " + status + "  " + Mathf.RoundToInt(fps) + "fps  " + DevStatus() + "  F1";
             if (session.SourceStatus != null) label += "  " + session.SourceStatus;
-            if (GUI.Button(new Rect(8, 8, Mathf.Min(width - 16, 560), 26), label)) showPanel = !showPanel;
+            if (chipStyle == null)
+            {
+                chipStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, alignment = TextAnchor.MiddleLeft };
+                chipStyle.normal.textColor = new Color(1, 1, 1, 0.45f);
+            }
+            // 游戏通常自己画 HUD：外壳只在左下角留一行小字，点击打开面板
+            if (GUI.Button(new Rect(8, height - 22, Mathf.Min(width - 16, 420), 20), label, chipStyle)) showPanel = !showPanel;
 
             var y = 40f;
             if (runtime != null && runtime.Status == PotRuntime.RuntimeStatus.Failed && !string.IsNullOrEmpty(runtime.LastError))

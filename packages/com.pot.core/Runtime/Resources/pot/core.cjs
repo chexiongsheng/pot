@@ -24,6 +24,7 @@ var pot = (() => {
   var index_exports = {};
   __export(index_exports, {
     API_VERSION: () => API_VERSION,
+    AudioService: () => AudioService,
     CORE_SERVICES: () => CORE_SERVICES,
     CacheService: () => CacheService,
     ClockService: () => ClockService,
@@ -47,7 +48,9 @@ var pot = (() => {
     Service: () => Service,
     StateService: () => StateService,
     StateTypeError: () => StateTypeError,
+    Texture: () => Texture,
     TimerService: () => TimerService,
+    UIService: () => UIService,
     VERSION: () => VERSION,
     ValidationError: () => ValidationError,
     ancestors: () => ancestors,
@@ -67,6 +70,7 @@ var pot = (() => {
     defaultFormatters: () => defaultFormatters,
     definePlugin: () => definePlugin,
     encode: () => encode,
+    encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
     getPropertyDescriptor: () => getPropertyDescriptor,
     getTraceable: () => getTraceable,
@@ -2385,7 +2389,7 @@ var pot = (() => {
       const [x, y] = this._host.engine.axis(name);
       return { x, y };
     }
-    /** 按住 */
+    /** 按住。鼠标按键用 mouse0（左）、mouse1（右）、mouse2（中） */
     key(name) {
       return this._host.engine.key(name, 0);
     }
@@ -2397,16 +2401,62 @@ var pot = (() => {
     released(name) {
       return this._host.engine.key(name, 2);
     }
+    /** 锁定并隐藏鼠标（第一人称视角）；false 释放。不传参数时只返回当前是否锁定 */
+    cursor(locked) {
+      if (locked !== void 0) this._host.engine.cursor(locked);
+      return this._host.engine.cursorLocked();
+    }
+    /** 鼠标位置（像素，左上角为原点，与 ctx.ui 坐标一致） */
+    mouse() {
+      const [x, y] = this._host.engine.mouse();
+      return { x, y };
+    }
+    /** 屏幕尺寸（像素） */
+    screen() {
+      const [width, height] = this._host.engine.screen();
+      return { width, height };
+    }
+    /** 本帧滚轮增量 */
+    wheel() {
+      return this._host.engine.wheel();
+    }
+    /** 窗口是否有焦点（失焦时可以自动暂停） */
+    focused() {
+      return this._host.engine.focused();
+    }
   };
 
   // runtime/src/scene.ts
+  var Texture = class {
+    constructor(id, width, height, _dispose) {
+      __publicField(this, "id", id);
+      __publicField(this, "width", width);
+      __publicField(this, "height", height);
+      __publicField(this, "_dispose", _dispose);
+    }
+    destroy() {
+      return this._dispose?.();
+    }
+  };
+  function rgb(color, k = 1) {
+    if (color === void 0) return void 0;
+    const [r, g, b, a] = parseColor(color);
+    return [r * k, g * k, b * k, a];
+  }
+  function bool(v) {
+    return v === void 0 ? void 0 : v ? 1 : 0;
+  }
+  function bytesOf(view, Type) {
+    const typed = view instanceof Type ? view : new Type(view);
+    return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength ? typed.buffer : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
+  }
   function parseColor(color) {
     if (typeof color === "string") {
       const hex = color.replace("#", "");
       const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
-      const n = parseInt(full.slice(0, 6), 16);
+      const n2 = parseInt(full.slice(0, 6), 16);
       const a = full.length >= 8 ? parseInt(full.slice(6, 8), 16) / 255 : 1;
-      return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255, a];
+      return [(n2 >> 16 & 255) / 255, (n2 >> 8 & 255) / 255, (n2 & 255) / 255, a];
     }
     return [color[0], color[1], color[2], color[3] ?? 1];
   }
@@ -2459,6 +2509,64 @@ var pot = (() => {
       this._engine.setActive(this.id, value);
       return this;
     }
+    /** 相对父节点的位置 */
+    get localPosition() {
+      return this._engine.getVec(this.id, "localPosition");
+    }
+    set localPosition(v) {
+      this._engine.setVec(this.id, "localPosition", v[0], v[1], v[2]);
+    }
+    /** 相对父节点的欧拉角（度） */
+    get localRotation() {
+      return this._engine.getVec(this.id, "localRotation");
+    }
+    set localRotation(v) {
+      this._engine.setVec(this.id, "localRotation", v[0], v[1], v[2]);
+    }
+    /** 材质参数（逐对象，不复制材质）。只设置传入的字段 */
+    material(options) {
+      const engine = this._engine;
+      if (options.mode !== void 0 || options.shadows !== void 0) {
+        engine.material(this.id, options.mode ?? "", options.shadows === void 0 ? -1 : options.shadows ? 1 : 0);
+      }
+      if (options.metallic !== void 0 || options.smoothness !== void 0) {
+        engine.surface(this.id, options.metallic ?? -1, options.smoothness ?? -1);
+      }
+      if (options.emission !== void 0) {
+        const [r, g, b] = parseColor(options.emission);
+        const k = options.emissionIntensity ?? 1;
+        engine.emission(this.id, r * k, g * k, b * k);
+      }
+      if (options.map !== void 0) engine.matTexture(this.id, "map", options.map?.id ?? 0);
+      if (options.normalMap !== void 0) engine.matTexture(this.id, "normal", options.normalMap?.id ?? 0);
+      if (options.maskMap !== void 0) engine.matTexture(this.id, "mask", options.maskMap?.id ?? 0);
+      if (options.tiling !== void 0 || options.offset !== void 0) {
+        const t = options.tiling ?? [1, 1];
+        const o = options.offset ?? [0, 0];
+        engine.matVector(this.id, "_Tiling", t[0], t[1], o[0], o[1]);
+      }
+      if (options.uv !== void 0) engine.matFloat(this.id, "_UVMode", options.uv === "world" ? 1 : options.uv === "object" ? 2 : 0);
+      if (options.normalScale !== void 0) engine.matFloat(this.id, "_BumpScale", options.normalScale);
+      if (options.occlusion !== void 0) engine.matFloat(this.id, "_Occlusion", options.occlusion);
+      if (options.wet !== void 0) engine.matFloat(this.id, "_Wet", options.wet);
+      if (options.planar !== void 0) engine.matFloat(this.id, "_Planar", options.planar);
+      if (options.cutoff !== void 0) engine.matFloat(this.id, "_Cutoff", options.cutoff);
+      if (options.vertexColors !== void 0) engine.matFloat(this.id, "_VColor", options.vertexColors ? 1 : 0);
+      return this;
+    }
+    collider(enabled) {
+      this._engine.collider(this.id, enabled);
+      return this;
+    }
+    layer(layer) {
+      this._engine.layer(this.id, layer);
+      return this;
+    }
+    /** 灯光强度（仅灯光对象） */
+    intensity(value) {
+      this._engine.lightIntensity(this.id, value);
+      return this;
+    }
     destroy() {
       if (this._dispose) return this._dispose();
       throw new Error("该对象不能销毁（例如主相机）");
@@ -2494,21 +2602,173 @@ var pot = (() => {
         };
       }, `scene.spawn(${name})`);
       const entity = new Entity(this, id, dispose);
-      if (options.position) entity.position = options.position;
-      if (options.rotation) entity.rotation = options.rotation;
+      if (options.parent) {
+        if (options.position) entity.localPosition = options.position;
+        if (options.rotation) entity.localRotation = options.rotation;
+      } else {
+        if (options.position) entity.position = options.position;
+        if (options.rotation) entity.rotation = options.rotation;
+      }
       if (options.scale !== void 0) {
         const s = options.scale;
         entity.scale = typeof s === "number" ? [s, s, s] : s;
       }
       if (options.color) entity.color(options.color);
+      if (options.material) entity.material(options.material);
+      if (options.collider === false) entity.collider(false);
+      if (options.layer !== void 0) entity.layer(options.layer);
       if (options.active === false) entity.active(false);
       return entity;
     }
     light(options = {}) {
-      const entity = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, position: options.position, rotation: options.rotation });
+      const entity = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, parent: options.parent, position: options.position, rotation: options.rotation });
       const [r, g, b] = parseColor(options.color ?? [1, 1, 1]);
-      this.host.engine.light(entity.id, options.type ?? "directional", options.intensity ?? 1, r, g, b, options.range ?? 10);
+      const engine = this.host.engine;
+      engine.light(entity.id, options.type ?? "directional", options.intensity ?? 1, r, g, b, options.range ?? 10);
+      if (options.spotAngle !== void 0 || options.shadows !== void 0) {
+        const shadows = options.shadows === void 0 ? -1 : options.shadows === "none" ? 0 : options.shadows === "hard" ? 1 : 2;
+        engine.lightOptions(entity.id, options.spotAngle ?? 0, shadows);
+      }
       return entity;
+    }
+    /** 主相机参数：视野（度）、近/远裁剪面 */
+    view(options) {
+      this.host.engine.view(options.fov ?? 0, options.near ?? 0, options.far ?? 0);
+    }
+    /** 指数平方雾；density 为 0 或传 false 关闭。options 可加高度衰减与太阳散射 */
+    fog(color, density = 0.03, options) {
+      if (color === false) return this.host.engine.fog(0, 0, 0, 0);
+      const [r, g, b] = parseColor(color);
+      this.host.engine.fog(r, g, b, density);
+      if (options) this._render("fog", { height: options.height, base: options.base, sun: options.sun });
+    }
+    /** 环境光：纯色，或 { sky, equator, ground } 三色；reflection 为环境反射强度（0 到 1） */
+    ambient(color, reflection = 0.3) {
+      if (typeof color === "object" && !Array.isArray(color)) {
+        const [sr, sg, sb] = parseColor(color.sky);
+        const [er, eg, eb] = parseColor(color.equator);
+        const [gr, gg, gb] = parseColor(color.ground);
+        return this.host.engine.ambientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection);
+      }
+      const [r, g, b] = parseColor(color);
+      this.host.engine.ambient(r, g, b, reflection);
+    }
+    _render(kind, options) {
+      const error = this.host.engine.render(kind, JSON.stringify(options));
+      if (error) throw new Error(`scene.${kind}：${error}`);
+    }
+    /** 由像素创建贴图（随调用方插件卸载销毁） */
+    texture(options) {
+      const engine = this.host.engine;
+      const { width, height, data } = options;
+      if (data.length < width * height * 4) throw new Error(`scene.texture：数据长度 ${data.length} 小于 ${width}x${height}x4`);
+      const wrap = options.wrap === "clamp" ? 1 : 0;
+      const filter = options.filter === "point" ? 0 : options.filter === "bilinear" ? 1 : 2;
+      let id = 0;
+      const dispose = this.ctx.effect(() => {
+        const view = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        const buffer = view.byteOffset === 0 && view.byteLength === view.buffer.byteLength ? view.buffer : view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+        id = engine.texture(buffer, width, height, !!options.linear, options.mipmaps !== false, wrap, filter, options.aniso ?? 8);
+        return () => engine.destroyTexture(id);
+      }, "scene.texture");
+      return new Texture(id, width, height, dispose);
+    }
+    /** 文字转贴图（系统中文字体），可贴在任意材质上（例如集装箱喷字、路牌） */
+    text(options) {
+      const engine = this.host.engine;
+      const width = options.width ?? 256;
+      const height = options.height ?? 64;
+      const json = JSON.stringify({
+        text: options.text,
+        width,
+        height,
+        size: options.size ?? Math.round(height * 0.7),
+        color: rgb(options.color ?? [1, 1, 1]),
+        background: rgb(options.background ?? [0, 0, 0, 0]),
+        align: options.align === "left" ? 0 : options.align === "right" ? 2 : 1,
+        bold: options.bold ? 1 : 0,
+        letterSpacing: options.letterSpacing ?? 0
+      });
+      let id = 0;
+      const dispose = this.ctx.effect(() => {
+        id = engine.textTexture(json);
+        return () => engine.destroyTexture(id);
+      }, `scene.text(${options.text})`);
+      return new Texture(id, width, height, dispose);
+    }
+    /** 注册网格，之后用 spawn({ shape: 'mesh:名字' }) 创建（自带网格碰撞体）。同名覆盖 */
+    mesh(name, data) {
+      const f = (v) => v ? bytesOf(v, Float32Array) : null;
+      return this.host.engine.mesh(name, f(data.positions), f(data.normals), f(data.uvs), f(data.colors), bytesOf(data.indices, Uint32Array));
+    }
+    /** 后处理（色调映射、曝光、调色、泛光、暗角、颗粒、色差、SSAO、抗锯齿）；只改传入的字段 */
+    post(options) {
+      const tonemap = options.tonemap === void 0 ? void 0 : options.tonemap === "none" ? 0 : options.tonemap === "neutral" ? 1 : 2;
+      const antialias = options.antialias === void 0 ? void 0 : options.antialias === "none" ? 0 : options.antialias === "fxaa" ? 1 : 2;
+      this._render("post", {
+        ...options,
+        enabled: bool(options.enabled),
+        tonemap,
+        antialias,
+        filter: rgb(options.filter),
+        bloomTint: rgb(options.bloomTint),
+        vignetteColor: rgb(options.vignetteColor)
+      });
+    }
+    /** 程序化天空盒（渐变、日轮光晕、云、地平线雾），太阳方向跟随主方向光；同时捕捉环境反射 */
+    sky(options) {
+      this._render("sky", {
+        ...options,
+        zenith: rgb(options.zenith),
+        horizon: rgb(options.horizon),
+        horizonAway: rgb(options.horizonAway),
+        ground: rgb(options.ground),
+        sun: rgb(options.sun, options.sunIntensity ?? 1),
+        cloudColor: rgb(options.cloudColor),
+        reflection: bool(options.reflection),
+        ambient: bool(options.ambient),
+        sunIntensity: void 0
+      });
+    }
+    /** 天气：全局湿润、积水、雨丝与波纹 */
+    weather(options) {
+      this._render("weather", { ...options, rainColor: rgb(options.rainColor) });
+    }
+    /** 平面反射（湿地面、积水、水面）。材质需设置 planar */
+    reflection(options) {
+      const exclude = options.exclude?.reduce((m, l) => m | 1 << l, 0);
+      this._render("reflection", { ...options, enabled: bool(options.enabled), shadows: bool(options.shadows), exclude });
+    }
+    /** 画质参数（渲染缩放、阴影距离/分辨率/级联、MSAA、HDR） */
+    quality(options) {
+      this._render("quality", { ...options, hdr: bool(options.hdr), cascades: options.shadowCascades, shadowCascades: void 0 });
+    }
+    /** 太阳或天空改变后重新捕捉环境反射 */
+    refreshEnvironment() {
+      this._render("refresh", {});
+    }
+    /** 粒子迸发（枪口火花、弹着点火星、烟尘）。不需要销毁，生命周期结束自动消失 */
+    burst(options) {
+      this.host.engine.burst(JSON.stringify({
+        kind: options.kind ?? "spark",
+        pos: options.position,
+        dir: options.direction,
+        color: rgb(options.color ?? [1, 0.8, 0.5], options.intensity ?? 1),
+        count: options.count,
+        speed: options.speed,
+        speedJitter: options.speedJitter,
+        spread: options.spread,
+        size: options.size,
+        sizeJitter: options.sizeJitter,
+        life: options.life,
+        lifeJitter: options.lifeJitter
+      }));
+    }
+    /** 射线检测（命中图元自带的碰撞体）。direction 不必归一化 */
+    raycast(origin, direction, options = {}) {
+      const hit = this.host.engine.raycast(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], options.maxDistance ?? 0, options.mask ?? 0);
+      if (!hit) return null;
+      return { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : void 0 };
     }
     find(name) {
       for (const info of this.objects.values()) {
@@ -2521,8 +2781,170 @@ var pot = (() => {
     }
   };
 
+  // runtime/src/ui.ts
+  var RS = "";
+  var FS = "";
+  var n = (v) => String(Math.round(v * 10) / 10);
+  var UIService = class extends Service {
+    constructor(ctx, _host) {
+      super(ctx, "ui");
+      __publicField(this, "_host", _host);
+      __publicField(this, "_list", []);
+      __publicField(this, "_colors", /* @__PURE__ */ new Map());
+      __publicField(this, "_submittedEmpty", true);
+    }
+    /** 屏幕宽（像素） */
+    get width() {
+      return this._host.engine.screen()[0];
+    }
+    /** 屏幕高（像素） */
+    get height() {
+      return this._host.engine.screen()[1];
+    }
+    /** 颜色转 rrggbbaa，alpha 为倍数 */
+    hex(color, alpha = 1) {
+      let base;
+      if (typeof color === "string") {
+        base = this._colors.get(color);
+        if (base === void 0) {
+          const [r2, g2, b2, a3] = parseColor(color);
+          base = [r2, g2, b2, a3].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+          if (this._colors.size > 1024) this._colors.clear();
+          this._colors.set(color, base);
+        }
+        if (alpha >= 1) return base;
+        const a2 = Math.round(parseInt(base.slice(6, 8), 16) * Math.max(0, alpha));
+        return base.slice(0, 6) + a2.toString(16).padStart(2, "0");
+      }
+      const [r, g, b, a] = parseColor(color);
+      return [r, g, b, a * Math.max(0, Math.min(1, alpha))].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+    }
+    rect(x, y, w, h, color, options = {}) {
+      this._list.push(["r", n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(options.radius ?? 0)].join(FS));
+    }
+    border(x, y, w, h, color, thickness = 1, options = {}) {
+      this._list.push(["b", n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(thickness), n(options.radius ?? 0)].join(FS));
+    }
+    line(x1, y1, x2, y2, color, width = 1, alpha = 1) {
+      this._list.push(["l", n(x1), n(y1), n(x2), n(y2), this.hex(color, alpha), n(width)].join(FS));
+    }
+    /** 圆弧：角度制，0 度朝上，顺时针；sweep 360 为整圆 */
+    arc(cx, cy, radius, color, thickness = 2, start = 0, sweep = 360, alpha = 1) {
+      this._list.push(["a", n(cx), n(cy), n(radius), this.hex(color, alpha), n(thickness), n(start), n(sweep)].join(FS));
+    }
+    text(text, x, y, options = {}) {
+      const h = options.align === "right" ? 2 : options.align === "center" ? 1 : 0;
+      const v = options.valign === "bottom" ? 2 : options.valign === "middle" ? 1 : 0;
+      const flags = (options.bold ? 1 : 0) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0);
+      const w = options.w ?? 0;
+      const hh = options.h ?? 0;
+      const s = String(text).split(RS).join("").split(FS).join("");
+      this._list.push(["t", n(x), n(y), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(Math.round(options.size ?? 16)), String(v * 3 + h), String(flags), s].join(FS));
+    }
+    /** 文字尺寸（像素） */
+    measure(text, size = 16, bold = false) {
+      const [width, height] = this._host.engine.uiMeasure(text, size, bold);
+      return { width, height };
+    }
+    /** 鼠标是否在矩形内 */
+    hit(x, y, w, h) {
+      const [mx, my] = this._host.engine.mouse();
+      return mx >= x && mx <= x + w && my >= y && my <= y + h;
+    }
+    /** 运行时在每个游戏帧末调用 */
+    flush() {
+      if (!this._list.length) {
+        if (this._submittedEmpty) return;
+        this._submittedEmpty = true;
+        this._host.engine.uiSubmit("");
+        return;
+      }
+      this._submittedEmpty = false;
+      this._host.engine.uiSubmit(this._list.join(RS));
+      this._list = [];
+    }
+  };
+
+  // runtime/src/audio.ts
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function encodePcm16(samples) {
+    const bytes = new Uint8Array(samples.length * 2);
+    for (let i = 0; i < samples.length; i++) {
+      let v = Math.round(Math.max(-1, Math.min(1, samples[i] || 0)) * 32767);
+      if (v < 0) v += 65536;
+      bytes[i * 2] = v & 255;
+      bytes[i * 2 + 1] = v >> 8;
+    }
+    const out = [];
+    let chunk = "";
+    for (let i = 0; i < bytes.length; i += 3) {
+      const a = bytes[i], b = bytes[i + 1], c = bytes[i + 2];
+      const triple = a << 16 | (b ?? 0) << 8 | (c ?? 0);
+      chunk += B64[triple >> 18 & 63] + B64[triple >> 12 & 63] + (i + 1 < bytes.length ? B64[triple >> 6 & 63] : "=") + (i + 2 < bytes.length ? B64[triple & 63] : "=");
+      if (chunk.length >= 4096) {
+        out.push(chunk);
+        chunk = "";
+      }
+    }
+    out.push(chunk);
+    return out.join("");
+  }
+  var AudioService = class extends Service {
+    constructor(ctx, _host) {
+      super(ctx, "audio");
+      __publicField(this, "_host", _host);
+    }
+    /** 注册（或替换）片段；rate 为采样率，默认 22050 */
+    clip(name, samples, rate = 22050) {
+      return this._host.engine.audioClip(name, rate, 1, encodePcm16(samples));
+    }
+    /** 片段是否已注册（热重载后可以跳过重新合成） */
+    has(name) {
+      return this._host.engine.audioHas(name);
+    }
+    play(name, options = {}) {
+      const p = options.position;
+      this._host.engine.audioPlay(name, options.volume ?? 1, options.pitch ?? 1, p?.[0] ?? 0, p?.[1] ?? 0, p?.[2] ?? 0, !!p);
+    }
+    /** 循环播放，随调用方单元卸载自动停止 */
+    loop(name, options = {}) {
+      const engine = this._host.engine;
+      let id = 0;
+      const dispose = this.ctx.effect(() => {
+        id = engine.audioLoop(name, options.volume ?? 1, options.pitch ?? 1);
+        return () => {
+          if (id) engine.audioStop(id);
+          id = 0;
+        };
+      }, `audio.loop(${name})`);
+      const handle = {
+        get id() {
+          return id;
+        },
+        set(o) {
+          if (!id) return;
+          const p = o.position;
+          engine.audioSetLoop(id, o.volume ?? -1, o.pitch ?? 0, p?.[0] ?? 0, p?.[1] ?? 0, p?.[2] ?? 0, !!p);
+        },
+        stop() {
+          dispose();
+        }
+      };
+      if (options.position) handle.set({ position: options.position });
+      return handle;
+    }
+    /** 主音量 0 到 1 */
+    volume(value) {
+      this._host.engine.audioVolume(value);
+    }
+    /** 暂停/恢复全部声音 */
+    pause(paused) {
+      this._host.engine.audioPause(paused);
+    }
+  };
+
   // runtime/src/plugins.ts
-  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "plugins"];
+  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "plugins"];
   function compileModule(code, filename) {
     const indirectEval = eval;
     return indirectEval(`(function (exports, require, module, __filename) {${code}
@@ -2714,6 +3136,8 @@ var pot = (() => {
       await install(bind(DataService, host));
       await install(bind(SceneService, host));
       await install(bind(InputService, host));
+      await install(bind(UIService, host));
+      await install(bind(AudioService, host));
       await install(bind(PluginsService, host, modules, this.options.loader));
       if (this.options.state) this.root.state.importJSON(this.options.state);
       return this;
@@ -2755,7 +3179,10 @@ var pot = (() => {
       return this;
     }
     tick(dt) {
-      this.root.clock.tick(dt);
+      const clock = this.root.clock;
+      const frame = clock.frame;
+      clock.tick(dt);
+      if (clock.frame !== frame) this.root.ui.flush();
     }
     /** 卸载所有单元（服务保留，state 保留） */
     async stop() {
@@ -2800,14 +3227,17 @@ var pot = (() => {
   function createUnityHost() {
     const Pot = CS.Pot;
     const H = Pot.PotHost;
-    const FS = Pot.GameFS;
+    const FS2 = Pot.GameFS;
     const S = Pot.PotScene;
     const I = Pot.PotInput;
+    const U = Pot.PotUI;
+    const A = Pot.PotAudio;
+    const R = Pot.PotRender;
     return {
       platform: "unity",
       log: (level, text) => H.Log(level, text),
       readText: (path) => {
-        const text = FS.ReadText(path);
+        const text = FS2.ReadText(path);
         return text === null || text === void 0 ? null : text;
       },
       gc: () => H.RequestGC(),
@@ -2832,7 +3262,57 @@ var pot = (() => {
           return [I.ax, I.ay];
         },
         key: (name, mode) => I.Key(name, mode),
-        count: () => S.Count()
+        count: () => S.Count(),
+        material: (id, mode, castShadows) => S.SetMaterial(id, mode, castShadows),
+        surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
+        emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
+        collider: (id, enabled) => S.SetCollider(id, enabled),
+        layer: (id, layer) => S.SetLayer(id, layer),
+        raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
+          const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask);
+          if (!id) return null;
+          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
+        },
+        view: (fov, near, far) => S.SetCamera(fov, near, far),
+        fog: (r, g, b, density) => S.SetFog(r, g, b, density),
+        ambient: (r, g, b, reflection) => S.SetAmbient(r, g, b, reflection),
+        lightOptions: (id, spotAngle, shadows) => S.LightOptions(id, spotAngle, shadows),
+        lightIntensity: (id, intensity) => S.SetLightIntensity(id, intensity),
+        cursor: (locked) => I.SetCursor(locked),
+        cursorLocked: () => I.CursorLocked(),
+        mouse: () => {
+          I.Mouse();
+          return [I.mx, I.my];
+        },
+        screen: () => {
+          I.ScreenSize();
+          return [I.sw, I.sh];
+        },
+        wheel: () => I.Wheel(),
+        focused: () => I.Focused(),
+        uiSubmit: (list) => U.Submit(list),
+        uiMeasure: (text, size, bold) => {
+          U.Measure(text, size, bold);
+          return [U.tw, U.th];
+        },
+        audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),
+        audioHas: (name) => A.HasClip(name),
+        audioPlay: (name, volume, pitch, x, y, z, spatial) => A.Play(name, volume, pitch, x, y, z, spatial),
+        audioLoop: (name, volume, pitch) => A.Loop(name, volume, pitch),
+        audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => A.SetLoop(handle, volume, pitch, x, y, z, spatial),
+        audioStop: (handle) => A.StopLoop(handle),
+        audioVolume: (volume) => A.Volume(volume),
+        audioPause: (paused) => A.Pause(paused),
+        texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
+        destroyTexture: (id) => S.DestroyTexture(id),
+        textTexture: (json) => R.TextTexture(json),
+        mesh: (name, positions, normals, uvs, colors, indices) => S.Mesh(name, positions, normals, uvs, colors, indices),
+        matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
+        matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
+        matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
+        ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
+        render: (kind, json) => R.Configure(kind, json) ?? "",
+        burst: (json) => R.Burst(json)
       }
     };
   }

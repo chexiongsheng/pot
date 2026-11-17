@@ -39,7 +39,39 @@
 - 原因：主相机不归任何单元，不会被重建或还原。
 - 做法：在负责场景的单元 apply 里每次都设置相机。
 
+### 写实画面偏灰、偏暗或过曝
+- 原因：Runner 是 Linear + HDR，sRGB 0.085 只相当于线性 0.0076；后处理曝光、雾色、环境光三者叠加很敏感。
+- 做法：先关雾和后处理确认基础受光，再逐项加；雾色用暖灰而不是中性灰；改曝光每次 ±0.2 以内，顺光、逆光各截一张对比。
+- 来源：jimao 写实化迭代。
+
+### 贴图材质发白或像镜子
+- 原因：mask 的金属度、光滑度会和 `metallic`/`smoothness` 相乘；不传 mask 时按参数原值，参数为 1 就是镜面。平整的盒子顶面在掠射角会反射整片天空。
+- 做法：用贴图时传 `smoothness: 1, metallic: 1`，由 mask 控制；枪模等近景小件光滑度降到 0.6 左右并关掉 `wet`。
+
+### quad 贴花看不见或文字镜像
+- 原因：Unity 的 quad 正面朝 -Z。
+- 做法：贴在 +Z 侧面向外时不转，-Z 侧转 180°；离表面留 5mm 左右防止闪烁。
+
+### 受伤暗角用 UI 多层描边
+- 现象：屏幕出现一圈圈同心方框。
+- 做法：用 `scene.post({ vignette, vignetteColor })` 驱动，并对强度量化，变化时才调用。
+
+### tiling 写成 `as const` 报类型错误
+- 原因：`as const` 得到只读元组，不能赋给 `MaterialOptions`。
+- 做法：直接把对象标注为 `MaterialOptions`。
+
+### 暂停游戏用了 clock.pause
+- 现象：UI、菜单也一起停了。
+- 做法：游戏暂停用自己的 phase；`time pause` 只用于开发调试。
+
 ## 工具与环境
+
+### 类型检查用错 tsc
+- 做法：用 `js/node_modules/.bin/tsc --noEmit -p games/<id>/tsconfig.json`，全局 tsc 版本可能不一致。
+
+### 自动化输入没反应
+- 原因：Runner 窗口不在前台时收不到系统按键。
+- 做法：调试时用 `eval` 改 state（如 phase、yaw、health）再截图。
 
 ### PowerShell 改含中文的文件后乱码
 - 原因：Windows PowerShell 5 的 `Set-Content`/`Get-Content` 默认不是 UTF-8。
