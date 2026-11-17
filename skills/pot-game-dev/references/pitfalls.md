@@ -1,4 +1,4 @@
-# 坑点库
+﻿# 坑点库
 
 格式：现象 / 原因 / 做法 / 来源。能由框架消除的坑改框架，并标注“已由框架保证”。
 
@@ -50,5 +50,6 @@
 
 ## 画面全是洋红（粉紫色）
 
-现象：物体都是纯洋红色，日志无报错。原因：着色器没被打进构建（CreatePrimitive 默认用 Standard，会被裁剪）。core 已统一用 `Resources/pot/PotLit.shader`（Pot/Lit），新增着色器也必须放进 Resources 或 Always Included Shaders。另外 `-nographics` 构建不会编译着色器，Runner 构建不要加此参数。
+现象：物体都是纯洋红色，日志无报错。这是 Runner 自身缺陷（着色器没打进 Runner），不是游戏代码问题，游戏侧无法也不应修复：游戏不能新增 Unity 着色器，外观只能通过 Game API 的材质参数和数据表达。遇到时把截图和日志反馈给 Runner 维护者。
 
+（Runner 维护者注意：Runner 内置着色器必须放在 core 的 Resources 或 Always Included 中；构建 Runner 不要加 `-nographics`，否则着色器不会编译。）
