@@ -13,7 +13,8 @@ export function apply(ctx: Context) {
   scene.background('#1b2333')
   scene.sky({ zenith: '#2c4f86', horizon: '#c9d8e8', ground: '#3b3b40', reflection: true, ambient: true })
   scene.light({ type: 'directional', rotation: [40, -40, 0], intensity: 1.2, shadows: 'soft' })
-  scene.spawn({ shape: 'plane', name: 'ground', scale: 3, position: [0, -1.2, 0], color: '#556055' })
+  scene.spawn({ shape: 'plane', name: 'ground', scale: 3, position: [0, -1.2, 0] })
+    .shader(gfx.shader({ fragment: 'shaders/ground.frag' }), { uniforms: { uColor: '#556055' } })
 
   const camera = scene.camera
   camera.position = [0, 5, -9]

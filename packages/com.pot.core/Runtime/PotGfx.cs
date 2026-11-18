@@ -262,7 +262,7 @@ namespace Pot
 
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
-                var len = Pack(queue, ref renderingData.cameraData);
+                var len = Pack(queue, ref renderingData.cameraData, ref renderingData);
                 if (len <= 0) return;
                 var slot = PotGfx_Submit(frame.GetBuffer(), len);
                 var cmd = CommandBufferPool.Get("PotGfx");
@@ -363,6 +363,55 @@ namespace Pot
                 for (var r = 0; r < 3; r++) n[c * 3 + r] = inv[c, r];
         }
 
+        static readonly int shadowMapId = Shader.PropertyToID("_MainLightShadowmapTexture");
+        static readonly float[] shadowMats = new float[64];
+        static readonly float[] shadowSpheres = new float[16];
+        static int shadowFrame = -1;
+        static Camera shadowCam;
+        static Texture shadowTex;
+
+        /// <summary>
+        /// 主光阴影：按 URP MainLightShadowCasterPass.Setup 的同一算法复算级联矩阵（全局变量要到 Submit 才生效，
+        /// 读 _MainLightShadowmapWorldToShadow 只能拿到上一帧）。贴图取 URP 的 shadowmap（RTHandle 跨帧稳定）。
+        /// </summary>
+        static Texture ShadowBuiltins(ref RenderingData rd)
+        {
+            var cam = rd.cameraData.camera;
+            if (shadowFrame == Time.frameCount && shadowCam == cam) return shadowTex;
+            shadowFrame = Time.frameCount;
+            shadowCam = cam;
+            shadowTex = null;
+            SetVec("pot_ShadowParams", 0, 0, 0, 0);
+            ref var sd = ref rd.shadowData;
+            var li = rd.lightData.mainLightIndex;
+            if (!sd.supportsMainLightShadows || li < 0) return null;
+            var vl = rd.lightData.visibleLights[li];
+            var light = vl.light;
+            if (light == null || light.shadows == LightShadows.None || vl.lightType != LightType.Directional) return null;
+            if (!rd.cullResults.GetShadowCasterBounds(li, out _)) return null;
+            var tex = Shader.GetGlobalTexture(shadowMapId);
+            if (tex == null) return null;
+            var n = Mathf.Clamp(sd.mainLightShadowCascadesCount, 1, 4);
+            var res = ShadowUtils.GetMaxTileResolutionInAtlas(sd.mainLightShadowmapWidth, sd.mainLightShadowmapHeight, n);
+            var w = sd.mainLightShadowmapWidth;
+            var h = n == 2 ? sd.mainLightShadowmapHeight >> 1 : sd.mainLightShadowmapHeight;
+            Array.Clear(shadowSpheres, 0, 16);
+            for (var c = 0; c < n; c++)
+            {
+                if (!ShadowUtils.ExtractDirectionalLightMatrix(ref rd.cullResults, ref sd, li, c, w, h, res, light.shadowNearPlane,
+                        out var sphere, out var slice)) return null;
+                var m = slice.shadowTransform;
+                for (var i = 0; i < 16; i++) shadowMats[c * 16 + i] = m[i];
+                shadowSpheres[c * 4] = sphere.x; shadowSpheres[c * 4 + 1] = sphere.y;
+                shadowSpheres[c * 4 + 2] = sphere.z; shadowSpheres[c * 4 + 3] = sphere.w;
+            }
+            builtins["pot_ShadowMatrix"] = shadowMats;
+            builtins["pot_ShadowSpheres"] = shadowSpheres;
+            SetVec("pot_ShadowParams", light.shadowStrength, n, rd.cameraData.maxShadowDistance, SystemInfo.usesReversedZBuffer ? 1 : 0);
+            shadowTex = tex;
+            return tex;
+        }
+
         static int AttrFormat(VertexAttributeFormat f, int dim)
         {
             if (f == VertexAttributeFormat.Float32) return dim == 2 ? 1 : dim == 3 ? 2 : dim == 4 ? 3 : 0;
@@ -431,7 +480,7 @@ namespace Pot
             return size;
         }
 
-        static int Pack(int queue, ref CameraData cameraData)
+        static int Pack(int queue, ref CameraData cameraData, ref RenderingData renderingData)
         {
             var cam = cameraData.camera;
             drawList.Clear();
@@ -467,6 +516,7 @@ namespace Pot
 
             var flipped = cameraData.IsCameraProjectionMatrixFlipped();
             FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
+            var shadowMap = ShadowBuiltins(ref renderingData);
             var frameFlags = (flipped ? F_FrontCCW : 0) | (SystemInfo.usesReversedZBuffer ? F_ReversedZ : 0);
             var env = PotRender.EnvTexture;
 
@@ -480,7 +530,7 @@ namespace Pot
                 var mesh = mf != null ? mf.sharedMesh : null;
                 if (mesh == null || mesh.vertexCount == 0) continue;
                 ObjectBuiltins(go.transform);
-                if (WriteDraw(b, programs[b.program], mesh, b.flags | frameFlags, env)) count++;
+                if (WriteDraw(b, programs[b.program], mesh, b.flags | frameFlags, env, shadowMap)) count++;
             }
             return Finish(count);
         }
@@ -496,7 +546,7 @@ namespace Pot
         }
 
         /// <summary>写出一个 draw（网格须已 UploadMeshData，位置在流 0）；内置量须已设置好</summary>
-        static bool WriteDraw(Binding b, GpuProgram p, Mesh mesh, int flags, Texture env)
+        static bool WriteDraw(Binding b, GpuProgram p, Mesh mesh, int flags, Texture env, Texture shadowMap = null)
         {
             if (mesh.GetVertexAttributeStream(VertexAttribute.Position) != 0) return false;
             var vb = mesh.GetNativeVertexBufferPtr(0);
@@ -527,12 +577,13 @@ namespace Pot
                 Texture tex = null;
                 int texId;
                 if (t.Key == "pot_EnvMap") tex = env;
+                else if (t.Key == "pot_ShadowMap") tex = shadowMap != null ? shadowMap : Texture2D.whiteTexture;
                 else if (b.textures.TryGetValue(t.Key, out texId)) tex = PotScene.GetTexture(texId);
                 if (tex == null) continue;
                 var ptr = tex.GetNativeTexturePtr();
                 if (ptr == IntPtr.Zero) continue;
                 writer.Write(t.Value);
-                writer.Write(t.Key == "pot_EnvMap" ? (1 | (2 << 1)) : SamplerBits(tex));
+                writer.Write(t.Key == "pot_EnvMap" ? (1 | (2 << 1)) : t.Key == "pot_ShadowMap" ? 1 : SamplerBits(tex));
                 writer.Write(ptr.ToInt64());
                 nt++;
             }
@@ -656,7 +707,11 @@ namespace Pot
             writer.Write(0);
             // 不剔除、不写深度、关深度测试
             var flags = 2 | ((blend & 3) << F_BlendShift) | F_NoDepthTest;
+            var sp = Builtin("pot_ShadowParams", 4);
+            var savedStrength = sp[0];
+            sp[0] = 0; // 烘焙不接收阴影
             var ok = WriteDraw(b, p, BakeQuad(), flags, PotRender.EnvTexture);
+            sp[0] = savedStrength;
             var len = Finish(ok ? 1 : 0);
             if (len <= 0)
             {

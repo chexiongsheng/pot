@@ -102,7 +102,7 @@ const PROPS: Record<string, { size: Vec3; color: string; shape?: Shape; smooth?:
 
 /**
  * origStatic：堆场、仓库、围栏、道具等由机械移植的原版关卡（origlevel.ts）生成，这里只出地面、码头、海面、起重机、撤离艇与远景
- * （原版 ground/backdrop 模块尚未移植）。
+ * （原版地面见 apron.ts，可用时 world 会跳过这里的 ground 与 quay-deck；backdrop 已在 origlevel 中移植）。
  */
 export function buildLevel(level: LevelData, opts: { origStatic?: boolean } = {}) {
   const full = !opts.origStatic

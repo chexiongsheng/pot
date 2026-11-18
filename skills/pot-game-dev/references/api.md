@@ -50,8 +50,8 @@ ent.shader(null)                                                          // 恢
 
 - `shader` 选项：`fragment`/`vertex`（data 内路径）或 `fragmentSource`/`vertexSource`（内联）、`name`、`fullscreen`（给 bake 用的全屏程序）。返回对象有 `ok`、`error`，编译失败不抛错，日志记录并保留上一版。
 - `entity.shader` 选项：`blend`：none（默认）/alpha/add/premultiplied；`cull`：back/front/none；`queue`：opaque/transparent（默认按 blend 推断）；`depthWrite`、`depthTest`、`shadows`（投射阴影，不透明时默认开）。
-- 不写 `#version`，由 Runner 补上。`#include <pot/varyings>`（`vWorldPos/vNormal/vUV/vColor/vTangent`）、`<pot/lit>`（`PotSurface`、`pot_DefaultSurface()`、`pot_Lit(s)`，含太阳光、半球环境光、环境反射与雾）、`<pot/standard.vert>`；`#include "相对路径"` 引用游戏内文件。
-- 内置 uniform：`pot_Model`、`pot_ModelInv`、`pot_NormalMatrix`、`pot_View`、`pot_Proj`、`pot_ViewProj`、`pot_CameraPos`、`pot_Time`（x 时间、y dt、z 帧号、w 不受缩放时间）、`pot_ScreenSize`、`pot_SunDir`、`pot_SunColor`、`pot_AmbientSky/Equator/Ground`、`pot_Fog`、`pot_Env`；贴图 `pot_EnvMap`（samplerCube）。顶点输入 `pot_Position`、`pot_Normal`、`pot_UV`、`pot_VertexColor`、`pot_Tangent`。
+- 不写 `#version`，由 Runner 补上。`#include <pot/varyings>`（`vWorldPos/vNormal/vUV/vColor/vTangent`）、`<pot/lit>`（`PotSurface`、`pot_DefaultSurface()`、`pot_Lit(s, worldPos)`，含太阳光与主光阴影、半球环境光、环境反射与雾，并带镜面抗锯齿；`pot_Shadow(worldPos)` 单独取阴影，1 亮 0 暗；暂不含点光和聚光）、`<pot/standard.vert>`；`#include "相对路径"` 引用游戏内文件。
+- 内置 uniform：`pot_Model`、`pot_ModelInv`、`pot_NormalMatrix`、`pot_View`、`pot_Proj`、`pot_ViewProj`、`pot_CameraPos`、`pot_Time`（x 时间、y dt、z 帧号、w 不受缩放时间）、`pot_ScreenSize`、`pot_SunDir`、`pot_SunColor`、`pot_AmbientSky/Equator/Ground`、`pot_Fog`、`pot_Env`、`pot_ShadowMatrix[4]`、`pot_ShadowSpheres[4]`、`pot_ShadowParams`（x 强度，0 表示本帧无阴影；y 级联数；z 阴影距离；w reversed Z）；贴图 `pot_EnvMap`（samplerCube）、`pot_ShadowMap`（主光阴影图，用 texelFetch 读深度）。顶点输入 `pot_Position`、`pot_Normal`、`pot_UV`、`pot_VertexColor`、`pot_Tangent`。
 - 颜色 uniform 以 sRGB 传入，自动转线性；输出写线性颜色。
 
 #### 烘焙到贴图（gfx.bake）

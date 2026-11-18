@@ -86,6 +86,9 @@ uniform vec4 pot_AmbientEquator;
 uniform vec4 pot_AmbientGround;
 uniform vec4 pot_Fog;
 uniform vec4 pot_Env;
+uniform mat4 pot_ShadowMatrix[4];
+uniform vec4 pot_ShadowSpheres[4];
+uniform vec4 pot_ShadowParams;
 `
 
 const HEADER = `#version 310 es
@@ -195,9 +198,50 @@ vec3 pot_ApplyFog(vec3 color, vec3 worldPos) {
   return mix(pot_Fog.rgb, color, pot_FogFactor(worldPos));
 }
 
-// GGX 太阳光 + 半球环境光 + 环境反射，含雾
+// 主光阴影：1 = 全亮，0 = 全影。按级联包围球选级联，3x3 双线性 PCF，超出阴影距离淡出
+// pot_ShadowParams: x 强度（0 表示本帧无阴影），y 级联数，z 最大距离，w 1 = reversed Z
+float pot_ShadowCmp(ivec2 p, float z) {
+  float d = texelFetch(pot_ShadowMap, p, 0).r;
+  return pot_ShadowParams.w > 0.5 ? step(d, z) : step(z, d);
+}
+
+float pot_Shadow(vec3 worldPos) {
+  if (pot_ShadowParams.x <= 0.0) return 1.0;
+  int count = int(pot_ShadowParams.y + 0.5);
+  int ci = -1;
+  for (int i = 0; i < 4; i++) {
+    if (i >= count) break;
+    vec3 dv = worldPos - pot_ShadowSpheres[i].xyz;
+    if (dot(dv, dv) < pot_ShadowSpheres[i].w * pot_ShadowSpheres[i].w) { ci = i; break; }
+  }
+  if (ci < 0) return 1.0;
+  vec4 sc = pot_ShadowMatrix[ci] * vec4(worldPos, 1.0);
+  sc.xyz /= sc.w;
+  ivec2 size = textureSize(pot_ShadowMap, 0);
+  vec2 tc = sc.xy * vec2(size) - 0.5;
+  ivec2 base = ivec2(floor(tc)) - 1;
+  vec2 f = fract(tc);
+  float sum = 0.0;
+  for (int j = 0; j < 4; j++) {
+    float wy = j == 0 ? 1.0 - f.y : (j == 3 ? f.y : 1.0);
+    for (int i = 0; i < 4; i++) {
+      float wx = i == 0 ? 1.0 - f.x : (i == 3 ? f.x : 1.0);
+      ivec2 p = clamp(base + ivec2(i, j), ivec2(0), size - 1);
+      sum += wx * wy * pot_ShadowCmp(p, sc.z);
+    }
+  }
+  float lit = sum / 9.0;
+  float dist = length(worldPos - pot_CameraPos.xyz);
+  float fade = clamp((dist - pot_ShadowParams.z * 0.9) / max(pot_ShadowParams.z * 0.1, 1e-3), 0.0, 1.0);
+  return mix(1.0, mix(1.0, lit, pot_ShadowParams.x), 1.0 - fade);
+}
+
+// GGX 太阳光（含阴影）+ 半球环境光 + 环境反射，含雾
 vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   vec3 n = normalize(s.normal);
+  // 镜面抗锯齿：法线在像素内的变化折算为粗糙度（同 three.js geometryRoughness），避免细碎法线在高光里闪烁
+  vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
+  s.roughness = min(max(s.roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
   vec3 v = normalize(pot_CameraPos.xyz - worldPos);
   vec3 l = normalize(pot_SunDir.xyz);
   vec3 h = normalize(l + v);
@@ -215,7 +259,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
   vec3 spec = D * G * F / max(4.0 * nl * nv, 1e-4);
   vec3 kd = (1.0 - F) * (1.0 - s.metallic);
-  vec3 direct = (kd * s.albedo / POT_PI + spec) * pot_SunColor.rgb * nl * POT_PI;
+  vec3 direct = (kd * s.albedo / POT_PI + spec) * pot_SunColor.rgb * nl * POT_PI * pot_Shadow(worldPos);
   vec3 fenv = f0 + (max(vec3(1.0 - s.roughness), f0) - f0) * pow(1.0 - nv, 5.0);
   vec3 ambient = (1.0 - s.metallic) * s.albedo * pot_Hemisphere(n) * s.ao;
   vec3 refl = pot_EnvReflection(reflect(-v, n), s.roughness) * fenv * s.ao;
@@ -258,7 +302,7 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
   out.push(`#define ${stage === 'vertex' ? 'POT_VERTEX' : 'POT_FRAGMENT'} 1`)
   out.push(BUILTIN_UNIFORMS.trimEnd())
   if (stage === 'vertex') out.push(VERTEX_INPUTS.trimEnd())
-  else out.push('uniform samplerCube pot_EnvMap;')
+  else out.push('uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;')
 
   const expand = (name: string, text: string, depth: number, stack: string[]) => {
     if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(' → ')}`)

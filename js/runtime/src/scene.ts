@@ -465,7 +465,7 @@ export class Entity {
 
   /**
    * 改用运行时着色器绘制（ctx.gfx.shader 创建；也可传程序名）。null 恢复普通材质。
-   * 网格仍由 Unity 渲染器投射阴影（shadows: false 关闭）；暂不接收阴影。
+   * 网格仍由 Unity 渲染器投射阴影（shadows: false 关闭）；接收主光阴影用 <pot/lit> 的 pot_Lit / pot_Shadow。
    */
   shader(shader: { name: string } | string | null, options: ShaderBinding = {}) {
     const engine = this._engine

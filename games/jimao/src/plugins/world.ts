@@ -1,6 +1,7 @@
 /** 场景：关卡几何与 PBR 表面、喷字贴花、黄昏光照与天气、画质档位、中继模型、撤离点信标、环境声 */
 import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
 import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
+import { createApron } from '../lib/apron'
 import { rng } from '../lib/math'
 import { createMats, MATS, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
@@ -157,9 +158,13 @@ export function apply(ctx: Context) {
     }
   }
 
+  // ---- 原版地面（apron：积水/干湿/油污/接缝，ctx.gfx 着色器）；不可用时用下面的近似地面 ----
+  const apron = createApron(ctx, { maskRes: tuning.quality.tex >= 1024 ? 1024 : 512, detailRes: tuning.quality.tex >= 1024 ? 512 : 256 })
+  const replaced = apron ? new Set(['ground', 'quay-deck']) : new Set<string>()
+
   // ---- 关卡几何：地面、码头、海面、起重机、远景（原版 ground/backdrop 未移植前的近似） ----
   for (const piece of buildLevel(level, { origStatic: true })) {
-    if (piece.hidden) continue
+    if (piece.hidden || replaced.has(piece.name ?? '')) continue
     const collide = piece.collide !== false
     const { color, material } = resolve(piece)
     const common = {
