@@ -200,6 +200,15 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 缺口：没有 `fov`、渲染分辨率之类的相机内置量，目前用 `pot_Proj[1][1]` 和 `pot_ScreenSize` 反推。
 - 未移植：雷声事件（原版每 30 到 60 秒触发一次 `thunder`，驱动闪电与音效），留到灯光一步一起做。gfx 雨可用时关掉了 `scene.weather` 的内置雨滴粒子，地面湿润仍由 weather 提供。
 
+移植原版标题机位（z()：周期 max(26, 路径长/速度)、smoothstep 混合缓动、位置与目标微晃、轻微滚转、首尾淡入淡出）和标题菜单（m-veil 渐变遮罩、上下黑边、B4 eyebrow、超大字距标题、带短条的简介、横排主次按钮、右下操作速览），以及暂停、阵亡、简报页的版式与文案后新发现：
+
+- 相机滚转可以做：`lookAt` 之后读 `camera.rotation`（欧拉角，度），给 z 加偏移再写回。原版是弧度，要换算。
+- 缺口：ui 没有渐变。CSS 的 linear-gradient 遮罩用 6px 条带矩形近似（约 180 个 rect/帧），条带宽了会出现色阶。建议 `ui.rect` 支持 `gradient: { to, dir, stops }` 或单独的 `ui.gradient`。
+- 缺口：`ui.text` 没有字距（CSS letter-spacing）。原版标题 .15em、按钮 .3em、eyebrow .24em；现在按字绘制并缓存 `ui.measure` 的单字宽度，每个字一条绘制命令。建议 `TextOptions.spacing`（em）。
+- 缺口：ui 没有字重档位，只有 bold；原版 900/600/500 三档被压成两档。没有等宽字体（原版备注用 mono）。
+- 缺口：颜色只认十六进制（`#rgb`/`#rrggbb`/`#rrggbbaa`），原版 CSS 变量里的 `rgba()` 要手动换算。
+- 缺口：ui 没有布局能力（flex 底对齐、clamp/vw 字号），全部手算坐标；目前可接受，菜单多了以后建议提供轻量的行/列布局辅助。
+
 ## 9. 资产即代码
 
 - 优先生成：地形、建筑、低多边形模型、材质和贴图、粒子、合成音效。

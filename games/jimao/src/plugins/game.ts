@@ -147,7 +147,7 @@ export function apply(ctx: Context) {
   let tickT = 0
   let lastFocus = true
 
-  ctx.on('update', (dt) => {
+  ctx.on('update', (dt, now) => {
     const input = ctx.input
     const p = player(ctx)
     g.phaseTime += dt
@@ -174,13 +174,25 @@ export function apply(ctx: Context) {
     }
 
     if (g.phase === 'title') {
+      // 原版 z()：周期 max(26, 路径长/速度)，smoothstep 混合缓动，位置/目标微晃，滚转，首尾淡入淡出
+      const pos = points.cinematic.map((c) => c.pos), look = points.cinematic.map((c) => c.look)
+      let len = 0
+      for (let i = 1; i < pos.length; i++) len += Math.hypot(pos[i][0] - pos[i - 1][0], pos[i][1] - pos[i - 1][1], pos[i][2] - pos[i - 1][2])
+      const V = Math.max(26, Math.max(len, 4) / flow.titleSpeed)
       g.titleT += dt
-      const u = (g.titleT * flow.titleSpeed * 0.028) % 1
+      if (g.titleT >= V) g.titleT = 0
+      const Y = g.titleT / V, L = Y * Y * (3 - 2 * Y) * 0.25 + Y * 0.75, J = now
+      const b = catmull(pos, L), m = catmull(look, L)
+      b[0] += Math.sin(J * 0.31) * 0.05; b[1] += Math.sin(J * 0.43 + 1.7) * 0.035; b[2] += Math.sin(J * 0.27 + 0.6) * 0.05
+      m[1] += Math.sin(J * 0.19) * 0.12; m[0] += Math.sin(J * 0.13 + 2) * 0.2
       const cam = ctx.scene.camera
-      cam.position = catmull(points.cinematic.map((c) => c.pos), u)
-      cam.lookAt(catmull(points.cinematic.map((c) => c.look), u))
+      cam.position = b
+      cam.lookAt(m)
+      const r = cam.rotation
+      cam.rotation = [r[0], r[1], r[2] + Math.sin(J * 0.21) * 6e-3 * 180 / Math.PI]
       ctx.scene.view({ fov: flow.titleFov })
-      g.fade = Math.max(0, g.fade - dt)
+      const ss = (a: number, c: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t) }
+      g.fade = Math.max(1 - ss(0, 1.8, g.titleT), ss(V - 1.6, V, g.titleT))
       return
     }
 

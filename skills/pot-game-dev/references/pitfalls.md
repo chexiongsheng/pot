@@ -101,6 +101,14 @@
 - three.js 的十六进制颜色按 sRGB 解释并转线性（ColorManagement），传进 bake 的颜色 uniform 若是数组要自己转线性。
 - 依赖世界坐标、法线或屏幕导数的部分（宏观亮度变化、雨痕水珠、远距离镂空抖动）不能烘焙，只能写成完整的自定义着色器或暂时舍弃。
 
+### 移植 HTML/CSS 菜单
+
+- `rgba(...)`、颜色名传给 ui 会被当成十六进制解析成错色，先换成 `#rrggbbaa`。
+- linear-gradient 用条带矩形近似时条带不要超过约 6px，16px 在亮背景上能看到竖向色阶。
+- letter-spacing 按字绘制时缓存 `ui.measure` 的单字宽度（每次 measure 都是跨语言调用）；CSS 字距在末字后也有，按钮文字居中要补回半个字距。
+- `valign: 'bottom'` 对齐的是字体框底，大字号（100px 以上）时字形底部和下方元素之间要多留 8px 左右。
+- three 相机 `rotation.z` 是弧度，pot 的 `camera.rotation` 是度；在 `lookAt` 之后读出再写回才能叠加滚转。
+
 ## 工具与环境
 
 ### 类型检查用错 tsc

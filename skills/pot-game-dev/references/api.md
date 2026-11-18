@@ -96,6 +96,10 @@ ent.material({ map: albedo, maskMap: mask, metallic: 1, smoothness: 1 })
 
 `axis('move')`：WASD/方向键/触屏左半屏摇杆，返回 `{ x, y }`；`axis('look')`：鼠标增量。`key(name)` 按住、`pressed(name)` 本帧按下、`released(name)` 本帧抬起。键名不区分大小写，用 Unity KeyCode 名（`space`、`a`、`1`、`leftshift`）。
 
+## ctx.ui
+
+即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap})`、`measure(str,size,bold)`、`hit(x,y,w,h)`、`width`/`height`。颜色只认十六进制（`#rrggbbaa` 带透明度）。没有渐变、字距、字重档位：渐变用窄条带矩形近似，字距按字绘制并缓存单字宽度（见 jimao `menu.ts` 的 `spaced`）。
+
 ## 定时器
 
 `ctx.timeout(cb, ms)`、`ctx.interval(cb, ms)` 返回取消函数；`await ctx.timeout(ms)` 在单元卸载时 reject。`ctx.throttle`/`ctx.debounce` 同 cordis。全部走游戏时间：暂停、时间缩放、热重载冻结都会生效。
