@@ -262,7 +262,7 @@ export function toMesh(g: Geo): MeshData {
   const positions = new Float32Array(n * 3), normals = new Float32Array(n * 3)
   for (let k = 0; k < n; k++) {
     positions[k * 3] = pos.getX(k); positions[k * 3 + 1] = pos.getY(k); positions[k * 3 + 2] = -pos.getZ(k)
-    normals[k * 3] = nrm.getX(k); normals[k * 3 + 1] = nrm.getY(k); normals[k * 3 + 2] = -nrm.getZ(k)
+    if (nrm) { normals[k * 3] = nrm.getX(k); normals[k * 3 + 1] = nrm.getY(k); normals[k * 3 + 2] = -nrm.getZ(k) } else normals[k * 3 + 1] = 1
   }
   let uvs: Float32Array | undefined
   if (uv) {

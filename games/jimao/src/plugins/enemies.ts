@@ -51,7 +51,7 @@ export function apply(ctx: Context) {
   const tuning = ctx.data.load('tuning.json')
   const E = tuning.enemy
   const level = ctx.data.load<LevelData>('level.json')
-  const world = levelCollision(level)
+const world = levelCollision(level, 'enemy')
   const s = ctx.state.define<EnemiesState>(ENEMIES, { version: 1, init: () => ({ list: [], nextId: 1, bolts: [], tokenGap: 0, booms: [] }) })
   const { scene } = ctx
   const rand = Math.random

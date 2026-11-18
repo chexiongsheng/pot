@@ -100,7 +100,12 @@ const PROPS: Record<string, { size: Vec3; color: string; shape?: Shape; smooth?:
   workbench: { size: [2.2, 0.95, 0.9], color: '#6a6f73' },
 }
 
-export function buildLevel(level: LevelData) {
+/**
+ * origStatic：堆场、仓库、围栏、道具等由机械移植的原版关卡（origlevel.ts）生成，这里只出地面、码头、海面、起重机、撤离艇与远景
+ * （原版 ground/backdrop 模块尚未移植）。
+ */
+export function buildLevel(level: LevelData, opts: { origStatic?: boolean } = {}) {
+  const full = !opts.origStatic
   const pieces: Piece[] = []
   const add = (p: Piece) => (pieces.push(p), p)
   const pal = level.palette
@@ -123,7 +128,7 @@ export function buildLevel(level: LevelData) {
 
   // ---- 集装箱（波纹网格 + 漆面贴图 + 侧面喷字） ----
   let serial = 0
-  for (const [x, z, layers, rot] of level.containers) {
+  if (full) for (const [x, z, layers, rot] of level.containers) {
     let y = 0
     for (const [kind, color, dx = 0] of layers) {
       const key = String(kind) in CONTAINER ? String(kind) : '20'
@@ -148,7 +153,7 @@ export function buildLevel(level: LevelData) {
   }
 
   // ---- 杂物 ----
-  for (const [type, x, z, rot, y = 0] of level.props) {
+  if (full) for (const [type, x, z, rot, y = 0] of level.props) {
     const def = PROPS[type]
     if (!def) continue
     const [sx, sy, sz] = def.size
@@ -170,13 +175,13 @@ export function buildLevel(level: LevelData) {
   }
 
   // ---- 灯塔杆（灯光由 world 另行生成） ----
-  for (const [x, z] of level.masts) {
+  if (full) for (const [x, z] of level.masts) {
     add(box(P(x, 6, z), [0.32, 6, 0.32], '#8a9096', { shape: 'cylinder', mat: steel }))
     add(box(P(x, 12.1, z), [1.6, 0.35, 0.7], '#2a2d30', { collide: false, mat: steel }))
     add(box(P(x, 11.9, z), [1.4, 0.06, 0.55], '#fff1d0', { collide: false, mat: { mode: 'unlit' } }))
   }
   // 通道指示牌（挂在前两根灯杆上，双面）
-  level.masts.slice(0, 2).forEach(([x, z], k) => {
+  if (full) level.masts.slice(0, 2).forEach(([x, z], k) => {
     add(box(P(x, 3.6, z - 0.22), [1.5, 0.5, 0.05], '#c9a227', { collide: false, tex: 'steel' }))
     for (const side of [-1, 1]) {
       pieces.push({ pos: P(x, 3.6, z - 0.22 + side * 0.03), size: [1.4, 0.42, 1], rot: [0, side > 0 ? 0 : 180, 0], shape: 'quad', color: '#ffffff', collide: false, solid: false, decal: k === 0 ? 'lane2' : 'lane3' })
@@ -184,9 +189,11 @@ export function buildLevel(level: LevelData) {
   })
 
   // ---- 系缆桩 ----
-  for (const z of level.bollards) add(box(P(level.quay.X - 1.1, 0.3, z), [0.42, 0.3, 0.42], '#2c2f31', { shape: 'cylinder', mat: steel }))
+  if (full) for (const z of level.bollards) add(box(P(level.quay.X - 1.1, 0.3, z), [0.42, 0.3, 0.42], '#2c2f31', { shape: 'cylinder', mat: steel }))
 
   // ---- 门式起重机（码头） ----
+  // 原版模式下起重机、撤离艇、远景由机械移植的 backdrop 提供
+  if (!full) return pieces
   const [r0, r1] = level.quay.RAILS
   for (const [cz] of level.cranes) {
     const red = '#b4452f'
@@ -221,6 +228,8 @@ export function buildLevel(level: LevelData) {
     add(slab(x - 18, 36, z - 0.8, x + 12, 38, z + 0.8, '#3a3f44', { collide: false, solid: false }))
     add(box(P(x, 38.6, z), [0.4, 0.4, 0.4], '#ff3b30', { collide: false, solid: false, mat: { mode: 'unlit' } }))
   }
+
+  if (!full) return pieces
 
   // ---- 围栏与大门 ----
   const f = level.fence

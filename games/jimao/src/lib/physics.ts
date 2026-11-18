@@ -3,7 +3,8 @@
  * 角色视为竖直盒子：底面中心 pos，半宽 radius，高 height。
  */
 import type { Vec3 } from '@pot/core'
-import { buildLevel, buildSolids, levelPoints, type Box, type LevelData } from './level'
+import { buildLevel, buildSolids, type Box, type LevelData } from './level'
+import { origLevel } from './origlevel'
 
 export interface Body {
   pos: Vec3
@@ -116,10 +117,13 @@ export class Collision {
   }
 }
 
-export function levelCollision(level: LevelData) {
-  const boxes = buildSolids(buildLevel(level))
-  for (const r of levelPoints(level).relays) {
-    boxes.push({ min: [r.pos[0] - 0.5, r.pos[1], r.pos[2] - 0.5], max: [r.pos[0] + 0.5, r.pos[1] + 1.7, r.pos[2] + 0.5] })
+export function levelCollision(level: LevelData, who: 'player' | 'enemy' = 'player') {
+  // 堆场、仓库、道具、中继的碰撞盒来自机械移植的原版关卡（physics.addBox 收集，已转 Unity 坐标）
+  // bulletOnly 不挡移动；playerOnly（码头/围栏外的空气墙）只挡玩家
+  const boxes = buildSolids(buildLevel(level, { origStatic: true }))
+  for (const b of origLevel().boxes) {
+    if (b.bulletOnly || (b.playerOnly && who !== 'player')) continue
+    boxes.push(b)
   }
   return new Collision(boxes, level.quay.X)
 }

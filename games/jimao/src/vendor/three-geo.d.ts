@@ -16,5 +16,18 @@ export const TubeGeometry: any
 export const Shape: any
 export const Path: any
 export const CatmullRomCurve3: any
+export const Vector4: any
+export const Matrix3: any
+export const Color: any
+export const Box3: any
+export const MathUtils: any
+export const Object3D: any
+export const Group: any
+export const Mesh: any
+export const PlaneGeometry: any
+export const TorusGeometry: any
+export const ShapeUtils: any
+export const OctahedronGeometry: any
+export const CapsuleGeometry: any
 export function mergeGeometries(geometries: any[], useGroups?: boolean): any
 export function mergeVertices(geometry: any, tolerance?: number): any

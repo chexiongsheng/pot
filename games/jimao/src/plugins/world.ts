@@ -2,8 +2,9 @@
 import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
 import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
 import { rng } from '../lib/math'
-import { createMats, type Mats } from '../lib/mats'
-import { containerMesh } from '../lib/meshes'
+import { createMats, MATS, type Mats } from '../lib/mats'
+import { toMesh } from '../lib/geo'
+import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, type MatToken } from '../lib/origlevel'
 import { registerSfx, sfx } from '../lib/sfx'
 import * as T from '../lib/textures'
 import { game } from '../lib/types'
@@ -58,8 +59,6 @@ const DECALS: Record<string, { text: string; width: number; height: number; size
   lane2: { text: '二号通道', width: 512, height: 152, size: 104, color: '#151515', letterSpacing: 8 },
   lane3: { text: '三号通道', width: 512, height: 152, size: 104, color: '#151515', letterSpacing: 8 },
 }
-
-const CONTAINER_SIZES: Record<string, Vec3> = { '20': [6.06, 2.59, 2.44], '40': [12.19, 2.59, 2.44], hc: [12.19, 2.9, 2.44] }
 
 function hexRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.replace('#', '').slice(0, 6), 16)
@@ -121,9 +120,6 @@ export function apply(ctx: Context) {
     return tex
   }
 
-  // ---- 集装箱网格 ----
-  for (const [key, [L, H, W]] of Object.entries(CONTAINER_SIZES)) scene.mesh(`container${key}`, containerMesh(L, H, W))
-
   const rand = rng(1931)
   /** 由 piece 解析颜色与材质 */
   function resolve(piece: Piece): { color?: string; material?: MaterialOptions } {
@@ -161,8 +157,8 @@ export function apply(ctx: Context) {
     }
   }
 
-  // ---- 关卡几何 ----
-  for (const piece of buildLevel(level)) {
+  // ---- 关卡几何：地面、码头、海面、起重机、远景（原版 ground/backdrop 未移植前的近似） ----
+  for (const piece of buildLevel(level, { origStatic: true })) {
     if (piece.hidden) continue
     const collide = piece.collide !== false
     const { color, material } = resolve(piece)
@@ -183,6 +179,81 @@ export function apply(ctx: Context) {
     }
   }
 
+  // ---- 机械移植的原版关卡：堆场、仓库、围栏、道具、中继 ----
+  const orig = origLevel()
+  /** 材质令牌 → Runner 材质：GPU 烘焙的原版材质；没有运行时着色器时退回纯色 */
+  const resolveToken = (t: MatToken): { color: string; material: MaterialOptions } => {
+    if (t.kind === 'emissive') return emissiveMaterial(t)
+    // 远景闪灯：原版 MeshBasicMaterial + HDR 顶点色（闪烁着色器暂缺，常亮）
+    if (t.kind === 'lamps') return { color: '#ffffff', material: { mode: 'unlit', vertexColors: true, shadows: false } }
+    if (mats) {
+      const r = mats.get(t.name, { interior: !!t.opts.interior })
+      return { color: r.color, material: { ...r.material, vertexColors: t.vertexColors } }
+    }
+    const def = MATS[t.name]
+    const hex = `#${(def?.color ?? 0x808080).toString(16).padStart(6, '0')}`
+    return { color: hex, material: { metallic: def?.metal ?? 0, smoothness: 1 - (def?.rough ?? 0.7), vertexColors: t.vertexColors, mode: def?.transparent ? 'lit-fade' : 'lit' } }
+  }
+  // Canvas 2D 绘制的贴花与喷字（decal/label）暂缺，跳过
+  const drawable = (t: MatToken) => t.kind !== 'decal' && t.kind !== 'label'
+  orig.statics.forEach((s, k) => {
+    if (!drawable(s.material)) return
+    const name = `orig-static-${k}`
+    scene.mesh(name, toMesh(s.geometry))
+    const r = resolveToken(s.material)
+    const solid = !s.material.transparent && s.material.kind === 'std'
+    scene.spawn({
+      shape: `mesh:${name}`, name: `level:${s.material.name}`, color: r.color,
+      material: { ...r.material, shadows: s.cast }, collider: solid, layer: solid ? LEVEL_LAYER : undefined,
+    })
+  })
+  const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
+  orig.dynamics.forEach((d, k) => {
+    if (!drawable(d.material)) return
+    const name = `orig-dyn-${k}`
+    scene.mesh(name, toMesh(d.mesh.geometry))
+    const r = resolveToken(d.material)
+    const tr = toUnityTransform(d.mesh.matrixWorld)
+    const ent = scene.spawn({
+      shape: `mesh:${name}`, name: `level-dyn:${d.material.name}`, position: tr.position, rotation: tr.rotation, scale: tr.scale,
+      color: r.color, material: { ...r.material, shadows: d.mesh.castShadow }, collider: false,
+    })
+    dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
+  })
+  // 原版点光源（three 物理单位坎德拉；URP 漫反射不除以 π，强度按 1/π 换算）
+  const origLights = orig.lights.map((l) => {
+    l.updateWorldMatrix(true, false)
+    const p = toUnityPos({ x: l.matrixWorld.elements[12], y: l.matrixWorld.elements[13], z: l.matrixWorld.elements[14] })
+    const c = hdr(l.color)
+    const ent = scene.light({ type: 'point', name: 'orig-light', position: p, intensity: (l.intensity * c.intensity) / Math.PI, range: l.distance || 15, color: c.color })
+    return { l, ent, last: l.intensity }
+  })
+  const syncOrig = (dt: number) => {
+    orig.update(dt)
+    orig.data.root.updateMatrixWorld(true)
+    for (const d of dynamic) {
+      const e = d.mesh.matrixWorld.elements
+      let changed = false
+      for (let k = 0; k < 16; k++) if (e[k] !== d.last[k]) { changed = true; d.last[k] = e[k] }
+      if (changed) {
+        const tr = toUnityTransform(d.mesh.matrixWorld)
+        d.ent.position = tr.position
+        d.ent.rotation = tr.rotation
+        d.ent.scale = tr.scale
+      }
+      if (d.token.version !== d.version) {
+        d.version = d.token.version
+        d.ent.material(emissiveMaterial(d.token).material)
+      }
+    }
+    for (const o of origLights) {
+      if (o.l.intensity !== o.last) {
+        o.last = o.l.intensity
+        o.ent.intensity((o.l.intensity * hdr(o.l.color).intensity) / Math.PI)
+      }
+    }
+  }
+
   // ---- 光照：黄昏逆光 ----
   scene.view({ near: 0.02, far: 600 })
   scene.light({ type: 'directional', name: 'sun', rotation: look.sun.rotation, intensity: look.sun.intensity, color: look.sun.color, shadows: 'soft' })
@@ -196,10 +267,6 @@ export function apply(ctx: Context) {
   }
   for (const [cz] of level.cranes) {
     scene.light({ type: 'point', name: 'crane', position: P(level.quay.RAILS[1] - 1, 19, cz), intensity: 1.2, range: 16, color: '#ffc070' })
-  }
-  const s = level.shed
-  for (const x of [-10, -2, 6]) {
-    scene.light({ type: 'point', name: 'shed', position: P(x, s.EAVE - 0.6, s.ZR), intensity: 1.5, range: 13, color: '#fff1d6' })
   }
   scene.light({ type: 'point', name: 'quay', position: P(level.quay.X - 2, 3, 12), intensity: 0.8, range: 12, color: '#9fc4ff' })
 
@@ -216,22 +283,18 @@ export function apply(ctx: Context) {
   applyQuality(game(ctx)?.settings.quality ?? 2)
   scene.refreshEnvironment()
 
-  // ---- 中继 ----
-  const steelSet = surfaceTex('steel')
-  const steelMat = (extra: MaterialOptions = {}): MaterialOptions => ({ ...steelSet, smoothness: 1, metallic: 1, uv: 'object', tiling: [2, 2], ...extra })
-  const relayParts: { body: Entity; beacon: Entity; screen: Entity; light: Entity; pos: Vec3 }[] = []
-  for (const r of points.relays) {
-    const root = scene.spawn({ shape: 'empty', name: `relay-${r.id}`, position: r.pos, rotation: [0, r.yaw, 0] })
-    const body = scene.spawn({ parent: root, name: 'relay', position: [0, 0.8, 0], scale: [0.9, 1.6, 0.6], color: '#4a535a', material: steelMat(), layer: LEVEL_LAYER })
-    scene.spawn({ parent: root, name: 'relay-base', position: [0, 0.05, 0], scale: [1.1, 0.1, 0.8], color: '#2c3033', material: steelMat(), collider: false })
-    const screen = scene.spawn({ parent: root, name: 'relay-screen', position: [0, 1.15, 0.305], scale: [0.6, 0.35, 0.01], color: '#ff5a40', material: { mode: 'unlit' }, collider: false })
-    scene.spawn({ parent: root, name: 'relay-stripe', position: [0, 0.35, 0.305], scale: [0.88, 0.12, 0.01], color: '#c39b2a', material: steelMat(), collider: false })
-    scene.spawn({ parent: root, shape: 'cylinder', name: 'antenna', position: [0.3, 2.4, 0], scale: [0.05, 0.8, 0.05], color: '#8d9aa3', material: steelMat(), collider: false })
-    scene.spawn({ parent: root, shape: 'cylinder', name: 'dish', position: [-0.2, 1.75, 0], rotation: [70, 0, 0], scale: [0.5, 0.03, 0.5], color: '#aab3b8', material: steelMat(), collider: false })
-    const beacon = scene.spawn({ parent: root, shape: 'sphere', name: 'beacon', position: [0.3, 3.25, 0], scale: 0.16, color: '#ff5a40', material: { mode: 'unlit' }, collider: false })
-    const light = scene.light({ type: 'point', name: 'relay-light', parent: root, position: [0, 2.2, 0.8], intensity: 1.2, range: 6, color: '#ff5a40' })
-    relayParts.push({ body, beacon, screen, light, pos: r.pos })
-  }
+  // ---- 中继：原版模型（发光/天线/盖板动画由原版 update 驱动），这里只补一盏随发光强度变化的点光 ----
+  const relayParts = orig.data.objectives.map((o: any, i: number) => {
+    const ud = o.object.userData
+    const b = ud.beacon as number[]
+    o.object.updateWorldMatrix(true, false)
+    const e = o.object.matrixWorld.elements
+    const wx = e[0] * b[0] + e[4] * b[1] + e[8] * b[2] + e[12]
+    const wy = e[1] * b[0] + e[5] * b[1] + e[9] * b[2] + e[13]
+    const wz = e[2] * b[0] + e[6] * b[1] + e[10] * b[2] + e[14]
+    const light = scene.light({ type: 'point', name: `relay-light-${i}`, position: toUnityPos({ x: wx, y: wy, z: wz }), intensity: 1.2, range: 6, color: '#ff5a40' })
+    return { ud, light }
+  })
 
   // ---- 撤离点信标 ----
   const ex = points.extraction
@@ -254,15 +317,12 @@ export function apply(ctx: Context) {
     const quality = g?.settings.quality ?? 2
     if (quality !== appliedQuality) applyQuality(quality)
     const relays = g?.relays ?? []
-    relayParts.forEach((r, i) => {
-      const status = relays[i] ?? 'live'
-      const blink = status === 'live' ? (Math.sin(t * 6 + i) > 0 ? 1 : 0.15) : status === 'cutting' ? (Math.sin(t * 22) > 0 ? 1 : 0.3) : 0
-      const color = status === 'cut' ? '#2a3034' : status === 'cutting' ? '#ffb347' : '#ff5a40'
-      r.beacon.color(color)
-      const k = 0.16 * (0.6 + blink * 0.4)
-      r.beacon.scale = [k, k, k]
-      r.screen.color(status === 'cut' ? '#14181a' : color)
-      r.light.intensity(status === 'cut' ? 0 : 0.4 + blink * 1.2)
+    relayParts.forEach((r: any, i: number) => r.ud.setState?.(relays[i] ?? 'live'))
+    syncOrig(dt)
+    relayParts.forEach((r: any) => {
+      const c = hdr(r.ud.emissiveMaterial.color)
+      r.light.intensity(Math.min(2, (r.ud.level ?? 0) * 0.2))
+      r.light.color(c.color)
     })
     const open = relays.length > 0 && relays.every((s) => s === 'cut') && g?.phase !== 'title'
     exRoot.active(open)
