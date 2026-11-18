@@ -126,6 +126,13 @@
 - `valign: 'bottom'` 对齐的是字体框底，大字号（100px 以上）时字形底部和下方元素之间要多留 8px 左右。
 - three 相机 `rotation.z` 是弧度，pot 的 `camera.rotation` 是度；在 `lookAt` 之后读出再写回才能叠加滚转。
 
+### 移植 canvas 贴图与贴花
+
+- `canvas.data` 是预乘 alpha 的 Float32；要非预乘 RGBA8 用 `pixels()`，直接喂 `scene.texture` 时用 `pixels(true)`（行序从下到上），否则贴图上下颠倒。
+- 动态网格池（弹孔、贴花）初始全零时，`spawn` 不会建碰撞体；但池子本身也不该参与射线检测，spawn 时传 `collider: false`。
+- gfx 没有 polygon offset，贴花沿法线外推几毫米防 z-fighting；网格没有切线，法线贴图用 `dFdx/dFdy` 重建切线框架。
+- 调试命中类效果不要靠模拟鼠标（失焦会触发暂停），给游戏加一个调试事件，在 `eval` 里 `ctx.emit` 后看日志和截图。
+
 ## 工具与环境
 
 ### 类型检查用错 tsc

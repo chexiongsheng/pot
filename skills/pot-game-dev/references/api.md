@@ -101,6 +101,22 @@ chain.set({ uThunder: 0.3 })   // 改共享 uniform；chain.setPass(i, {...}) �
 - 后建的链替换先建的，`chain.active` 为 false 表示已被替换或释放。着色器编译失败或目标名不存在时抛错。
 - `#include <pot/post>`：`in vec2 vUv`（原点左下）、`pot_Depth01(raw)`、`pot_EyeDepth(raw)`、`pot_IsSky(raw)`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`（xy 为屏幕 uv，z 为裁剪空间 w，<0 在相机后）。内置量 `pot_ScreenVP`、`pot_ScreenInvVP`、`pot_DepthParams`；`pot_ScreenSize` 在每个 pass 里是输出目标的尺寸（xy 像素、zw 倒数），源贴图尺寸用 `textureSize`。`<pot/lit>` 也能 include，用其中的雾函数和太阳量。
 
+### Canvas 2D（ctx.scene.canvas）
+
+```ts
+const c = ctx.scene.canvas(1024, 512)
+const g = c.getContext('2d')          // 与浏览器 CanvasRenderingContext2D 同名同义
+g.fillStyle = g.createRadialGradient(64, 64, 0, 64, 64, 40); g.fill('evenodd')
+g.font = 'bold 24px Microsoft YaHei'; g.fillText('标签', 8, 30)
+const tex = c.texture({ wrap: 'clamp', aniso: 4, mipmaps: true })   // 默认 sRGB，数据贴图传 linear: true；插件卸载时自动销毁
+const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下到上（scene.texture 的约定）
+```
+
+- 用于移植网页里用 canvas 程序化绘制的贴图（贴花图集、标签、喷字、标线）。纯 JS 软件光栅，1024×512 的复杂图集约 40 ms 一张，只在加载时画，不要每帧画。
+- 支持：路径（arc、贝塞尔、rect、roundRect）、nonzero/evenodd、线性/径向渐变、描边（lineWidth/cap/join/dash）、变换、save/restore、clip、globalAlpha、globalCompositeOperation（source-over、destination-out、lighter 等）、getImageData/putImageData、drawImage（另一块 Canvas）、fillText/measureText。
+- 不支持：pattern、shadow、filter、strokeText。
+- 文字由 Runner 用系统字体栅格化（family 逗号列表依次回退），与浏览器字形不会逐像素一致。
+
 ## ctx.state
 
 | API | 说明 |

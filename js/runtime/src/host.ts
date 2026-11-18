@@ -81,6 +81,11 @@ export interface Engine {
   destroyTexture(id: number): void
   /** 文字转贴图，参数 JSON 见 PotRender.TextTexture；返回贴图 id */
   textTexture(json: string): number
+  /**
+   * Canvas 文字栅格化：family 为逗号分隔的系统字体名；style bit1 粗体 bit2 斜体。
+   * 返回 Float32 头 [w,h,ox,base,adv,ascent,descent,0] + w*h 字节 alpha（行从上到下）；不支持返回 null
+   */
+  canvasText(text: string, family: string, size: number, style: number): ArrayBuffer | null
   /** 注册网格（Float32 xyz / uv / rgba，Uint32 索引）；返回顶点数 */
   mesh(name: string, positions: ArrayBuffer, normals: ArrayBuffer | null, uvs: ArrayBuffer | null, colors: ArrayBuffer | null, indices: ArrayBuffer): number
   /** slot：map / normal / mask 或着色器属性名；tex 为 0 表示解除 */

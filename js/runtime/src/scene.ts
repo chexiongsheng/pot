@@ -6,6 +6,7 @@
 import { Context, Service } from 'cordis'
 import type { Host, Vec3 } from './host'
 import { unitOf } from './units'
+import { Canvas } from './canvas'
 
 declare module 'cordis' {
   interface Context {
@@ -624,6 +625,13 @@ export class SceneService extends Service {
       return () => engine.destroyTexture(id)
     }, 'scene.texture')
     return new Texture(id, width, height, dispose)
+  }
+
+  /** Canvas 2D 画布（软件光栅化，文字由宿主栅格化）；canvas.texture() 转贴图，随调用方插件卸载销毁 */
+  canvas(width: number, height: number): Canvas {
+    const canvas = new Canvas(width, height, this.host)
+    canvas.upload = (data, w, h, o) => this.texture({ ...o, data, width: w, height: h }) as any
+    return canvas
   }
 
   /** 文字转贴图（系统中文字体），可贴在任意材质上（例如集装箱喷字、路牌） */

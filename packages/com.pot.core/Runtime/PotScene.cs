@@ -110,8 +110,12 @@ namespace Pot
                         {
                             go.AddComponent<MeshFilter>().sharedMesh = mesh;
                             go.AddComponent<MeshRenderer>();
-                            var mc = go.AddComponent<MeshCollider>();
-                            mc.sharedMesh = mesh;
+                            // 退化网格（如初始全零的动态池）不建碰撞体：PhysX 会报错，且之后每次更新都会重新烘焙
+                            if (mesh.vertexCount >= 3 && mesh.bounds.size.sqrMagnitude > 1e-12f)
+                            {
+                                var mc = go.AddComponent<MeshCollider>();
+                                mc.sharedMesh = mesh;
+                            }
                         }
                         else Debug.LogWarning("[pot] 未注册的网格：" + meshName);
                     }

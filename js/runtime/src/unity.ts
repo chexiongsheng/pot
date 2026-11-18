@@ -91,6 +91,7 @@ export function createUnityHost(): Host {
       texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
       destroyTexture: (id) => S.DestroyTexture(id),
       textTexture: (json) => R.TextTexture(json),
+      canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
       mesh: (name, positions, normals, uvs, colors, indices) => S.Mesh(name, positions, normals, uvs, colors, indices),
       matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
       matFloat: (id, prop, value) => S.MatFloat(id, prop, value),

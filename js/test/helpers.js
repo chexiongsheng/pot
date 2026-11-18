@@ -79,6 +79,16 @@ class MockEngine {
   texture(data, width, height, linear) { this.textures ??= new Map(); const id = (this.texId = (this.texId ?? 0) + 1); this.textures.set(id, { bytes: data.byteLength, width, height, linear }); return id }
   destroyTexture(id) { this.textures?.delete(id) }
   textTexture(json) { this.textures ??= new Map(); const id = (this.texId = (this.texId ?? 0) + 1); this.textures.set(id, { text: JSON.parse(json) }); return id }
+  // 文字栅格化 mock：每个字符 0.6*size 宽、ascent 0.8*size 高的实心块
+  canvasText(text, family, size) {
+    const adv = Math.round(String(text).length * size * 0.6), asc = Math.round(size * 0.8), desc = Math.round(size * 0.2)
+    const w = Math.max(1, adv), h = asc
+    const buf = new ArrayBuffer(32 + w * h)
+    new Float32Array(buf, 0, 8).set([w, h, 0, asc, adv, asc, desc, 0])
+    new Uint8Array(buf, 32).fill(255)
+    ;(this.canvasTexts ??= []).push({ text, family, size })
+    return buf
+  }
   mesh(name, positions, normals, uvs, colors, indices) { (this.meshes ??= new Map()).set(name, { vertices: positions.byteLength / 12, indices: indices.byteLength / 4 }); return positions.byteLength / 12 }
   matTexture(id, slot, tex) { const o = this._get(id); (o.textures ??= {})[slot] = tex }
   matFloat(id, prop, value) { const o = this._get(id); (o.props ??= {})[prop] = value }

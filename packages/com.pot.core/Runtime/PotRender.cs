@@ -774,6 +774,113 @@ namespace Pot
             GL.Vertex3(x / w * 2 - 1, (y / h * 2 - 1) * flip, 0);
         }
 
+        // ---------------- Canvas 2D 文字栅格化 ----------------
+
+        static readonly System.Collections.Generic.Dictionary<string, Font> canvasFonts = new System.Collections.Generic.Dictionary<string, Font>();
+        static Texture2D canvasRead;
+
+        /// <summary>
+        /// 一行文字栅格化为 alpha 位图（给 JS 端软件 Canvas 合成用）。families 为逗号分隔的系统字体名；style bit0 粗体 bit1 斜体。
+        /// 返回 Float32 头 [w, h, ox(笔起点 x), base(基线距顶), advance, ascent, descent, 0] + w*h 字节 alpha（行从上到下）。
+        /// </summary>
+        [Preserve]
+        public static Puerts.ArrayBuffer CanvasText(string text, string families, int size, int style)
+        {
+            text = (text ?? "").Replace("\n", " ");
+            size = Mathf.Clamp(size, 1, 512);
+            families = string.IsNullOrEmpty(families) ? "Microsoft YaHei,Arial" : families;
+            if (!canvasFonts.TryGetValue(families, out var f) || f == null)
+            {
+                f = Font.CreateDynamicFontFromOSFont(families.Split(','), 32);
+                canvasFonts[families] = f;
+            }
+            if (textMat == null) textMat = new Material(PotScene.LoadShader("pot/PotText", "UI/Default"));
+            var fs = (style & 3) == 3 ? FontStyle.BoldAndItalic : (style & 1) != 0 ? FontStyle.Bold : (style & 2) != 0 ? FontStyle.Italic : FontStyle.Normal;
+            f.RequestCharactersInTexture(text, size, fs);
+
+            float pen = 0, minX = 0, maxX = 0, minY = 0, maxY = 0;
+            var any = false;
+            foreach (var ch in text)
+            {
+                if (!f.GetCharacterInfo(ch, out var ci, size, fs)) continue;
+                if (ci.maxX > ci.minX && ci.maxY > ci.minY)
+                {
+                    if (!any) { minX = pen + ci.minX; maxX = pen + ci.maxX; minY = ci.minY; maxY = ci.maxY; any = true; }
+                    else
+                    {
+                        minX = Mathf.Min(minX, pen + ci.minX); maxX = Mathf.Max(maxX, pen + ci.maxX);
+                        minY = Mathf.Min(minY, ci.minY); maxY = Mathf.Max(maxY, ci.maxY);
+                    }
+                }
+                pen += ci.advance;
+            }
+            var ascent = f.fontSize > 0 && f.ascent > 0 ? f.ascent * size / f.fontSize : size * 0.8f;
+            if (ascent > size * 1.2f || ascent < size * 0.5f) ascent = size * 0.8f;
+            var descent = Mathf.Max(size * 1.0f - ascent, size * 0.15f);
+            const int pad = 2;
+            int w = 0, h = 0, ox = 0, by = 0;
+            if (any)
+            {
+                ox = pad - Mathf.FloorToInt(minX);
+                by = pad - Mathf.FloorToInt(minY);
+                w = Mathf.Clamp(Mathf.CeilToInt(maxX) + ox + pad, 1, 4096);
+                h = Mathf.Clamp(Mathf.CeilToInt(maxY) + by + pad, 1, 1024);
+            }
+            var bytes = new byte[32 + w * h];
+            var header = new float[] { w, h, ox, h - by, pen, ascent, descent, 0 };
+            System.Buffer.BlockCopy(header, 0, bytes, 0, 32);
+            if (!any) return new Puerts.ArrayBuffer(bytes);
+
+            var rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            var prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            GL.Clear(true, true, Color.clear);
+            textMat.mainTexture = f.material.mainTexture;
+            textMat.SetPass(0);
+            var flip = SystemInfo.graphicsUVStartsAtTop ? -1f : 1f;
+            GL.PushMatrix();
+            GL.LoadIdentity();
+            GL.Begin(GL.QUADS);
+            GL.Color(Color.white);
+            float p = ox;
+            foreach (var ch in text)
+            {
+                if (!f.GetCharacterInfo(ch, out var ci, size, fs)) continue;
+                float x0 = p + ci.minX, x1 = p + ci.maxX, y0 = by + ci.minY, y1 = by + ci.maxY;
+                Vert(ci.uvBottomLeft, x0, y0, w, h, flip);
+                Vert(ci.uvTopLeft, x0, y1, w, h, flip);
+                Vert(ci.uvTopRight, x1, y1, w, h, flip);
+                Vert(ci.uvBottomRight, x1, y0, w, h, flip);
+                p += ci.advance;
+            }
+            GL.End();
+            GL.PopMatrix();
+
+            if (canvasRead == null || canvasRead.width < w || canvasRead.height < h)
+            {
+                if (canvasRead != null) Object.Destroy(canvasRead);
+                canvasRead = new Texture2D(Mathf.Max(w, 256), Mathf.Max(h, 64), TextureFormat.RGBA32, false, true);
+            }
+            canvasRead.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
+            canvasRead.Apply(false);
+            RenderTexture.active = prev;
+            RenderTexture.ReleaseTemporary(rt);
+
+            var px = canvasRead.GetPixels32();
+            var cw = canvasRead.width;
+            for (var y = 0; y < h; y++)
+            {
+                var src = (h - 1 - y) * cw; // ReadPixels 行 0 在底部
+                var dst = 32 + y * w;
+                for (var x = 0; x < w; x++)
+                {
+                    var c = px[src + x];
+                    bytes[dst + x] = (byte)Mathf.Min(c.a, c.r);
+                }
+            }
+            return new Puerts.ArrayBuffer(bytes);
+        }
+
         // ---------------- 每帧驱动 ----------------
 
         static void SyncSun()

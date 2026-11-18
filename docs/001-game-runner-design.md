@@ -152,82 +152,79 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 ### 复刻几猫发现的 Runner 能力缺口
 
-通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。已补齐：
+通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。状态说明：✅ 已完成，❌ 未完成，⚠️ 可用但与原版有出入。
 
-- GPU 烘焙到贴图（`gfx.bake`，MRT、sRGB、mip、过滤与环绕）。
-- 原生帧数据槽：原来是 16 槽环形缓冲，同一帧大量提交会互相覆盖，改为按票号索引。
-- 自定义着色器接收主光阴影：C# 端按 URP `MainLightShadowCasterPass` 的同一算法复算级联矩阵（URP 设置的全局变量要到 Submit 才生效，直接读只能拿到上一帧），把 URP 的 shadowmap 作为 `pot_ShadowMap` 绑定；`<pot/lit>` 新增 `pot_Shadow(worldPos)`（选级联、3×3 双线性 PCF、按 reversed Z 比较、阴影距离淡出），`pot_Lit` 的太阳光已乘上它。
-- 镜面抗锯齿：`pot_Lit` 把法线在像素内的变化折算进粗糙度（同 three.js 的 geometryRoughness）。移植原版地面时发现细碎法线在逆光高光里大片闪烁，原版靠 three 内置的这一步压住。
-- 自定义着色器接收点光和聚光：C# 端每帧取 URP 剔除后的附加光（参数按 URP `InitializeLightConstants` 计算），每个物体按包围盒与光照范围相交、亮度/距离² 排序挑最多 16 个，写入 `pot_LightPos/Color/Spot/Atten[16]` 与 `pot_LightCount`；`<pot/lit>` 新增 `pot_BRDF`、`pot_AdditionalLights`，衰减公式与 URP 相同，`pot_Lit` 已包含。
-- 平面反射开放给自定义着色器：这项能力 PotRender 早就有（`scene.reflection`，镜像相机 + 斜裁剪投影渲染到 HDR 贴图），之前只给 PotLit 用，误记成了缺口。现在绑定为 `pot_PlanarMap`，并提供 `pot_Planar`（开关、平面高度）和镜像相机的 `pot_PlanarVP`；`PotSurface.planar` 设权重即可，`pot_PlanarReflection(worldPos, n, roughness)` 也可单独调用。停机坪积水已能倒映集装箱和起重机。
-- 雾与内置材质同源：gfx 原来读 `RenderSettings.fog*`，而 `scene.fog` 写的是 `_PotFog*`，两边颜色和浓度都对不上。现在读 `_PotFog*`，并按 PotCommon.hlsl 移植高度雾和太阳方向散射（`pot_FogParams`、`pot_FogColor(viewDir)`）。
+**汇总**
 
-尚缺（复刻时暂用替代方案）：
+| 状态 | 数量 |
+|---|---|
+| ✅ 已完成 | 16 |
+| ⚠️ 有出入 | 5 |
+| ❌ 未完成 | 23 |
 
-- Canvas 2D 绘制：原版的喷字贴花、标签、编号用 Canvas 画，这里暂用 `scene.text`，缺描边、做旧、混排。
-- 内置材质的世界空间效果：原版补丁里的宏观亮度/粗糙度变化、雨天条纹与水珠、远距离镂空抖动，PotLit 只覆盖了一部分（湿润）。
+#### 渲染与着色器（gfx）
 
-移植原版远景（门式起重机、货轮、撤离艇、天际线、闪灯）后新发现：
+| 状态 | 能力 | 发现场景 | 说明 / 建议 |
+|---|---|---|---|
+| ✅ | GPU 烘焙到贴图 `gfx.bake` | 初始移植 | MRT、sRGB、mip、过滤与环绕 |
+| ✅ | 原生帧数据槽按票号索引 | 初始移植 | 原 16 槽环形缓冲，同帧大量提交会互相覆盖 |
+| ✅ | 自定义着色器接收主光阴影 `pot_Shadow` | 初始移植 | C# 按 URP 同算法复算级联矩阵，绑定 `pot_ShadowMap`，3×3 PCF、reversed Z、距离淡出 |
+| ✅ | 镜面抗锯齿 | 地面 | `pot_Lit` 把像素内法线变化折算进粗糙度（同 three geometryRoughness） |
+| ✅ | 点光与聚光 `pot_AdditionalLights` | 初始移植 | 每物体最多 16 个，衰减与 URP 相同 |
+| ✅ | 平面反射开放给 gfx `pot_PlanarReflection` | 初始移植 | 原能力仅 PotLit 可用，现绑定 `pot_PlanarMap` / `pot_PlanarVP` |
+| ✅ | 雾与内置材质同源 `pot_FogColor` | 初始移植 | 读 `_PotFog*`，含高度雾与太阳方向散射 |
+| ✅ | 直射高光可调 `specular` / `specularMax` | 海面 | 对应原版改写 directSpecular 的补丁，新增 `pot_BRDFLight` |
+| ✅ | 雾之前插入效果 `pot_LitColor` | 海面 | `pot_Lit = pot_ApplyFog(pot_LitColor(...))` |
+| ✅ | 关闭视锥剔除 `frustumCull: false` | 雨 | 顶点着色器重算位置的效果（雨、粒子）不再时有时无 |
+| ✅ | 自定义后处理链 `gfx.post` | 后处理 | 全屏 pass 链、按比例或固定尺寸目标、`history` 双缓冲、内置 `scene` / `depth` |
+| ✅ | 屏幕空间内置量 | 后处理 | `pot_ScreenVP/InvVP`、`pot_DepthParams`、`<pot/post>` 的深度与世界坐标重建 |
+| ⚠️ | 遮蔽只有一个 `ao` | 海面 | 原版只遮直射与漫反射 IBL；建议拆成 diffuse / specular / direct 三项 |
+| ⚠️ | 高光钳制逐光源进行 | 海面 | 原版是所有光源之和钳到 40，只在多光源极亮时有差别 |
+| ⚠️ | 镜头污渍改为程序噪声 | 后处理 | 原版用噪声贴图，外观接近 |
+| ⚠️ | 雷电只作用于后处理 | 后处理 | 与原版一致，但没有闪电对物体的直射光和闪电几何 |
+| ❌ | gfx 物体不进平面反射 | 地面 | 镜像相机也要挂 GfxPass 并用其矩阵打包 |
+| ❌ | 附加光阴影 | 地面 | 路灯光斑不会被集装箱挡住，需复算附加光阴影图集矩阵 |
+| ❌ | 实例化 `instances` | 雨 | 现在把实例展开成普通网格，顶点数与上传量 4 倍；建议 `DrawIndexedInstanced` |
+| ❌ | 自定义顶点属性 `attributes` | 雨 | 只能借用 normals / uvs，colors 会被转线性 |
+| ❌ | 相机内置量 `fov`、渲染分辨率 | 雨 | 现在从 `pot_Proj[1][1]` 反推 |
+| ❌ | 后处理 pass 读阴影图 | 后处理 | 体积光（god rays）因此未移植 |
+| ❌ | 后处理链与 `scene.post` 可共存 | 后处理 | 链生效时 SSAO、景深一起失效；建议提供 URP 后处理之后的挂点 |
+| ❌ | 后处理 pass 单独开关 | 后处理 | 关 Bloom 只能把强度置零；建议 `enable(i, on)` |
 
-- 内置材质的顶点动画：原版闪灯（blink）和海鸥群靠顶点着色器按 `uTime` 动画，PotLit 不支持，闪灯暂时常亮，海鸥跳过。给内置材质开一个顶点位移钩子，就不用为了这一点改写整套光照。
-- HDR 顶点色：远景灯带用大于 1 的顶点色模拟发光，目前用 unlit 加顶点色代替，Bloom 能否吃到这部分亮度还要确认。
-- 动态变换的批量同步：原版每帧改 64 个网格的矩阵（吊具摆动、雷达、艇身起伏），现在是 JS 逐个比较矩阵再逐个下发，应提供一次性提交多个变换的接口。
-- 动态物体的碰撞：中继、闸杆这类会动的网格没有碰撞体，挡不住射线。大块静态网格同样缺 MeshCollider，只能用盒子近似。
-- 点光源单位：three.js 用物理单位（强度/π、distance），Runner 用 Unity 的强度和 range，换算目前写在游戏里，应由 API 文档写明或提供 `physical` 选项。
-- 热重载耗时：原版关卡（约 195 万顶点、557 个碰撞盒）每次热重载都重建，耗时约 6 秒。需要可跨重载缓存的网格与几何（按内容哈希复用），只改逻辑时不重建场景。
+#### 内置材质与场景
 
-移植原版地面（apron：积水高度、干湿、油污、磨损遮罩，细节与法线贴图，接缝、裂缝、雨滴涟漪）后新发现。遮罩 512² 和细节 256² 在 JS 里生成分别约 124ms 和 31ms，可以接受：
+| 状态 | 能力 | 发现场景 | 说明 / 建议 |
+|---|---|---|---|
+| ⚠️ | 内置材质世界空间效果 | 初始移植 | 宏观亮度/粗糙度变化、雨痕水珠、远距离抖动镂空只覆盖了湿润 |
+| ❌ | 内置材质顶点动画钩子 | 远景 | 闪灯、海鸥靠 `uTime` 顶点动画，目前闪灯常亮、海鸥跳过 |
+| ❌ | HDR 顶点色 | 远景 | 远景灯带用大于 1 的顶点色发光，Bloom 是否吃到待确认 |
+| ❌ | 批量变换同步 | 远景 | 原版每帧改 64 个矩阵，现在逐个比较逐个下发 |
+| ❌ | 点光源物理单位选项 | 远景 | three 强度/π 与 distance 的换算写在游戏里 |
+| ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
+| ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
+| ❌ | gfx 深度偏移 `polygonOffset` | 弹孔 | 贴花现靠沿法线外推 4 mm 防 z-fighting，远处或掠射角仍可能闪 |
+| ❌ | 网格切线属性 `tangents` | 弹孔 | 法线贴图用 dFdx/dFdy 重建切线框架，三角形边缘有轻微接缝 |
 
-- 自定义物体不进平面反射：GfxPass 只挂在主相机上，镜像相机渲染时 gfx 物体（停机坪、以后的海面）不会出现在倒影里。要让 gfx 也画进反射，需要给镜像相机同样挂 pass 并用它的矩阵打包一次。
-- Canvas 2D：原版标线贴图（黄白线、文字、泊位编号、轮胎痕）用 Canvas 画（`Pb`），现在沿用标线几何，缺磨损、轮胎痕和地面文字。
-- 附加光没有阴影：路灯、桅杆灯照在地面上的光斑不会被集装箱挡住。URP 的附加光阴影图需要另外复算图集矩阵，暂缓。
+#### 物理与运行时
 
-移植原版海面（kb：变密格网 + 远处四边形，4 个 Gerstner 波顶点位移，11 个波的斜率法线，码头与船体泡沫、浮渣，风区与涌浪，太阳闪光，远处雾霭）时补齐：
+| 状态 | 能力 | 发现场景 | 说明 / 建议 |
+|---|---|---|---|
+| ✅ | `physics.addBox` 接受 `{x,y,z}` | 穿墙 | 原来 557 个碰撞盒有 452 个是 NaN |
+| ❌ | 动态碰撞与 MeshCollider | 远景 | 中继、闸杆等会动的网格挡不住射线，大块静态网格只能用盒子近似 |
+| ❌ | 固定步长 `fixedUpdate` | 穿墙 | 后台约 4 fps 时 dt≈0.25 s 会跨过空气墙；jimao 用子步兜底 |
+| ❌ | `state.define` 的 `validate` | 穿墙 | 存档会原样恢复越界、卡墙等坏状态 |
+| ❌ | 跨热重载缓存网格 | 远景 | 约 195 万顶点每次重建约 6 秒；建议按内容哈希复用 |
 
-- 直射高光可调：`PotSurface` 新增 `specular`（直射高光倍率）和 `specularMax`（逐光源钳制上限），对应原版改写 `reflectedLight.directSpecular` 的补丁；`<pot/lit>` 新增 `pot_BRDFLight`。
-- 雾之前插入效果：新增 `pot_LitColor`（不含雾），`pot_Lit` 即 `pot_ApplyFog(pot_LitColor(...))`。原版海面在 `opaque_fragment` 前混远处雾霭，之后才上雾，原来的 `pot_Lit` 做不到。
+#### UI
 
-仍有出入：
-
-- 遮蔽只有一个 `ao`：原版海面把 gOcc 乘在直射 radiance 和漫反射 IBL 上，不影响镜面 IBL；`s.ao` 同时作用于环境漫反射和环境反射，不作用于直射。现在折算成 albedo 与 `specular` 乘 gOcc。若再遇到类似补丁，可考虑把 `ao` 拆成 `diffuseOcclusion`、`specularOcclusion`、`directOcclusion`。
-- 高光钳制按光源逐个进行：原版是对所有光源的直射高光之和钳到 40，差别只在多个光源同时打出极亮高光时。
-
-移植原版雨（Fb/Nb：4500 条以相机为中心循环的雨丝、260 条仓库南檐滴水、450 个地面溅射，HG 相函数逆光发亮，室内盒子与天窗遮挡，积水处溅射更密）时补齐与发现：
-
-- 补齐：绑定选项 `frustumCull: false`。gfx 物体原来一律按网格包围盒做视锥剔除，顶点着色器重算位置的效果（雨、广告牌、以相机为中心的粒子）会时有时无。
-- 缺口：没有实例化。原版每实例一个 `aSeed vec4`，现在把实例展开成普通网格（每实例 4 个顶点，种子放在法线和 uv 里），顶点数和上传量是实例化的 4 倍，雨丝 19040 顶点尚可，上万实例的粒子会吃紧。建议 `scene.mesh` 支持 `instances`（每实例属性 + 数量），C# 用 `DrawIndexedInstanced`。
-- 缺口：网格没有自定义顶点属性，只能借用 normals/uvs 位置，且 colors 会被转线性；建议 `scene.mesh` 支持 `attributes: { aSeed: { size: 4, data } }`，GLSL 用同名 `in` 接收。
-- 缺口：没有 `fov`、渲染分辨率之类的相机内置量，目前用 `pot_Proj[1][1]` 和 `pot_ScreenSize` 反推。
-- 雷声事件已在后处理一步移植（见下文）。gfx 雨可用时关掉了 `scene.weather` 的内置雨滴粒子，地面湿润仍由 weather 提供。
-
-移植原版标题机位（z()：周期 max(26, 路径长/速度)、smoothstep 混合缓动、位置与目标微晃、轻微滚转、首尾淡入淡出）和标题菜单（m-veil 渐变遮罩、上下黑边、B4 eyebrow、超大字距标题、带短条的简介、横排主次按钮、右下操作速览），以及暂停、阵亡、简报页的版式与文案后新发现：
-
-- 相机滚转可以做：`lookAt` 之后读 `camera.rotation`（欧拉角，度），给 z 加偏移再写回。原版是弧度，要换算。
-- 缺口：ui 没有渐变。CSS 的 linear-gradient 遮罩用 6px 条带矩形近似（约 180 个 rect/帧），条带宽了会出现色阶。建议 `ui.rect` 支持 `gradient: { to, dir, stops }` 或单独的 `ui.gradient`。
-- 缺口：`ui.text` 没有字距（CSS letter-spacing）。原版标题 .15em、按钮 .3em、eyebrow .24em；现在按字绘制并缓存 `ui.measure` 的单字宽度，每个字一条绘制命令。建议 `TextOptions.spacing`（em）。
-- 缺口：ui 没有字重档位，只有 bold；原版 900/600/500 三档被压成两档。没有等宽字体（原版备注用 mono）。
-- 缺口：颜色只认十六进制（`#rgb`/`#rrggbb`/`#rrggbbaa`），原版 CSS 变量里的 `rgba()` 要手动换算。
-- 缺口：ui 没有布局能力（flex 底对齐、clamp/vw 字号），全部手算坐标；目前可接受，菜单多了以后建议提供轻量的行/列布局辅助。
-
-修玩家穿出空气墙（用户报"中间的集装箱只有薄薄一层"，其实是站在关卡西侧边界外，看到的是只有正面的远景天际线面片）后新发现：
-
-- 缺口：Runner 没有固定步长的物理回调。`update` 的 dt 直接是帧间隔，窗口在后台时约 4 fps（dt≈0.25 s），游戏自写的 AABB 移动一帧冲刺 1.75 米，直接跨过 0.6 米厚的空气墙。jimao 先用子步（每步 ≤ 0.2 米）和越界拉回兜底；建议 Runner 提供 `ctx.on('fixedUpdate')`（固定 dt、单帧最多若干步），或对 dt 设上限并在后台时降帧而不是放大 dt。
-- 缺口：存档会把越界、卡墙等坏状态原样恢复。建议 `state.define` 支持 `validate(state)`，读档失败时回到 init。
-- 移植 bug：原版道具碰撞把 three 的 `Box3.min/max`（Vector3）传给 `physics.addBox`，适配层按数组下标取值得到 NaN，557 个碰撞盒里 452 个无效（道具、集装箱堆等全部可穿）。适配层已改为同时接受数组和 `{x,y,z}`。
-
-移植原版后处理（J6/K6 六级降采样与上采样 Bloom、Q6 两段横向光条、eA 自动曝光与可见度、tA 镜头污渍、nA 调色：AgX 混合、色差、暗角、受伤与低血量红晕、开镜、太阳眩光、雷电闪光；iA：FXAA、锐化、颗粒、抖动）和雷电（首次 12 到 30 秒、之后每 30 到 60 秒，按距离延迟的远雷/近雷合成音）时补齐：
-
-- 自定义后处理链 `ctx.gfx.post({ targets, passes, uniforms })`：C# 在 `BeforeRenderingPostProcessing` 按顺序执行全屏 pass，目标可按屏幕比例（`scale`）或固定尺寸分配，`history: true` 为双缓冲（读上一帧、写本帧，新建时清成透明黑以识别首帧），内置输入 `scene`（HDR 场景拷贝）和 `depth`（相机深度），最后一个 pass 输出 `screen`。链生效时自动关闭 URP 自带后处理，卸载后恢复。原版的 EffectComposer 链可逐 pass 机械移植。
-- 屏幕空间内置量：`pot_ScreenVP`、`pot_ScreenInvVP`（与深度贴图一致的视图投影及其逆，已处理平台 y 翻转与 reversed Z）、`pot_DepthParams`；`<pot/post>` 提供 `pot_Depth01`、`pot_EyeDepth`、`pot_IsSky`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`。原版靠 `cameraNear/Far`、`projectionMatrixInverse` 自己重建，这里统一由 Runner 提供。
-- 画质档位可设 `bloom: false`，jimao 把 Bloom、污渍、光条的强度置零（默认四档都开，与原版一致）。
-
-仍缺或有出入：
-
-- 链里的 pass 不能单独开关：关掉 Bloom 只能把强度置零，降采样和光条 pass 仍在执行。建议 `PostChain.enable(i, on)`，或在 pass 上加 `enabled`。
-- 体积光（原版 god rays 的 32 步光线步进）未移植：需要在后处理里采主光阴影图，`pot_ShadowMap` 目前只绑定给物体着色器。建议后处理 pass 也能 include `<pot/lit>` 的阴影部分。
-- 后处理链与 `scene.post` 二选一：链生效后 `scene.post` 的 SSAO、景深等 URP 效果一起失效。若游戏只想替换调色，需要自己实现其余效果；建议提供"插在 URP 后处理之后"的挂点。
-- 镜头污渍原版用噪声贴图，这里改为程序化值噪声一次性 bake；外观接近但不完全相同。
-- 雷电闪光只作用于后处理（天空与雾提亮），原版同样如此；没有闪电对场景物体的直射光照，也没有闪电几何。
+| 状态 | 能力 | 发现场景 | 说明 / 建议 |
+|---|---|---|---|
+| ✅ | 相机滚转 | 菜单 | `lookAt` 后改 `camera.rotation.z` 即可，无需新增 |
+| ❌ | 渐变 `gradient` | 菜单 | 现用约 180 个 6px 条带近似 |
+| ❌ | 字距 `spacing` | 菜单 | 现按字绘制并缓存单字宽度 |
+| ❌ | 字重档位、等宽字体 | 菜单 | 900/600/500 被压成两档 |
+| ❌ | `rgba()` 颜色 | 菜单 | 只认十六进制 |
+| ❌ | 行/列布局辅助 | 菜单 | 目前全部手算坐标，尚可接受 |
 
 ## 9. 资产即代码
 

@@ -15,6 +15,8 @@ export interface BulletHit {
 export interface Events {
   /** 重新开始（keep 为 true 时保留中继进度） */
   'jimao/reset'(keep: boolean): void
+  /** 调试：沿视线做一次开枪检测并落弹孔（devserver eval 用） */
+  'jimao/debug'(): void
   /** 玩家开枪（听觉警觉） */
   'jimao/shot'(pos: Vec3): void
   'jimao/bullet'(hit: BulletHit): void

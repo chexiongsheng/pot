@@ -1,6 +1,7 @@
 /** 武器 PAC-9：射线射击、扩散、后坐力、换弹、瞄准、枪模（含双手、刻字）、曳光与命中火花 */
 import type { Context, Entity, MaterialOptions, Vec3 } from '@pot/core'
 import { emit, on, type BulletHit } from '../lib/bus'
+import { createDecals, decalFor, surfaceAt } from '../lib/decals'
 import { linearColor, toMesh, type RGB } from '../lib/geo'
 import { buildPac9, PAC9 } from '../lib/gun'
 import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from '../lib/hands'
@@ -42,6 +43,18 @@ export function apply(ctx: Context) {
   const { scene } = ctx
   const cam = scene.camera
   const rand = Math.random
+  // ---- 弹孔贴花（原版 Hb 图集 + j1 池） ----
+  const decals = createDecals(ctx)
+  if (decals) ctx.logger('jimao').info(`弹孔图集绘制 ${decals.atlasMs} ms`)
+  // 调试：ctx.emit('jimao/debug') 沿视线做一次与开枪相同的检测并落弹孔，日志报告表面与池数量
+  if (decals) on(ctx, 'jimao/debug', () => {
+    const p = player(ctx)
+    if (!p) return
+    const hit = scene.raycast(eyeOf(p), forward(p.yaw, p.pitch), { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER) })
+    const s = hit ? surfaceAt(hit.point) : '-', dk = decalFor(s)
+    if (hit && dk) decals.add(hit.point, hit.normal, dk[0], dk[1], dk[2], dk[3])
+    ctx.logger('jimao').info(`调试射线 ${hit ? hit.point.map(v => v.toFixed(2)).join(',') : '未命中'} 表面 ${s} 弹孔 ${decals.count}`)
+  })
 
   // ---- 枪模（原版几何机械移植，挂在相机下，单独一层，不进平面反射） ----
   const geo = buildPac9()
@@ -123,6 +136,7 @@ export function apply(ctx: Context) {
     if (keep) { w.mag = Math.max(m, W.mag); w.reserve = Math.max(r, W.reserve) }
     boltLocked = false
     round.active(true)
+    decals?.clear()
   })
 
   function startReload() {
@@ -174,6 +188,8 @@ export function apply(ctx: Context) {
       } else {
         scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffb060', intensity: 8, count: 12, speed: 5.5, speedJitter: 0.6, spread: 0.45, size: 0.018, life: 0.35, lifeJitter: 0.5 })
         scene.burst({ kind: 'smoke', position: at, direction: n, color: '#8f8a84', count: 4, speed: 0.8, spread: 0.6, size: 0.22, sizeJitter: 0.5, life: 1.1 })
+        const dk = decals && decalFor(surfaceAt(hit.point))
+        if (dk) decals!.add(hit.point, n, dk[0], dk[1], dk[2], dk[3])
       }
     }
     // 枪口火光
