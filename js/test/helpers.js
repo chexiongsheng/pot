@@ -108,6 +108,7 @@ class MockEngine {
   gfxTexture(id, name, tex) { const g = this._gfx(id); if (g) g.textures[name] = tex }
   _gfx(id) { return id < 0 ? this.bakeBinds?.get(id) : this._get(id).gfx }
   gfxBakeBegin() { this.bakeBinds ??= new Map(); const id = -((this.bakeId = (this.bakeId ?? 0) + 1)); this.bakeBinds.set(id, { uniforms: {}, textures: {} }); return id }
+  gfxPost(json) { this.post = json ? JSON.parse(json) : null; this.postCalls = (this.postCalls ?? 0) + 1; return '' }
   gfxBake(bind, program, width, height, targets, blend) {
     const g = this.bakeBinds?.get(bind)
     this.bakeBinds?.delete(bind)

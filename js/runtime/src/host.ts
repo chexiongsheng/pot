@@ -108,6 +108,8 @@ export interface Engine {
   gfxBakeBegin(): number
   /** 画全屏四边形到新贴图；targets 见 PotGfx.Bake；返回逗号分隔的贴图 id，出错以 ! 开头 */
   gfxBake(bind: number, program: string, width: number, height: number, targets: string, blend: number): string
+  /** 设置每帧后处理链（JSON 见 PotGfx.Post），空串关闭；返回空串成功，否则为错误 */
+  gfxPost(json: string): string
 }
 
 export interface RaycastResult {

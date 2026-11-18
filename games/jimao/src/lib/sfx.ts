@@ -126,6 +126,29 @@ const CLIPS: Record<string, () => Float32Array> = {
     })
     return normalize(loopable(d, 0.2), 0.5)
   },
+  thunder() {
+    // 远雷：低通布朗噪声 + 几次缓慢起伏的滚动
+    const r = rng(83)
+    let a = 0
+    const d = synth(5, (t) => {
+      a += ((r() * 2 - 1) - a) * 0.08
+      const roll = 0.55 + 0.45 * Math.sin(t * 5.1) * Math.sin(t * 2.3 + 1)
+      return a * env(t, 0.25, 1.4) * roll
+    })
+    return normalize(lowpass(lowpass(d, 0.12), 0.2), 0.8)
+  },
+  thunderNear() {
+    // 近雷：开头的炸裂 + 滚动
+    const r = rng(89)
+    let a = 0
+    const d = synth(5, (t) => {
+      a += ((r() * 2 - 1) - a) * 0.12
+      const crack = (r() * 2 - 1) * env(t, 0.004, 0.12) * 1.4
+      const roll = 0.6 + 0.4 * Math.sin(t * 6.7) * Math.sin(t * 1.9 + 2)
+      return crack + a * env(t, 0.08, 1.6) * roll * 1.2
+    })
+    return normalize(lowpass(d, 0.22), 0.9)
+  },
   tension() {
     const d = synth(4, (t) => {
       const pulse = Math.exp(-((t * 2) % 1) / 0.12)

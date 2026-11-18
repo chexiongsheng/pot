@@ -73,6 +73,34 @@ ent.material({ map: albedo, maskMap: mask, metallic: 1, smoothness: 1 })
 - `vUv.y=0` 对应贴图 `v=0`，已处理平台差异。同一帧可连续 bake 任意多次，结果按调用顺序生效。
 - 同一次 bake 返回的贴图共享生命周期：随调用插件卸载释放，任一张 `destroy()` 会一起释放。
 
+#### 自定义后处理链（gfx.post）
+
+整条后处理由游戏的全屏程序组成，替换 URP 自带后处理（链存在期间 `scene.post` 无效，卸载后恢复）。
+
+```ts
+const fs = (f: string) => ctx.gfx.shader({ fullscreen: true, fragment: `shaders/post/${f}.frag` })
+const chain = ctx.gfx.post({
+  targets: {
+    half: { scale: 0.5 },                                   // 按屏幕比例；或 width/height 固定尺寸
+    adapt: { width: 1, height: 1, filter: 'point', history: true },
+    ldr: { format: 'rgba8' },                               // 默认 rgba16f、bilinear
+  },
+  passes: [
+    { shader: fs('down'), output: 'half', inputs: { tSrc: 'scene' } },
+    { shader: fs('adapt'), output: 'adapt', inputs: { tPrev: 'adapt', tLum: 'half' } },
+    { shader: fs('grade'), output: 'ldr', inputs: { tScene: 'scene', tDepth: 'depth', tDirt: dirtTex } },
+    { shader: fs('final'), output: 'screen', inputs: { tSrc: 'ldr' }, uniforms: { uGrain: 0.02 } },
+  ],
+  uniforms: { uExposure: 1 },                               // 所有 pass 共享
+})
+chain.set({ uThunder: 0.3 })   // 改共享 uniform；chain.setPass(i, {...}) 改单个 pass；chain.destroy()
+```
+
+- 内置输入：`scene`（本帧 HDR 场景，线性）、`depth`（相机原始深度）。输入也可以直接给 Texture。`history: true` 的目标在同一帧里读到的是上一帧结果，写入本帧；首帧为透明黑。
+- pass 选项：`blend`（同 bake）、`uniforms`。按数组顺序执行，`output: 'screen'` 的 pass 写最终画面，必须输出线性颜色（最终拷贝负责转 sRGB）。
+- 后建的链替换先建的，`chain.active` 为 false 表示已被替换或释放。着色器编译失败或目标名不存在时抛错。
+- `#include <pot/post>`：`in vec2 vUv`（原点左下）、`pot_Depth01(raw)`、`pot_EyeDepth(raw)`、`pot_IsSky(raw)`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`（xy 为屏幕 uv，z 为裁剪空间 w，<0 在相机后）。内置量 `pot_ScreenVP`、`pot_ScreenInvVP`、`pot_DepthParams`；`pot_ScreenSize` 在每个 pass 里是输出目标的尺寸（xy 像素、zw 倒数），源贴图尺寸用 `textureSize`。`<pot/lit>` 也能 include，用其中的雾函数和太阳量。
+
 ## ctx.state
 
 | API | 说明 |

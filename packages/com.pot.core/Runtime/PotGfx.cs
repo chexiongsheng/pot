@@ -238,6 +238,7 @@ namespace Pot
         /// <summary>冷重启：释放全部程序与绑定</summary>
         internal static void Clear()
         {
+            ReleasePost();
             if (available == true)
                 foreach (var p in programs.Values) PotGfx_Destroy(p.id);
             programs.Clear();
@@ -277,13 +278,28 @@ namespace Pot
         }
 
         static GfxPass opaquePass, transparentPass;
+        static PostPass postPass;
+        static bool urpPostSuppressed;
 
         internal static void BeginCamera(ScriptableRenderContext ctx, Camera cam)
         {
-            if (bindings.Count == 0 || available != true || string.IsNullOrEmpty(backendName)) return;
+            if (available != true || string.IsNullOrEmpty(backendName)) return;
             if (cam != PotScene.Camera) return;
             var data = cam.GetUniversalAdditionalCameraData();
             if (data == null || data.scriptableRenderer == null) return;
+            if (post != null)
+            {
+                // 游戏自己的后处理链接管色调映射等：关掉 URP 后处理（SSAO 等渲染特性不受影响）
+                if (data.renderPostProcessing) { data.renderPostProcessing = false; urpPostSuppressed = true; }
+                postPass ??= new PostPass();
+                data.scriptableRenderer.EnqueuePass(postPass);
+            }
+            else if (urpPostSuppressed)
+            {
+                data.renderPostProcessing = true;
+                urpPostSuppressed = false;
+            }
+            if (bindings.Count == 0) return;
             if (opaquePass == null)
             {
                 opaquePass = new GfxPass(0, RenderPassEvent.AfterRenderingOpaques);
@@ -365,6 +381,11 @@ namespace Pot
             SetVec("pot_Planar", planarOn ? 1 : 0, PotRender.PlanarHeight, 0, 0);
             // 非 GPU 投影：uv = ndc.xy*0.5+0.5（Unity 在 D3D 上翻转 RT 的渲染方向，与 gfx.bake 同约定）
             SetMat("pot_PlanarVP", planarOn ? pc.projectionMatrix * pc.worldToCameraMatrix : Matrix4x4.identity);
+            // 后处理用：非 GPU 投影（uv = ndc.xy*0.5+0.5，ndc.z 在 [-1,1]），配合 <pot/post> 从深度重建世界坐标
+            var screenVP = cam.projectionMatrix * view;
+            SetMat("pot_ScreenVP", screenVP);
+            SetMat("pot_ScreenInvVP", screenVP.inverse);
+            SetVec("pot_DepthParams", cam.nearClipPlane, cam.farClipPlane, SystemInfo.usesReversedZBuffer ? 1 : 0, 0);
         }
 
         static void ObjectBuiltins(Transform t)
@@ -533,7 +554,7 @@ namespace Pot
         }
 
         /// <summary>按反射把统一变量写进 std140 块</summary>
-        static int WriteBlock(ReflStage s, Binding b)
+        static int WriteBlock(ReflStage s, Binding b, Binding shared = null)
         {
             var size = (s.size + 15) & ~15;
             if (size <= 0 || s.members == null) return 0;
@@ -542,7 +563,7 @@ namespace Pot
             foreach (var m in s.members)
             {
                 float[] src;
-                if (!b.uniforms.TryGetValue(m.name, out src) && !builtins.TryGetValue(m.name, out src)) continue;
+                if (!b.uniforms.TryGetValue(m.name, out src) && (shared == null || !shared.uniforms.TryGetValue(m.name, out src)) && !builtins.TryGetValue(m.name, out src)) continue;
                 var cols = Mathf.Max(1, m.cols);
                 var vec = Mathf.Max(1, m.vec);
                 var count = Mathf.Max(1, m.array);
@@ -648,7 +669,7 @@ namespace Pot
         }
 
         /// <summary>写出一个 draw（网格须已 UploadMeshData，位置在流 0）；内置量须已设置好</summary>
-        static bool WriteDraw(Binding b, GpuProgram p, Mesh mesh, int flags, Texture env, Texture shadowMap = null)
+        static bool WriteDraw(Binding b, GpuProgram p, Mesh mesh, int flags, Texture env, Texture shadowMap = null, Binding shared = null, Dictionary<string, Texture> inputs = null)
         {
             if (mesh.GetVertexAttributeStream(VertexAttribute.Position) != 0) return false;
             var vb = mesh.GetNativeVertexBufferPtr(0);
@@ -681,7 +702,8 @@ namespace Pot
                 if (t.Key == "pot_EnvMap") tex = env;
                 else if (t.Key == "pot_ShadowMap") tex = shadowMap != null ? shadowMap : Texture2D.whiteTexture;
                 else if (t.Key == "pot_PlanarMap") tex = PotRender.PlanarTexture != null ? PotRender.PlanarTexture : Texture2D.blackTexture;
-                else if (b.textures.TryGetValue(t.Key, out texId)) tex = PotScene.GetTexture(texId);
+                else if (inputs != null && inputs.TryGetValue(t.Key, out tex)) { }
+                else if (b.textures.TryGetValue(t.Key, out texId) || (shared != null && shared.textures.TryGetValue(t.Key, out texId))) tex = PotScene.GetTexture(texId);
                 if (tex == null) continue;
                 var ptr = tex.GetNativeTexturePtr();
                 if (ptr == IntPtr.Zero) continue;
@@ -695,8 +717,8 @@ namespace Pot
             writer.Write(nt);
             frame.Position = endPos;
 
-            if (WriteBlock(p.vs, b) == 0) writer.Write(0);
-            if (WriteBlock(p.fs, b) == 0) writer.Write(0);
+            if (WriteBlock(p.vs, b, shared) == 0) writer.Write(0);
+            if (WriteBlock(p.fs, b, shared) == 0) writer.Write(0);
             return true;
         }
 
@@ -846,6 +868,214 @@ namespace Pot
                 sb.Append(PotScene.RegisterTexture(rts[i]));
             }
             return sb.ToString();
+        }
+
+        // ---------------- 每帧后处理链 ----------------
+
+        [Serializable] class PostTargetCfg { public string name; public int width, height; public float scale = 1; public string format = "rgba16f"; public int filter = 1; public int history; }
+        [Serializable] class PostPassCfg { public string program; public string output; public string[] inputs; public int bind; public int blend; }
+        [Serializable] class PostChainCfg { public PostTargetCfg[] targets; public PostPassCfg[] passes; public int shared; }
+
+        class PostTarget
+        {
+            public PostTargetCfg cfg;
+            public readonly RenderTexture[] rts = new RenderTexture[2];
+            /// <summary>history 目标：rts[cur] 为最近写入的结果</summary>
+            public int cur;
+            public bool fresh;
+        }
+
+        class PostChain
+        {
+            public PostChainCfg cfg;
+            public readonly Dictionary<string, PostTarget> targets = new Dictionary<string, PostTarget>();
+            public string[][] inputUniforms, inputTargets;
+        }
+
+        static PostChain post;
+        static RenderTexture postScene;
+        static readonly Dictionary<string, Texture> postInputs = new Dictionary<string, Texture>();
+        static readonly Binding emptyBinding = new Binding();
+        static readonly int depthTexId = Shader.PropertyToID("_CameraDepthTexture");
+
+        /// <summary>
+        /// 设置每帧后处理链（替换旧链）；json 为空串表示关闭。
+        /// json：{ targets:[{name,width,height,scale,format,filter,history}], passes:[{program,output,inputs:["uniform=目标"],bind,blend}], shared }
+        /// 输入目标名：scene（本帧相机画面的 HDR 拷贝）、depth（相机深度纹理，原始值）或 targets 中的名字；output 为目标名或 screen（写回相机画面）。
+        /// bind/shared 为 BakeBegin 得到的临时绑定（逐 pass / 全链共享的 uniform），随链释放。返回空串成功，否则为错误。
+        /// </summary>
+        [Preserve]
+        public static string Post(string json)
+        {
+            ReleasePost();
+            if (string.IsNullOrEmpty(json)) return "";
+            var why = Check();
+            if (why != null) return why;
+            var cfg = JsonUtility.FromJson<PostChainCfg>(json);
+            if (cfg == null || cfg.passes == null || cfg.passes.Length == 0) return "后处理链没有 pass";
+            var chain = new PostChain { cfg = cfg };
+            if (cfg.targets != null)
+                foreach (var t in cfg.targets)
+                {
+                    if (string.IsNullOrEmpty(t.name) || t.name == "scene" || t.name == "depth" || t.name == "screen") return "目标名无效：" + t.name;
+                    chain.targets[t.name] = new PostTarget { cfg = t };
+                }
+            chain.inputUniforms = new string[cfg.passes.Length][];
+            chain.inputTargets = new string[cfg.passes.Length][];
+            for (var i = 0; i < cfg.passes.Length; i++)
+            {
+                var pc = cfg.passes[i];
+                if (pc.output != "screen" && !chain.targets.ContainsKey(pc.output ?? "")) return "pass " + i + " 的输出目标不存在：" + pc.output;
+                var ins = pc.inputs ?? new string[0];
+                chain.inputUniforms[i] = new string[ins.Length];
+                chain.inputTargets[i] = new string[ins.Length];
+                for (var k = 0; k < ins.Length; k++)
+                {
+                    var eq = ins[k].IndexOf('=');
+                    if (eq <= 0) return "pass " + i + " 的输入格式应为 uniform=目标：" + ins[k];
+                    var target = ins[k].Substring(eq + 1);
+                    if (target != "scene" && target != "depth" && !chain.targets.ContainsKey(target)) return "pass " + i + " 的输入目标不存在：" + target;
+                    chain.inputUniforms[i][k] = ins[k].Substring(0, eq);
+                    chain.inputTargets[i][k] = target;
+                }
+            }
+            post = chain;
+            return "";
+        }
+
+        static void ReleasePost()
+        {
+            if (post == null) return;
+            foreach (var t in post.targets.Values)
+                for (var i = 0; i < 2; i++)
+                    if (t.rts[i] != null) { t.rts[i].Release(); UnityEngine.Object.Destroy(t.rts[i]); t.rts[i] = null; }
+            foreach (var pc in post.cfg.passes) bakes.Remove(pc.bind);
+            bakes.Remove(post.cfg.shared);
+            post = null;
+            if (postScene != null) { postScene.Release(); UnityEngine.Object.Destroy(postScene); postScene = null; }
+        }
+
+        static RenderTexture PostAlloc(RenderTexture rt, int w, int h, GraphicsFormat fmt, FilterMode filter, string name, out bool created)
+        {
+            created = false;
+            if (rt != null && rt.width == w && rt.height == h && rt.graphicsFormat == fmt) return rt;
+            if (rt != null) { rt.Release(); UnityEngine.Object.Destroy(rt); }
+            var desc = new RenderTextureDescriptor(w, h, fmt, 0, 1) { msaaSamples = 1, useMipMap = false, autoGenerateMips = false };
+            rt = new RenderTexture(desc) { name = name, wrapMode = TextureWrapMode.Clamp, filterMode = filter };
+            rt.Create();
+            created = true;
+            return rt;
+        }
+
+        class PostPass : ScriptableRenderPass
+        {
+            public PostPass()
+            {
+                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+                ConfigureInput(ScriptableRenderPassInput.Depth);
+            }
+
+            public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+            {
+                var chain = post;
+                if (chain == null) return;
+                var cmd = CommandBufferPool.Get("PotGfx.Post");
+                RunPost(chain, cmd, ref renderingData);
+                context.ExecuteCommandBuffer(cmd);
+                CommandBufferPool.Release(cmd);
+            }
+        }
+
+        static void RunPost(PostChain chain, CommandBuffer cmd, ref RenderingData rd)
+        {
+            ref var cd = ref rd.cameraData;
+            var cam = cd.camera;
+            var color = cd.renderer.cameraColorTargetHandle;
+            var desc = cd.cameraTargetDescriptor;
+            int W = Mathf.Max(1, desc.width), H = Mathf.Max(1, desc.height);
+            bool created;
+            postScene = PostAlloc(postScene, W, H, GraphicsFormat.R16G16B16A16_SFloat, FilterMode.Bilinear, "pot_post_scene", out created);
+            cmd.Blit(color.nameID, postScene);
+
+            foreach (var t in chain.targets.Values)
+            {
+                var c = t.cfg;
+                var w = c.width > 0 ? c.width : Mathf.Max(1, Mathf.RoundToInt(W * c.scale));
+                var h = c.height > 0 ? c.height : Mathf.Max(1, Mathf.RoundToInt(H * c.scale));
+                var fmt = BakeFormat(c.format ?? "rgba16f");
+                var filter = c.filter == 0 ? FilterMode.Point : FilterMode.Bilinear;
+                for (var i = 0; i < (c.history != 0 ? 2 : 1); i++)
+                {
+                    t.rts[i] = PostAlloc(t.rts[i], w, h, fmt, filter, "pot_post_" + c.name, out created);
+                    if (created) t.fresh = true;
+                }
+                if (t.fresh)
+                {
+                    // 新建（含尺寸变化）后清成透明黑：history 目标借此识别“第一帧”
+                    for (var i = 0; i < 2; i++)
+                        if (t.rts[i] != null) { cmd.SetRenderTarget(t.rts[i]); cmd.ClearRenderTarget(false, true, Color.clear); }
+                    t.fresh = false;
+                }
+            }
+
+            var flipped = cd.IsCameraProjectionMatrixFlipped();
+            FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
+            var shadowMap = ShadowBuiltins(ref rd);
+            SetMat("pot_Model", Matrix4x4.identity);
+            SetMat("pot_ModelInv", Matrix4x4.identity);
+            var nm = Builtin("pot_NormalMatrix", 9);
+            for (var i = 0; i < 9; i++) nm[i] = i % 4 == 0 ? 1 : 0;
+            var lc = Builtin("pot_LightCount", 4);
+            var savedLights = lc[0];
+            lc[0] = 0;
+            var depth = Shader.GetGlobalTexture(depthTexId);
+            Binding shared;
+            bakes.TryGetValue(chain.cfg.shared, out shared);
+            var quad = BakeQuad();
+            var env = PotRender.EnvTexture;
+
+            for (var i = 0; i < chain.cfg.passes.Length; i++)
+            {
+                var pc = chain.cfg.passes[i];
+                GpuProgram p;
+                if (!programs.TryGetValue(pc.program ?? "", out p)) continue;
+                Binding b;
+                if (!bakes.TryGetValue(pc.bind, out b)) b = emptyBinding;
+                postInputs.Clear();
+                var us = chain.inputUniforms[i];
+                var ts = chain.inputTargets[i];
+                for (var k = 0; k < us.Length; k++)
+                {
+                    var tn = ts[k];
+                    Texture tex;
+                    if (tn == "scene") tex = postScene;
+                    else if (tn == "depth") tex = depth != null ? depth : Texture2D.whiteTexture;
+                    else { var t = chain.targets[tn]; tex = t.rts[t.cfg.history != 0 ? t.cur : 0]; }
+                    if (tex != null) postInputs[us[k]] = tex;
+                }
+                PostTarget outT = null;
+                RenderTexture outRt = null;
+                int ow = W, oh = H;
+                if (pc.output != "screen")
+                {
+                    outT = chain.targets[pc.output];
+                    outRt = outT.rts[outT.cfg.history != 0 ? 1 - outT.cur : 0];
+                    ow = outRt.width; oh = outRt.height;
+                }
+                SetVec("pot_ScreenSize", ow, oh, 1f / ow, 1f / oh);
+                frame.SetLength(0);
+                writer.Write(0);
+                var ok = WriteDraw(b, p, quad, 2 | ((pc.blend & 3) << F_BlendShift) | F_NoDepthTest, env, shadowMap, shared, postInputs);
+                var len = Finish(ok ? 1 : 0);
+                if (len <= 0) continue;
+                var slot = PotGfx_Submit(frame.GetBuffer(), len);
+                if (outRt != null) cmd.SetRenderTarget(outRt);
+                else cmd.SetRenderTarget(color.nameID, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store);
+                cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
+                if (outT != null && outT.cfg.history != 0) outT.cur = 1 - outT.cur;
+            }
+            lc[0] = savedLights;
+            postInputs.Clear();
         }
     }
 }

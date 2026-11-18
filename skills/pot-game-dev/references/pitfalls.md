@@ -89,7 +89,7 @@
 ### 自定义着色器的限制（ctx.gfx）
 
 - 目前只支持 Windows D3D11；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
-- 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。
+- 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。后处理链（`gfx.post`）的 pass 拿不到主光阴影图，体积光暂时做不了。
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
 - 移植 three.js 的 `onBeforeCompile` 补丁：改 `directSpecular` 用 `s.specular`/`s.specularMax`；在 `opaque_fragment` 前改 `outgoingLight` 用 `pot_LitColor` 后自己 `pot_ApplyFog`；`s.ao` 同时影响环境漫反射和环境反射、不影响直射，与 three 的 `radiance *= k; iblIrradiance *= k` 不同，后者应折算为 `albedo *= k; specular *= k`。
 - 移植时 three 的 `vGWorld`/`cameraPosition` 用 `(x, y, -z)` 换算，法线 `(nx, ny, nz)` 换回 Unity 是 `(nx, ny, -nz)`；自定义网格按 z 取反并反转三角形绕序。
@@ -101,6 +101,16 @@
 - 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。
 - `gfx.bake` 的 `vUv` 与采样坐标一致（`vUv.y=0` 即贴图 `v=0`），不要再手动翻 y；颜色目标用 `format: 'srgb'` 并输出线性值，数据目标（遮罩、高度、法线）用 `rgba8`。
 - 程序化材质优先 GPU 烘焙（原版 three.js 的 RenderTarget + 全屏 pass 可直接对照 `gfx.bake` 机械移植），CPU 逐像素生成 1024² 贴图要几秒；作为中间结果的 MRT 用 `filter: 'point', mipmaps: false`。
+
+### 移植 EffectComposer 后处理（gfx.post）
+
+- 写 `screen` 的最后一个 pass 输出线性颜色。原版最后一个 pass 输出 sRGB 编码值（`OutputPass` 或自己 pow 1/2.2），照搬会整体发灰偏亮，结尾补一次 `toLinear`。中间目标存 sRGB 值时用 `rgba8`，与原版一致。
+- `pot_ScreenSize` 是当前 pass 输出目标的尺寸，不是屏幕尺寸。降采样 pass 的源像素大小用 `1.0 / vec2(textureSize(tSrc, 0))`；原版按 `resolution` 统一传的 uniform 要逐个核对。
+- 时间累积（自动曝光、TAA）用 `history: true` 目标，首帧读到透明黑，着色器里把 `prev <= 0` 当作首帧直接取当前值，否则开局会从全黑慢慢亮起来。
+- 深度、世界坐标用 `<pot/post>` 的 `pot_WorldPos`、`pot_IsSky`，不要照搬原版的 `cameraNear/Far` 线性化：Unity 是 reversed Z，且远平面不同。
+- 原版的方向向量（太阳、闪电方向）是 three 坐标，传进来要把 z 取反；太阳屏幕位置用 `pot_WorldToUv(camPos + pot_SunDir * 500)`，z（w）< 0 时在相机后方，要关掉眩光。
+- 链生效时 URP 后处理被关闭，`scene.post` 里的 SSAO、景深、tonemap 全部失效；退路是先查 `ctx.gfx.supported` 和每个着色器的 `ok`，`gfx.post` 出错会抛异常，捕获后再走 `scene.post`（见 jimao 的 `lib/post.ts`）。
+- 热重载中途报 `xxx is not defined`（新加了 import 的模块）多半是编辑过程中保存的中间版本，已自动回滚；以最后一次重载或冷启动的日志为准。
 
 ### 移植原版自定义材质补丁（onBeforeCompile）
 

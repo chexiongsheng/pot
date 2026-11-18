@@ -9,6 +9,8 @@ import { createMats, MATS, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
 import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, type MatToken } from '../lib/origlevel'
 import { registerSfx, sfx } from '../lib/sfx'
+import { createPost } from '../lib/post'
+import { on } from '../lib/bus'
 import * as T from '../lib/textures'
 import { game } from '../lib/types'
 
@@ -24,6 +26,7 @@ interface QualityLevel {
   ao: number
   antialias: 'none' | 'fxaa' | 'smaa'
   reflectionShadows: boolean
+  bloom?: boolean
 }
 
 interface SurfaceDef {
@@ -271,7 +274,10 @@ export function apply(ctx: Context) {
   scene.ambient({ sky: look.ambient.sky, equator: look.ambient.equator, ground: look.ambient.ground }, look.ambient.reflection)
   scene.sky(look.sky)
   scene.fog(look.fog.color, look.fog.density, { height: look.fog.height, base: look.fog.base, sun: look.fog.sun })
-  scene.post(look.post)
+  // 后处理：游戏自己的链（原版移植）；平台不支持运行时着色器时回退到 URP 后处理
+  const post = createPost(ctx, { exposure: look.postExposure ?? 1, sunColor: look.sky.sun })
+  if (!post) scene.post(look.post)
+  on(ctx, 'jimao/post', (values) => post?.set(values))
 
   for (const [x, z] of level.masts) {
     scene.light({ type: 'spot', name: 'mast', position: P(x, 11.7, z), rotation: [90, 0, 0], intensity: 2.4, range: 30, spotAngle: 95, color: '#ffe2b0' })
@@ -289,6 +295,7 @@ export function apply(ctx: Context) {
     scene.quality({ renderScale: q.renderScale, shadowDistance: q.shadowDistance, shadowResolution: q.shadowResolution, shadowCascades: q.shadowCascades })
     scene.reflection({ enabled: q.reflection > 0, height: 0, scale: q.reflection > 0 ? q.reflection : undefined, exclude: [VIEW_LAYER], shadows: q.reflectionShadows })
     scene.post({ ao: q.ao, antialias: q.antialias })
+    post?.quality(q.bloom !== false)
     scene.weather({ ...look.weather, drops: rainFx ? 0 : q.drops })
   }
   applyQuality(game(ctx)?.settings.quality ?? 2)
@@ -321,10 +328,44 @@ export function apply(ctx: Context) {
   let tensionVol = 0
   let lastVol = -1
 
+  // ---- 雷电（原版：每 30–60 秒一次，强度 0.3–1；闪光曲线驱动天空与雾的提亮，雷声按强度延迟） ----
+  const thunderRand = rng(97)
+  let thunderNext = 12 + thunderRand() * 18
+  const thunder = { t: 99, power: 0 }
+  const pendingSounds: { at: number; near: boolean; gain: number }[] = []
+  const strike = (intensity: number) => {
+    thunder.t = 0
+    thunder.power = Math.min(1, intensity)
+    const a = Math.PI * (0.55 + thunderRand() * 0.9)
+    const d = [Math.cos(a), 0.35 + thunderRand() * 0.3, Math.sin(a) * (thunderRand() < 0.5 ? -1 : 1)]
+    const l = Math.hypot(d[0], d[1], d[2])
+    post?.set({ uFlashDir: [d[0] / l, d[1] / l, -d[2] / l] })
+    pendingSounds.push({ at: t + 0.5 + (1 - intensity) * 2 + thunderRand() * 0.6, near: intensity > 0.6, gain: 0.35 + 0.65 * intensity })
+  }
+  ;(ctx as any).on('jimao/thunder', (i: number) => strike(i ?? 0.8))
+  const updateThunder = (dt: number, paused: boolean) => {
+    if (!paused) {
+      thunderNext -= dt
+      if (thunderNext <= 0) { thunderNext = 30 + thunderRand() * 30; strike(0.3 + 0.7 * thunderRand()) }
+    }
+    thunder.t += dt
+    const tt = thunder.t
+    const value = tt < 0.9 ? thunder.power * Math.exp(-tt * 5) * (0.55 + 0.45 * Math.sin(tt * 47) * Math.sin(tt * 13 + 1)) * 0.35 : 0
+    post?.set({ uThunder: Math.max(0, value) })
+    for (let i = pendingSounds.length - 1; i >= 0; i--) {
+      const s = pendingSounds[i]
+      if (t < s.at) continue
+      pendingSounds.splice(i, 1)
+      ctx.audio.play(sfx(s.near ? 'thunderNear' : 'thunder'), { volume: s.gain, pitch: 0.9 + thunderRand() * 0.2 })
+    }
+  }
+
   let t = 0
   ctx.on('update', (dt) => {
     t += dt
     const g = game(ctx)
+    post?.update(dt)
+    updateThunder(dt, g?.phase === 'paused')
     const quality = g?.settings.quality ?? 2
     if (quality !== appliedQuality) applyQuality(quality)
     const relays = g?.relays ?? []

@@ -1,6 +1,6 @@
 /** HUD：指南针、任务目标、生命、弹药、准星与命中标记、击杀信息、无线电字幕、敌情警告、交互环、受伤暗角、渐黑 */
 import type { Context } from '@pot/core'
-import { on } from '../lib/bus'
+import { emit, on } from '../lib/bus'
 import { levelPoints, type LevelData } from '../lib/level'
 import { angleDelta, clamp, formatTime, sub, yawOf } from '../lib/math'
 import { C } from '../lib/palette'
@@ -22,11 +22,8 @@ export function apply(ctx: Context) {
   let message = { text: '', t: 0 }
   let marker = { t: 0, kill: false, weak: false }
   let feed: { text: string; weak: boolean; t: number }[] = []
-  let hurtShown = -1
-  const mixHex = (a: string, b: string, t: number) => {
-    const ch = (h: string, i: number) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16)
-    return '#' + [0, 1, 2].map((i) => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
-  }
+  let hurtShown = ''
+  let lowHealth = 0
 
   on(ctx, 'jimao/radio', (text) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
   on(ctx, 'jimao/warn', (text) => { warn = { text, t: 0 } })
@@ -53,15 +50,16 @@ export function apply(ctx: Context) {
       feed = feed.filter((f) => f.t < 5)
     }
 
-    // 受伤暗角：驱动后处理 Vignette 的强度与颜色（基础值来自 look.post）
+    // 受伤红边、低血量去饱和与暗角、ADS 边缘柔化：交给后处理链（lib/post.ts 的 grade pass）
     {
-      const low = live ? clamp(1 - p.health / 45, 0, 1) : 0
-      const v = live ? Math.max(p.hurt * 0.8, low * (0.45 + 0.15 * Math.sin(g.phaseTime * 5))) : 0
-      const q = Math.round(clamp(v, 0, 1) * 40) / 40
-      if (q !== hurtShown) {
-        hurtShown = q
-        const base = tuning.look.post
-        ctx.scene.post({ vignette: base.vignette + (0.55 - base.vignette) * q, vignetteSmooth: base.vignetteSmooth + 0.3 * q, vignetteColor: mixHex('#000000', '#8a0c06', Math.min(1, q * 1.6)) })
+      const low = live ? clamp((0.55 - p.health / tuning.player.maxHealth) / (0.55 - 0.12), 0, 1) : 0
+      lowHealth += (low * low * (3 - 2 * low) - lowHealth) * Math.min(1, dt * 4)
+      const damage = live ? clamp(p.hurt, 0, 1) : 0
+      const ads = live ? clamp(w.ads, 0, 1) : 0
+      const key = [damage, lowHealth, ads].map((v) => Math.round(v * 200)).join(',')
+      if (key !== hurtShown) {
+        hurtShown = key
+        emit(ctx, 'jimao/post', { uDamage: damage, uLowHealth: lowHealth, uAds: ads })
       }
     }
 

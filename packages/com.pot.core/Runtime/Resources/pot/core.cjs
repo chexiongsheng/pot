@@ -45,6 +45,7 @@ var pot = (() => {
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
     PluginsService: () => PluginsService,
+    PostChain: () => PostChain,
     RegistryService: () => RegistryService,
     Runtime: () => Runtime,
     SceneService: () => SceneService,
@@ -2999,6 +3000,35 @@ var pot = (() => {
   };
 
   // runtime/src/gfx.ts
+  var PostChain = class {
+    constructor(_apply, _dispose) {
+      __publicField(this, "_apply", _apply);
+      __publicField(this, "_dispose", _dispose);
+      /** @internal */
+      __publicField(this, "_shared", 0);
+      /** @internal */
+      __publicField(this, "_binds", []);
+      /** @internal */
+      __publicField(this, "_active", false);
+    }
+    /** 当前是否生效 */
+    get active() {
+      return this._active;
+    }
+    /** 更新共享 uniform */
+    set(values) {
+      if (this._active) this._apply(this._shared, values);
+      return this;
+    }
+    /** 更新第 index 个 pass 的 uniform */
+    setPass(index, values) {
+      if (this._active && this._binds[index] !== void 0) this._apply(this._binds[index], values);
+      return this;
+    }
+    destroy() {
+      return this._dispose?.();
+    }
+  };
   var Shader = class {
     constructor(name, error, _dispose) {
       __publicField(this, "name", name);
@@ -3040,6 +3070,9 @@ uniform vec4 pot_LightColor[16];
 uniform vec4 pot_LightSpot[16];
 uniform vec4 pot_LightAtten[16];
 uniform vec4 pot_LightCount;
+uniform mat4 pot_ScreenVP;
+uniform mat4 pot_ScreenInvVP;
+uniform vec4 pot_DepthParams;
 `;
   var HEADER = `#version 310 es
 precision highp float;
@@ -3088,6 +3121,38 @@ void main() {
   vUv = pot_UV;
   gl_Position = vec4(pot_Position.xy, 0.0, 1.0);
 }
+`,
+    "pot/post": `#ifndef POT_POST
+#define POT_POST
+// 后处理 pass 用（gfx.post）：vUv 原点在左下，与 NDC 一致（ndc = vUv * 2 - 1）
+// pot_ScreenSize 为本 pass 输出目标的 (宽, 高, 1/宽, 1/高)
+in vec2 vUv;
+// 深度纹理（inputs 里 'depth'）的原始值 → 0（近）..1（远），已处理 reversed Z
+float pot_Depth01(float raw) {
+  return pot_DepthParams.z > 0.5 ? 1.0 - raw : raw;
+}
+// 视空间距离（沿视线方向的深度，米）
+float pot_EyeDepth(float raw) {
+  float n = pot_DepthParams.x, f = pot_DepthParams.y;
+  return n * f / (f - pot_Depth01(raw) * (f - n));
+}
+bool pot_IsSky(float raw) {
+  return pot_Depth01(raw) >= 0.99999;
+}
+vec3 pot_WorldPos(vec2 uv, float raw) {
+  vec4 p = pot_ScreenInvVP * vec4(uv * 2.0 - 1.0, pot_Depth01(raw) * 2.0 - 1.0, 1.0);
+  return p.xyz / p.w;
+}
+// 从相机指向该像素的世界方向
+vec3 pot_ViewDir(vec2 uv) {
+  return normalize(pot_WorldPos(uv, 0.5) - pot_CameraPos.xyz);
+}
+// 世界坐标 → 屏幕 uv（z = 裁剪空间 w，<= 0 表示在相机后方）
+vec3 pot_WorldToUv(vec3 p) {
+  vec4 c = pot_ScreenVP * vec4(p, 1.0);
+  return vec3(c.xy / max(abs(c.w), 1e-6) * 0.5 + 0.5, c.w);
+}
+#endif
 `,
     "pot/lit": `#ifndef POT_LIT
 #define POT_LIT
@@ -3386,6 +3451,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_host", _host);
       /** 程序名 → 引用数（同名程序可被多个插件共享） */
       __publicField(this, "_refs", /* @__PURE__ */ new Map());
+      __publicField(this, "_post");
     }
     /** 后端名（d3d11）；为空表示当前平台不支持运行时着色器 */
     get backend() {
@@ -3456,6 +3522,73 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         };
       }, `gfx.bake(${program})`);
       return ids.map((id) => new Texture(id, width, height, dispose));
+    }
+    /**
+     * 设置每帧后处理链：相机画面（HDR 线性）渲染完成后、URP 后处理之前依次执行各 pass（全屏程序）。
+     * 链生效期间自动关闭 URP 自带后处理（色调映射、bloom 等由游戏自己实现）；最后一个写 'screen' 的 pass 应输出线性颜色。
+     * 随调用方插件卸载而关闭。
+     */
+    post(options) {
+      const engine = this._host.engine;
+      if (!options.passes?.length) throw new Error("gfx.post：至少需要一个 pass");
+      const targets = options.targets ?? {};
+      for (const name of Object.keys(targets)) {
+        if (name === "scene" || name === "depth" || name === "screen") throw new Error(`gfx.post：目标名 ${name} 是保留名`);
+      }
+      const programs = options.passes.map((p, i) => {
+        const name = typeof p.shader === "string" ? p.shader : p.shader.name;
+        if (typeof p.shader !== "string" && p.shader.error) throw new Error(`gfx.post：pass ${i} 的着色器 ${name} 编译失败`);
+        if (p.output !== "screen" && !(p.output in targets)) throw new Error(`gfx.post：pass ${i} 的输出目标不存在：${p.output}`);
+        for (const [u, t] of Object.entries(p.inputs ?? {})) {
+          if (typeof t === "string" && t !== "scene" && t !== "depth" && !(t in targets)) throw new Error(`gfx.post：pass ${i} 的输入 ${u} 指向不存在的目标：${t}`);
+        }
+        return name;
+      });
+      const apply = (id, values) => applyUniforms(engine, id, values);
+      const chain = new PostChain(apply, () => dispose());
+      const dispose = this.ctx.effect(() => {
+        chain._shared = engine.gfxBakeBegin();
+        if (options.uniforms) apply(chain._shared, options.uniforms);
+        chain._binds = options.passes.map((p) => {
+          const id = engine.gfxBakeBegin();
+          if (p.uniforms) apply(id, p.uniforms);
+          for (const [u, t] of Object.entries(p.inputs ?? {})) {
+            if (typeof t !== "string") apply(id, { [u]: t });
+          }
+          return id;
+        });
+        const json = JSON.stringify({
+          shared: chain._shared,
+          targets: Object.entries(targets).map(([name, t]) => ({
+            name,
+            width: Math.round(t.width ?? 0),
+            height: Math.round(t.height ?? t.width ?? 0),
+            scale: t.scale ?? 1,
+            format: t.format ?? "rgba16f",
+            filter: t.filter === "point" ? 0 : 1,
+            history: t.history ? 1 : 0
+          })),
+          passes: options.passes.map((p, i) => ({
+            program: programs[i],
+            output: p.output,
+            inputs: Object.entries(p.inputs ?? {}).filter(([, t]) => typeof t === "string").map(([u, t]) => `${u}=${t}`),
+            bind: chain._binds[i],
+            blend: { none: 0, alpha: 1, add: 2, premultiplied: 3 }[p.blend ?? "none"]
+          }))
+        });
+        const error = engine.gfxPost(json);
+        if (error) throw new Error(`gfx.post：${error}`);
+        if (this._post) this._post._active = false;
+        this._post = chain;
+        chain._active = true;
+        return () => {
+          if (this._post !== chain) return;
+          chain._active = false;
+          this._post = void 0;
+          engine.gfxPost("");
+        };
+      }, "gfx.post");
+      return chain;
     }
     /** 引用归零后延迟两帧再释放：热重载时新单元会先重新登记同名程序，旧程序得以平滑替换或在出错时保留 */
     _release(name, clock) {
@@ -3860,7 +3993,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
         gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
         gfxBakeBegin: () => G.BakeBegin(),
-        gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!"
+        gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
+        gfxPost: (json) => G.Post(json) ?? ""
       }
     };
   }

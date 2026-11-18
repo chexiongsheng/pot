@@ -30,6 +30,8 @@ export interface Events {
   'jimao/message'(text: string): void
   'jimao/feed'(text: string, weak: boolean): void
   'jimao/hitmarker'(kill: boolean, weak: boolean): void
+  /** 后处理的游戏参数（uDamage、uLowHealth、uAds、uFade、uSaturation 等），world 转给后处理链 */
+  'jimao/post'(values: Record<string, number>): void
   /** 菜单命令：start 开始、resume 继续、retry 重新部署、restart 重新开始、title 返回标题 */
   'jimao/command'(cmd: 'start' | 'resume' | 'retry' | 'restart' | 'title'): void
 }

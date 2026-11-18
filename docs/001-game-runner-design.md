@@ -198,7 +198,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 缺口：没有实例化。原版每实例一个 `aSeed vec4`，现在把实例展开成普通网格（每实例 4 个顶点，种子放在法线和 uv 里），顶点数和上传量是实例化的 4 倍，雨丝 19040 顶点尚可，上万实例的粒子会吃紧。建议 `scene.mesh` 支持 `instances`（每实例属性 + 数量），C# 用 `DrawIndexedInstanced`。
 - 缺口：网格没有自定义顶点属性，只能借用 normals/uvs 位置，且 colors 会被转线性；建议 `scene.mesh` 支持 `attributes: { aSeed: { size: 4, data } }`，GLSL 用同名 `in` 接收。
 - 缺口：没有 `fov`、渲染分辨率之类的相机内置量，目前用 `pot_Proj[1][1]` 和 `pot_ScreenSize` 反推。
-- 未移植：雷声事件（原版每 30 到 60 秒触发一次 `thunder`，驱动闪电与音效），留到灯光一步一起做。gfx 雨可用时关掉了 `scene.weather` 的内置雨滴粒子，地面湿润仍由 weather 提供。
+- 雷声事件已在后处理一步移植（见下文）。gfx 雨可用时关掉了 `scene.weather` 的内置雨滴粒子，地面湿润仍由 weather 提供。
 
 移植原版标题机位（z()：周期 max(26, 路径长/速度)、smoothstep 混合缓动、位置与目标微晃、轻微滚转、首尾淡入淡出）和标题菜单（m-veil 渐变遮罩、上下黑边、B4 eyebrow、超大字距标题、带短条的简介、横排主次按钮、右下操作速览），以及暂停、阵亡、简报页的版式与文案后新发现：
 
@@ -214,6 +214,20 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 缺口：Runner 没有固定步长的物理回调。`update` 的 dt 直接是帧间隔，窗口在后台时约 4 fps（dt≈0.25 s），游戏自写的 AABB 移动一帧冲刺 1.75 米，直接跨过 0.6 米厚的空气墙。jimao 先用子步（每步 ≤ 0.2 米）和越界拉回兜底；建议 Runner 提供 `ctx.on('fixedUpdate')`（固定 dt、单帧最多若干步），或对 dt 设上限并在后台时降帧而不是放大 dt。
 - 缺口：存档会把越界、卡墙等坏状态原样恢复。建议 `state.define` 支持 `validate(state)`，读档失败时回到 init。
 - 移植 bug：原版道具碰撞把 three 的 `Box3.min/max`（Vector3）传给 `physics.addBox`，适配层按数组下标取值得到 NaN，557 个碰撞盒里 452 个无效（道具、集装箱堆等全部可穿）。适配层已改为同时接受数组和 `{x,y,z}`。
+
+移植原版后处理（J6/K6 六级降采样与上采样 Bloom、Q6 两段横向光条、eA 自动曝光与可见度、tA 镜头污渍、nA 调色：AgX 混合、色差、暗角、受伤与低血量红晕、开镜、太阳眩光、雷电闪光；iA：FXAA、锐化、颗粒、抖动）和雷电（首次 12 到 30 秒、之后每 30 到 60 秒，按距离延迟的远雷/近雷合成音）时补齐：
+
+- 自定义后处理链 `ctx.gfx.post({ targets, passes, uniforms })`：C# 在 `BeforeRenderingPostProcessing` 按顺序执行全屏 pass，目标可按屏幕比例（`scale`）或固定尺寸分配，`history: true` 为双缓冲（读上一帧、写本帧，新建时清成透明黑以识别首帧），内置输入 `scene`（HDR 场景拷贝）和 `depth`（相机深度），最后一个 pass 输出 `screen`。链生效时自动关闭 URP 自带后处理，卸载后恢复。原版的 EffectComposer 链可逐 pass 机械移植。
+- 屏幕空间内置量：`pot_ScreenVP`、`pot_ScreenInvVP`（与深度贴图一致的视图投影及其逆，已处理平台 y 翻转与 reversed Z）、`pot_DepthParams`；`<pot/post>` 提供 `pot_Depth01`、`pot_EyeDepth`、`pot_IsSky`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`。原版靠 `cameraNear/Far`、`projectionMatrixInverse` 自己重建，这里统一由 Runner 提供。
+- 画质档位可设 `bloom: false`，jimao 把 Bloom、污渍、光条的强度置零（默认四档都开，与原版一致）。
+
+仍缺或有出入：
+
+- 链里的 pass 不能单独开关：关掉 Bloom 只能把强度置零，降采样和光条 pass 仍在执行。建议 `PostChain.enable(i, on)`，或在 pass 上加 `enabled`。
+- 体积光（原版 god rays 的 32 步光线步进）未移植：需要在后处理里采主光阴影图，`pot_ShadowMap` 目前只绑定给物体着色器。建议后处理 pass 也能 include `<pot/lit>` 的阴影部分。
+- 后处理链与 `scene.post` 二选一：链生效后 `scene.post` 的 SSAO、景深等 URP 效果一起失效。若游戏只想替换调色，需要自己实现其余效果；建议提供"插在 URP 后处理之后"的挂点。
+- 镜头污渍原版用噪声贴图，这里改为程序化值噪声一次性 bake；外观接近但不完全相同。
+- 雷电闪光只作用于后处理（天空与雾提亮），原版同样如此；没有闪电对场景物体的直射光照，也没有闪电几何。
 
 ## 9. 资产即代码
 
