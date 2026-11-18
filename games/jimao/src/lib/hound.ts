@@ -14,7 +14,7 @@ import { hdr, toUnityTransform } from './origlevel'
 const W = Vector3, Ye = Matrix4, Lt = Quaternion, ls = SphereGeometry, Ci = TorusGeometry
 
 // ---- 原版 rig（iu）：骨骼只有平移，几何按骨骼局部坐标保存（等价于原版 translate(world) + 逆绑定矩阵） ----
-class Rig {
+export class Rig {
   constructor() { this.bones = []; this.index = {}; this.groups = new Map() }
   bone(name, parent, x, y, z) {
     if (parent !== null && !(parent in this.index)) throw new Error('rig: unknown parent bone ' + parent)
@@ -51,23 +51,31 @@ class Rig {
 }
 
 // ---- 原版颜色常量与建模辅助（逐字） ----
-const Ss = [1.15, 1.15, 1.15], vm = [0.95, 0.96, 0.97], Ts = [1, 0.34, 0.08], s0 = [0.1, 0.11, 0.12], ga = [0.035, 0.035, 0.038]
-const Of = [1, 0.7, 0.07], As = [1, 1, 1], Yn = [2.4, 2.5, 2.6], an = [0.45, 0.46, 0.48], IC = [9, 9, 9.6], zC = [5.5, 4, 1.6]
-const va = Math.PI / 2
-const ft = (i, e, t, n = 0.008) => Wi(i, e, t, n)
-const Ce = (i, e, t, n, s = 0, o = 0, r = 0, a = 1) => Dc(i, { p: [e, t, n], r: [s, o, r], s: a })
-const ds = (i, e, t, n = 12) => ot(i, e, t, n)
-const Ro = (i, e, t, n = 12) => Dc(ot(i, e, t, n), { r: [0, 0, -va] })
-const Si = (i, e, t, n = 12) => Dc(ot(i, e, t, n), { r: [va, 0, 0] })
+export const Ss = [1.15, 1.15, 1.15]
+export const vm = [0.95, 0.96, 0.97]
+export const Ts = [1, 0.34, 0.08]
+export const s0 = [0.1, 0.11, 0.12]
+export const ga = [0.035, 0.035, 0.038]
+export const Of = [1, 0.7, 0.07]
+export const As = [1, 1, 1]
+export const Yn = [2.4, 2.5, 2.6]
+export const an = [0.45, 0.46, 0.48]
+const IC = [9, 9, 9.6], zC = [5.5, 4, 1.6]
+export const va = Math.PI / 2
+export const ft = (i, e, t, n = 0.008) => Wi(i, e, t, n)
+export const Ce = (i, e, t, n, s = 0, o = 0, r = 0, a = 1) => Dc(i, { p: [e, t, n], r: [s, o, r], s: a })
+export const ds = (i, e, t, n = 12) => ot(i, e, t, n)
+export const Ro = (i, e, t, n = 12) => Dc(ot(i, e, t, n), { r: [0, 0, -va] })
+export const Si = (i, e, t, n = 12) => Dc(ot(i, e, t, n), { r: [va, 0, 0] })
 const mm = new W(), gm = new W(), X_ = new Lt(), DC = new W(0, 1, 0), Y_ = new Ye(), LC = new W(1, 1, 1)
-function su(i, e, t, n = t, s = 8) {
+export function su(i, e, t, n = t, s = 8) {
   mm.set(i[0], i[1], i[2]), gm.set(e[0], e[1], e[2])
   const o = mm.distanceTo(gm), r = ot(n, t, o, s)
   return X_.setFromUnitVectors(DC, gm.clone().sub(mm).normalize()), Y_.compose(mm.clone().add(gm).multiplyScalar(0.5), X_, LC), r.applyMatrix4(Y_), r
 }
-const Ur = (i, e = 14, t = 10, n = 1, s = 1, o = 1) => { const r = new ls(i, e, t); return r.scale(n, s, o), r }
+export const Ur = (i, e = 14, t = 10, n = 1, s = 1, o = 1) => { const r = new ls(i, e, t); return r.scale(n, s, o), r }
 const $_ = (i, e, t) => Ce(Ro(0.0075, 0.0075, 0.006, 6), i, e, t)
-const Yv = (i, e, t) => Ce(ds(0.0075, 0.0075, 0.006, 6), i, e, t)
+export const Yv = (i, e, t) => Ce(ds(0.0075, 0.0075, 0.006, 6), i, e, t)
 const kC = (i, e, t) => Ce(Si(0.0075, 0.0075, 0.006, 6), i, e, t)
 
 /** 原版 $v：站高、大腿/小腿长、髋外展偏移、髋位、落脚点 */
@@ -342,7 +350,7 @@ const registered = new WeakSet<object>()
 const meshName = (p) => `hound-${p.bone}-${p.slot}`
 
 /** 原版 Em 的材质槽：shell/metal 用 GPU 烘焙材质（三平面，乘顶点色）；glow 为 HDR 顶点色的无光照；lens 每只一份、每帧改颜色 */
-function slotMaterial(slot, mats) {
+export function slotMaterial(slot, mats) {
   if (slot === 'glow') return { color: '#ffffff', material: { mode: 'unlit', vertexColors: true, shadows: false } }
   if (slot === 'lens') return { color: '#000000', material: { mode: 'lit', metallic: 0, smoothness: 0.6, emission: '#ffffff', emissionIntensity: 1, shadows: false, wet: 0 } }
   const name = slot === 'shell' ? 'armor_white' : 'gunmetal'
@@ -354,7 +362,7 @@ function slotMaterial(slot, mats) {
 }
 
 /** 隐形命中体（Runner 没有"只碰撞不渲染"的开关：用加色混合的黑色代替） */
-const HIDDEN = { color: '#000000', material: { mode: 'additive', shadows: false } }
+export const HIDDEN = { color: '#000000', material: { mode: 'additive', shadows: false } }
 
 export interface HoundModel {
   anim: any

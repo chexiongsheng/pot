@@ -160,7 +160,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 |---|---|
 | ✅ 已完成 | 17 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 27 |
+| ❌ 未完成 | 29 |
 
 #### 渲染与着色器（gfx）
 
@@ -202,6 +202,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ❌ | 批量变换同步 | 远景、机器狗 | 原版每帧改 64 个矩阵，现在逐个比较逐个下发；每只机器狗约 30 个刚性部件逐帧设世界变换，敌人一多开销明显；建议 `scene.setTransforms(ids, Float32Array)` |
 | ⚠️ | 没有蒙皮网格 `SkinnedMesh` | 机器狗 | 原版机器狗是刚性分件，用父子层级 + 逐帧设部件变换代替骨骼（[hound.ts](games/jimao/src/lib/hound.ts)）；真正的软蒙皮角色（人形、布料）还做不了，建议支持骨骼权重与骨骼矩阵数组 |
 | ❌ | 只碰撞不渲染的实体 | 机器狗 | 命中盒要么挂在可见网格上，要么另建实体再隐藏；建议 `spawn({ collider, visible: false })` 或 `scene.addCollider` 可跟随实体 |
+| ❌ | 半透明材质双面 | 飞鸥 | `lit-fade`/`unlit-fade` 只渲染正面，原版旋翼残影盘是 DoubleSide，现在正反各建一片；建议 `MaterialOptions.cull` |
 | ❌ | 点光源物理单位选项 | 远景 | three 强度/π 与 distance 的换算写在游戏里 |
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
@@ -221,6 +222,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ❌ | 固定步长 `fixedUpdate` | 穿墙 | 后台约 4 fps 时 dt≈0.25 s 会跨过空气墙；jimao 用子步兜底 |
 | ❌ | `state.define` 的 `validate` | 穿墙 | 存档会原样恢复越界、卡墙等坏状态 |
 | ❌ | 跨热重载缓存网格 | 远景 | 约 195 万顶点每次重建约 6 秒；建议按内容哈希复用 |
+| ❌ | 加载器支持 `export const a = 1, b = 2` | 水花、飞鸥 | 开发期源码加载器只导出第一个变量，其余运行时未定义，tsc 不报错；已踩两次，应在 devtools 的转译里修正或在 `pot check` 里报错 |
 
 #### UI
 

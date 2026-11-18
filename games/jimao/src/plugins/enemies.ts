@@ -5,6 +5,7 @@ import { LEVEL_LAYER, type LevelData } from '../lib/level'
 import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, RAD, segmentDistance, sub, yawOf } from '../lib/math'
 import { buildEnemy, type EnemyModel } from '../lib/models'
 import { syncHound } from '../lib/hound'
+import { syncGull } from '../lib/gull'
 import { createMats, type Mats } from '../lib/mats'
 import { levelCollision } from '../lib/physics'
 import { sfx } from '../lib/sfx'
@@ -45,6 +46,18 @@ export interface Enemy {
   flash: number
   /** 猎犬转向角速度（度/秒） */
   yawRate?: number
+  /** 飞鸥（原版 x()）：绕点角、绕飞半径、巡逻半径、换向计时、避障推力、天花板高度、探测轮转、相位、本帧加速度、冒烟计时 */
+  orbitA?: number
+  orbitR?: number
+  patrolR?: number
+  flipT?: number
+  avoid?: Vec3
+  ceil?: number
+  ceilT?: number
+  feeler?: number
+  phase?: number
+  acc?: Vec3
+  smokeT?: number
 }
 
 interface Bolt { pos: Vec3; vel: Vec3; life: number; damage: number; type: EnemyType }
@@ -85,6 +98,7 @@ const world = levelCollision(level, 'enemy')
       models.set(e.id, m)
       for (const [part, weak] of m.parts) partOwner.set(part, { id: e.id, weak })
       m.hound?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(e.yaw))
+      m.gull?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(e.yaw))
     }
     return m
   }
@@ -113,6 +127,7 @@ const world = levelCollision(level, 'enemy')
       orbit: rand() < 0.5 ? -1 : 1, alt: lerp(T.altMin ?? 0, T.altMax ?? 0, rand()), lunge: 0, lungeCd: 0,
       detour: 0, detourT: 0, dyingT: 0, grounded: true, anim: rand() * 10, flash: 0,
     }
+    if (type === 'gull') initGull(e, T)
     s.list.push(e)
     model(e)
     sync(e)
@@ -147,15 +162,19 @@ const world = levelCollision(level, 'enemy')
     e.hp -= dmg
     e.flash = 0.08
     const p = player(ctx)
-    const h = models.get(e.id)?.hound
-    if (h && p) {
-      const d = norm(sub(hit.point, eyeOf(p)))
-      h.anim.hit(dmg, { x: d[0], y: d[1], z: -d[2] }, owner.weak)
+    const m = models.get(e.id)
+    const dir = p ? norm(sub(hit.point, eyeOf(p))) : undefined
+    if (m?.hound && dir) m.hound.anim.hit(dmg, { x: dir[0], y: dir[1], z: -dir[2] }, owner.weak)
+    if (m?.gull && dir) {
+      // 原版 damage：被打退 min(3, dmg·.09)，机身随机歪一下
+      const k = Math.min(3, dmg * 0.09)
+      e.vel[0] += dir[0] * k; e.vel[1] += dir[1] * k; e.vel[2] += dir[2] * k
+      m.gull.anim.hit()
     }
     if (p && e.mode !== 'combat') enterCombat(e, p.pos)
     if (e.hp <= 0) {
       hit.killed = true
-      die(e, owner.weak)
+      die(e, owner.weak, dir)
     }
   })
 
@@ -174,15 +193,24 @@ const world = levelCollision(level, 'enemy')
     }
   }
 
-  function die(e: Enemy, weak: boolean) {
+  function die(e: Enemy, weak: boolean, dir?: Vec3) {
     releaseToken(e)
     e.mode = 'dying'
     e.dyingT = 0
     e.attack = 'idle'
-    if (e.type === 'gull') {
-      e.vel = [e.vel[0] * 0.5 + (rand() - 0.5) * 2, 1.5, e.vel[2] * 0.5 + (rand() - 0.5) * 2]
+    const m = models.get(e.id)
+    if (m?.gull) {
+      // 原版 v：随机掉一个旋翼（火花、碎片、烟），上抛 1.5，沿弹道再推 2.5，熄灯后自旋坠落
+      e.vel[1] += 1.5
+      if (dir) { e.vel[0] += dir[0] * 2.5; e.vel[1] += dir[1] * 2.5; e.vel[2] += dir[2] * 2.5 }
+      const at = m.gull.anim.die()
+      const pt: Vec3 = [at.x, at.y, -at.z]
+      scene.burst({ kind: 'spark', position: pt, direction: [0, 1, 0], color: '#ffc070', intensity: 8, count: 14, speed: 5, spread: 0.8, size: 0.02, life: 0.5 })
+      scene.burst({ kind: 'smoke', position: pt, direction: [0, 1, 0], color: '#3a3c3e', count: 3, speed: 0.6, spread: 0.6, size: 0.5, life: 1 })
+      for (const x of m.gull.hits) x.active(false)
+      m.light.intensity(0)
     }
-    const h = models.get(e.id)?.hound
+    const h = m?.hound
     if (h) {
       h.anim.die()
       e.vel[0] *= 0.3; e.vel[2] *= 0.3
@@ -217,6 +245,7 @@ const world = levelCollision(level, 'enemy')
     const d = dist(origin, target)
     const spread = lerp(T.spreadNear, T.spreadFar, clamp(d / T.fireRange, 0, 1))
     const dir = jitter(norm(sub(target, origin)), spread, rand)
+    if (m.gull) { e.vel[0] -= dir[0] * 0.35; e.vel[1] -= dir[1] * 0.35; e.vel[2] -= dir[2] * 0.35 }
     const speed = e.type === 'gull' ? T.boltSpeed : T.shotSpeed
     s.bolts.push({ pos: origin, vel: [dir[0] * speed, dir[1] * speed, dir[2] * speed], life: 1.6, damage: e.type === 'gull' ? T.boltDamage : T.shotDamage, type: e.type })
     ctx.audio.play(sfx(e.type === 'gull' ? 'bolt' : 'houndShot'), { volume: 0.6, position: origin, pitch: 0.9 + rand() * 0.2 })
@@ -252,8 +281,164 @@ const world = levelCollision(level, 'enemy')
   function sync(e: Enemy) {
     const m = model(e)
     if (m.hound) { syncHound(m.hound); return }
+    if (m.gull) { syncGull(m.gull); return }
     m.root.position = e.pos
-    m.root.rotation = [clamp(e.vel[1] * -4, -20, 20), e.yaw, e.mode === 'dying' ? Math.min(80, e.dyingT * 480) : 0]
+  }
+
+  /** 原版 _activate 中飞鸥的随机参数 */
+  function initGull(e: Enemy, T: any) {
+    e.orbitR = T.rangeMin + 2 + rand() * (T.rangeMax - T.rangeMin - 5)
+    e.alt = T.altMin + 0.8 + rand() * (T.altMax - T.altMin - 1.6)
+    e.patrolR = 4 + rand() * 5
+    e.phase = rand() * 6.283
+    e.orbitA = rand() * 6.283
+    e.ceil = 1e9; e.ceilT = 0; e.flipT = 3 + rand() * 4; e.feeler = 0; e.avoid = [0, 0, 0]; e.acc = [0, 0, 0]; e.smokeT = 0
+  }
+
+  /** 地面/海面平面（原版 physics：x ≤ 30 为 y=0 的地坪，码头外为 y=-1.6 的海面） */
+  const planeY = (x: number) => (x <= 30 ? 0 : -1.6)
+  const MASK = 1 << LEVEL_LAYER
+
+  /**
+   * 飞鸥飞行（原版 x() 的移动部分，Unity 坐标；公式对 z 镜像对称）：
+   * 目标点（交战绕玩家盘旋 / 搜索绕最后位置 / 巡逻绕出生点）→ PD 加速度 + 三向探测避障 → 限加速度、限速 → 逐轴碰撞 → 离地 ≥ 1.1。
+   * 返回与期望朝向的夹角（度），开火要求小于 20°。
+   */
+  function flyGull(e: Enemy, T: any, dt: number, p: PlayerState) {
+    if (e.orbitR === undefined) initGull(e, T)
+    const combat = e.mode === 'combat', hurt = e.hp < T.hp * 0.5, t = e.anim, lk = e.lastKnown
+    let M = T.patrolSpeed, tx: number, ty: number, tz: number
+    if (combat) {
+      M = T.maxSpeed
+      const busy = e.attack !== 'idle'
+      e.flipT! -= dt
+      if (e.flipT! <= 0) {
+        e.flipT = 3 + rand() * 5
+        if (rand() < 0.6) e.orbit = -e.orbit
+        e.orbitR = clamp(e.orbitR! + (rand() - 0.5) * 6, T.rangeMin + 1, T.rangeMax - 2)
+      }
+      if (e.lost > 1.5) {
+        tx = lk[0]; tz = lk[2]; ty = lk[1] + e.alt + 1
+        e.orbitA = Math.atan2(e.pos[2] - lk[2], e.pos[0] - lk[0])
+      } else {
+        e.orbitA! += e.orbit * (busy ? 0.9 : 3.6) / e.orbitR! * dt
+        tx = p.pos[0] + Math.cos(e.orbitA!) * e.orbitR!; tz = p.pos[2] + Math.sin(e.orbitA!) * e.orbitR!; ty = p.pos[1] + e.alt
+      }
+    } else if (e.mode === 'search') {
+      M = 5.5
+      e.orbitA! += 0.5 * dt
+      tx = lk[0] + Math.cos(e.orbitA!) * 4.5; tz = lk[2] + Math.sin(e.orbitA!) * 4.5; ty = lk[1] + Math.min(e.alt, 5.5)
+    } else {
+      e.orbitA! += 0.28 * dt * e.orbit
+      tx = e.home[0] + Math.cos(e.orbitA!) * e.patrolR!; tz = e.home[2] + Math.sin(e.orbitA!) * e.patrolR!; ty = e.home[1]
+    }
+    if (ty > e.ceil!) ty = e.ceil!
+    if (ty < 2.2) ty = 2.2
+    const acc: Vec3 = [(tx - e.pos[0]) * 2.2 - e.vel[0] * 2.4, (ty - e.pos[1]) * 5 - e.vel[1] * 3.6, (tz - e.pos[2]) * 2.2 - e.vel[2] * 2.4]
+    const av = e.avoid!
+    e.feeler = (e.feeler! + 1) % 3
+    const z = Math.hypot(e.vel[0], e.vel[2])
+    if (e.feeler === 0 && z > 0.6) {
+      const P = 2.2 + z * 0.5
+      const h = scene.raycast(e.pos, [e.vel[0] / z, 0, e.vel[2] / z], { maxDistance: P, mask: MASK })
+      if (h) {
+        const Y = 1 - h.distance / P
+        av[0] = h.normal[0] * 26 * Y; av[1] = h.normal[1] * 26 * Y + 9 * Y; av[2] = h.normal[2] * 26 * Y
+        if (Y > 0.5) { e.orbit = -e.orbit; e.flipT = 2.5 }
+      }
+    } else if (e.feeler === 1) {
+      const h = scene.raycast(e.pos, [0, -1, 0], { maxDistance: 2.4, mask: MASK })
+      if (h) av[1] += (2.4 - h.distance) * 10
+    } else if (e.feeler === 2) {
+      e.ceilT! -= dt * 3
+      if (e.ceilT! <= 0) {
+        e.ceilT = 0.35
+        const h = scene.raycast(e.pos, [0, 1, 0], { maxDistance: 4, mask: MASK })
+        e.ceil = h ? e.pos[1] + h.distance - 1.3 : 1e9
+      }
+    }
+    const decay = Math.exp(-6 * dt)
+    for (let k = 0; k < 3; k++) { acc[k] += av[k]; av[k] *= decay }
+    if (hurt) {
+      acc[0] += Math.sin(t * 7.3 + e.phase!) * 5; acc[2] += Math.cos(t * 6.1 + e.phase!) * 5; acc[1] += Math.sin(t * 9.7) * 3
+    }
+    const H = Math.hypot(acc[0], acc[1], acc[2])
+    if (H > T.accel) for (let k = 0; k < 3; k++) acc[k] *= T.accel / H
+    for (let k = 0; k < 3; k++) e.vel[k] += acc[k] * dt
+    const O = Math.hypot(e.vel[0], e.vel[1], e.vel[2])
+    if (O > M) for (let k = 0; k < 3; k++) e.vel[k] *= M / O
+    // 逐轴碰撞：撞上则反弹 .25 并记一次反向推力
+    for (let k = 0; k < 3; k++) {
+      const V = e.vel[k]
+      if (Math.abs(V) < 0.02) continue
+      const Y = V > 0 ? 1 : -1, L = k === 1 ? 0.35 : 0.62
+      const dir: Vec3 = [0, 0, 0]; dir[k] = Y
+      const h = scene.raycast(e.pos, dir, { maxDistance: Math.abs(V) * dt + L, mask: MASK })
+      if (h) {
+        e.vel[k] = -V * 0.25
+        av[k] -= Y * 8
+        if (h.distance < L) e.pos[k] -= Y * (L - h.distance)
+      }
+    }
+    for (let k = 0; k < 3; k++) e.pos[k] += e.vel[k] * dt
+    // 原版 groundHeight(x, z, y + .5) + 1.1
+    const g = scene.raycast([e.pos[0], e.pos[1] + 0.5, e.pos[2]], [0, -1, 0], { maxDistance: 60, mask: MASK })
+    const floor = Math.max(g ? g.point[1] : -Infinity, planeY(e.pos[0])) + 1.1
+    if (e.pos[1] < floor) { e.pos[1] = floor; if (e.vel[1] < 0) e.vel[1] = 0 }
+    // 朝向：交战/搜索时看玩家（或最后位置），否则看飞行方向；转速 3.2 rad/s
+    let q = e.yaw
+    if (combat || e.mode === 'search') q = yawOf(sub(combat && e.lost < 1.5 ? p.pos : lk, e.pos))
+    else if (z > 0.4) q = yawOf(e.vel)
+    const U = angleDelta(e.yaw, q)
+    const turn = 3.2 / RAD * dt
+    e.yaw += clamp(U, -turn, turn)
+    e.acc = acc
+    return Math.abs(U)
+  }
+
+  /** 飞鸥外观：原版姿态、旋翼、频闪、云台、镜头；血量过半冒烟 */
+  function animateGull(e: Enemy, m: EnemyModel, T: any, dt: number, p: PlayerState) {
+    const a = m.gull!.anim
+    const combat = e.mode === 'combat', hurt = e.hp < T.hp * 0.5, acc = e.acc ?? [0, 0, 0]
+    if (e.attack === 'telegraph') a.flare = Math.min(1, a.flare + dt * 4.5)
+    else if (e.attack === 'burst') a.flare = 1
+    a.live(dt, {
+      x: e.pos[0], y: e.pos[1], z: -e.pos[2], yaw: threeYaw(e.yaw), ax: acc[0], ay: acc[1], az: -acc[2], hs: Math.hypot(e.vel[0], e.vel[2]),
+      engage: combat, hurt, mode: combat ? 'engage' : e.mode === 'search' ? 'search' : 'patrol', player: toThree(p.pos), lastKnown: toThree(e.lastKnown),
+    })
+    if (hurt) {
+      e.smokeT = (e.smokeT ?? 0) - dt
+      if (e.smokeT <= 0) {
+        e.smokeT = 0.16
+        scene.burst({ kind: 'smoke', position: e.pos, direction: [0, 1, 0], color: '#26282c', count: 1, speed: 0.8, spread: 0.3, size: 0.3, life: 1.1 })
+        if (rand() < 0.15) scene.burst({ kind: 'spark', position: e.pos, direction: [0, -1, 0], color: '#ffc070', intensity: 8, count: 2, speed: 3, spread: 0.6, size: 0.015, life: 0.3 })
+      }
+    }
+  }
+
+  /** 飞鸥坠毁（原版 g）：重力 9.5、水平阻尼、越转越快；撞到东西、落地/落海或 5 秒后爆炸。返回是否结束 */
+  function crashGull(e: Enemy, m: EnemyModel, dt: number) {
+    e.vel[1] -= 9.5 * dt
+    e.vel[0] *= 1 - 0.4 * dt; e.vel[2] *= 1 - 0.4 * dt
+    const b = Math.hypot(e.vel[0], e.vel[1], e.vel[2])
+    let done = e.dyingT > 5 || e.pos[1] < -3
+    if (!done && b > 0.01) {
+      const h = scene.raycast(e.pos, [e.vel[0] / b, e.vel[1] / b, e.vel[2] / b], { maxDistance: b * dt + 0.3, mask: MASK })
+      if (h) { e.pos = [h.point[0] + h.normal[0] * 0.2, h.point[1] + h.normal[1] * 0.2, h.point[2] + h.normal[2] * 0.2]; done = true }
+    }
+    if (!done) {
+      for (let k = 0; k < 3; k++) e.pos[k] += e.vel[k] * dt
+      const py = planeY(e.pos[0])
+      if (e.pos[1] <= py + 0.2) { e.pos[1] = py + 0.2; done = true }
+    }
+    m.gull!.anim.dead(dt, e.pos[0], e.pos[1], -e.pos[2])
+    e.smokeT = (e.smokeT ?? 0) - dt
+    if (e.smokeT <= 0) {
+      e.smokeT = 0.045
+      scene.burst({ kind: 'smoke', position: e.pos, direction: [0, 1, 0], color: '#151617', count: 1, speed: 0.6, spread: 0.3, size: 0.45, life: 1.3 })
+      if (rand() < 0.5) scene.burst({ kind: 'spark', position: e.pos, direction: norm([rand() - 0.5, rand(), rand() - 0.5]), color: '#ffc070', intensity: 8, count: 3, speed: 4, spread: 0.5, size: 0.015, life: 0.3 })
+    }
+    return done
   }
 
   /** 猎犬：原版步态 H、姿态 O、炮塔/头部追踪、镜头色；死亡时原版 U 的倒地 */
@@ -293,11 +478,7 @@ const world = levelCollision(level, 'enemy')
       if (e.mode === 'dying') {
         e.dyingT += dt
         if (e.type === 'gull') {
-          e.vel[1] -= 18 * dt
-          e.pos[0] += e.vel[0] * dt; e.pos[1] += e.vel[1] * dt; e.pos[2] += e.vel[2] * dt
-          e.yaw += dt * 500
-          const floor = world.support(e.pos[0], e.pos[1], e.pos[2], 0.3, 0.5, 0.5) ?? (world.floor(e.pos[0]) === null ? -1.2 : null)
-          if ((floor !== null && e.pos[1] <= floor + 0.3) || e.dyingT > 4) {
+          if (crashGull(e, m, dt)) {
             explode(e.pos, fighting ? T.explodeDamage : 0, T.explodeRadius)
             remove(e)
             continue
@@ -336,10 +517,11 @@ const world = levelCollision(level, 'enemy')
       }
 
       // 攻击循环
+      const facing = e.type !== 'gull' || Math.abs(angleDelta(e.yaw, yawOf(sub(p.pos, e.pos)))) < 20
       const inRange = e.mode === 'combat' && e.seeing && d < T.fireRange
       if (e.attack === 'idle') {
         e.cooldown -= dt
-        if (inRange && e.cooldown <= 0 && !e.token && tokens < maxTokens && s.tokenGap <= 0) {
+        if (inRange && facing && e.cooldown <= 0 && !e.token && tokens < maxTokens && s.tokenGap <= 0) {
           e.token = true
           tokens++
           s.tokenGap = E.tokenGap * 0.5
@@ -378,31 +560,8 @@ const world = levelCollision(level, 'enemy')
       const toP = sub(p.pos, e.pos)
       const hd = Math.hypot(toP[0], toP[2]) || 1
       if (e.type === 'gull') {
-        let target: Vec3
-        let speed = T.maxSpeed
-        if (e.mode === 'combat') {
-          const want = clamp(hd, T.rangeMin, T.rangeMax)
-          const ang = Math.atan2(-toP[0], -toP[2]) + e.orbit * 0.35
-          target = [p.pos[0] + Math.sin(ang) * want, p.pos[1] + e.alt, p.pos[2] + Math.cos(ang) * want]
-          if (e.goalT <= 0) { e.goalT = 2 + rand() * 2; if (rand() < 0.35) e.orbit *= -1 }
-          if (e.attack !== 'idle') speed *= 0.35
-        } else if (e.mode === 'search') {
-          target = [e.lastKnown[0], e.lastKnown[1] + e.alt, e.lastKnown[2]]
-          speed = T.maxSpeed * 0.7
-        } else {
-          const a = e.anim * 0.35 * e.orbit
-          target = [e.home[0] + Math.sin(a) * 8, Math.max(e.home[1], T.altMin + 2), e.home[2] + Math.cos(a) * 8]
-          speed = T.patrolSpeed
-        }
-        steer(e, target, speed, T.accel, dt, true)
-        e.pos[0] += e.vel[0] * dt; e.pos[1] += e.vel[1] * dt; e.pos[2] += e.vel[2] * dt
-        if (world.blocked(e.pos[0], e.pos[1] - 0.3, e.pos[2], 0.5, 0.6)) { e.pos[1] += 4 * dt; e.vel[1] = Math.max(e.vel[1], 2) }
-        if (e.pos[1] < 2.2) { e.pos[1] = 2.2; e.vel[1] = Math.max(0, e.vel[1]) }
-        const face = e.mode === 'combat' ? yawOf(toP) : Math.hypot(e.vel[0], e.vel[2]) > 0.3 ? yawOf(e.vel) : e.yaw
-        e.yaw += angleDelta(e.yaw, face) * Math.min(1, dt * 5)
-        const flap = Math.sin(e.anim * (e.attack === 'idle' ? 9 : 16)) * 28
-        m.wings[0].localRotation = [0, 0, -flap]
-        m.wings[1].localRotation = [0, 0, flap]
+        flyGull(e, T, dt, p)
+        animateGull(e, m, T, dt, p)
       } else {
         let target: Vec3 = e.goal
         let speed = T.patrolSpeed
