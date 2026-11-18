@@ -203,8 +203,8 @@ namespace Pot
         [Preserve]
         public static void Uniform(int id, string name, int n, float x, float y, float z, float w)
         {
-            Binding b;
-            if (!bindings.TryGetValue(id, out b)) return;
+            var b = Find(id);
+            if (b == null) return;
             float[] v;
             if (!b.uniforms.TryGetValue(name, out v) || v.Length != 4) b.uniforms[name] = v = new float[4];
             v[0] = x; v[1] = y; v[2] = z; v[3] = w;
@@ -214,8 +214,8 @@ namespace Pot
         [Preserve]
         public static void UniformArray(int id, string name, Puerts.ArrayBuffer data)
         {
-            Binding b;
-            if (!bindings.TryGetValue(id, out b) || data == null || data.Bytes == null) return;
+            var b = Find(id);
+            if (b == null || data == null || data.Bytes == null) return;
             var f = new float[data.Count / 4];
             Buffer.BlockCopy(data.Bytes, 0, f, 0, f.Length * 4);
             b.uniforms[name] = f;
@@ -225,8 +225,8 @@ namespace Pot
         [Preserve]
         public static void Texture(int id, string name, int tex)
         {
-            Binding b;
-            if (!bindings.TryGetValue(id, out b)) return;
+            var b = Find(id);
+            if (b == null) return;
             if (tex == 0) b.textures.Remove(name);
             else b.textures[name] = tex;
         }
@@ -238,6 +238,7 @@ namespace Pot
                 foreach (var p in programs.Values) PotGfx_Destroy(p.id);
             programs.Clear();
             bindings.Clear();
+            bakes.Clear();
             uploaded.Clear();
         }
 
@@ -478,61 +479,207 @@ namespace Pot
                 var mf = go.GetComponent<MeshFilter>();
                 var mesh = mf != null ? mf.sharedMesh : null;
                 if (mesh == null || mesh.vertexCount == 0) continue;
-                if (mesh.GetVertexAttributeStream(VertexAttribute.Position) != 0) continue;
-                var vb = mesh.GetNativeVertexBufferPtr(0);
-                var ib = mesh.GetNativeIndexBufferPtr();
-                if (vb == IntPtr.Zero || ib == IntPtr.Zero) continue;
-                var p = programs[b.program];
                 ObjectBuiltins(go.transform);
-                var sub = mesh.GetSubMesh(0);
-
-                writer.Write(p.id);
-                writer.Write(b.flags | frameFlags);
-                writer.Write(vb.ToInt64());
-                writer.Write(ib.ToInt64());
-                writer.Write(mesh.GetVertexBufferStride(0));
-                writer.Write(mesh.indexFormat == IndexFormat.UInt32 ? 1 : 0);
-                writer.Write(sub.indexStart);
-                writer.Write(sub.indexCount);
-                writer.Write(sub.baseVertex);
-                foreach (var a in attrs)
-                    writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? mesh.GetVertexAttributeOffset(a) : 0);
-                foreach (var a in attrs)
-                    writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? AttrFormat(mesh.GetVertexAttributeFormat(a), mesh.GetVertexAttributeDimension(a)) : 0);
-
-                // 贴图
-                var texPos = frame.Position;
-                writer.Write(0);
-                var nt = 0;
-                foreach (var t in p.textures)
-                {
-                    Texture tex = null;
-                    int texId;
-                    if (t.Key == "pot_EnvMap") tex = env;
-                    else if (b.textures.TryGetValue(t.Key, out texId)) tex = PotScene.GetTexture(texId);
-                    if (tex == null) continue;
-                    var ptr = tex.GetNativeTexturePtr();
-                    if (ptr == IntPtr.Zero) continue;
-                    writer.Write(t.Value);
-                    writer.Write(t.Key == "pot_EnvMap" ? (1 | (2 << 1)) : SamplerBits(tex));
-                    writer.Write(ptr.ToInt64());
-                    nt++;
-                }
-                var endPos = frame.Position;
-                frame.Position = texPos;
-                writer.Write(nt);
-                frame.Position = endPos;
-
-                if (WriteBlock(p.vs, b) == 0) writer.Write(0);
-                if (WriteBlock(p.fs, b) == 0) writer.Write(0);
-                count++;
+                if (WriteDraw(b, programs[b.program], mesh, b.flags | frameFlags, env)) count++;
             }
+            return Finish(count);
+        }
+
+        static int Finish(int count)
+        {
             if (count == 0) return 0;
             var len = (int)frame.Position;
             frame.Position = 0;
             writer.Write(count);
             frame.Position = len;
             return len;
+        }
+
+        /// <summary>写出一个 draw（网格须已 UploadMeshData，位置在流 0）；内置量须已设置好</summary>
+        static bool WriteDraw(Binding b, GpuProgram p, Mesh mesh, int flags, Texture env)
+        {
+            if (mesh.GetVertexAttributeStream(VertexAttribute.Position) != 0) return false;
+            var vb = mesh.GetNativeVertexBufferPtr(0);
+            var ib = mesh.GetNativeIndexBufferPtr();
+            if (vb == IntPtr.Zero || ib == IntPtr.Zero) return false;
+            var sub = mesh.GetSubMesh(0);
+
+            writer.Write(p.id);
+            writer.Write(flags);
+            writer.Write(vb.ToInt64());
+            writer.Write(ib.ToInt64());
+            writer.Write(mesh.GetVertexBufferStride(0));
+            writer.Write(mesh.indexFormat == IndexFormat.UInt32 ? 1 : 0);
+            writer.Write(sub.indexStart);
+            writer.Write(sub.indexCount);
+            writer.Write(sub.baseVertex);
+            foreach (var a in attrs)
+                writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? mesh.GetVertexAttributeOffset(a) : 0);
+            foreach (var a in attrs)
+                writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? AttrFormat(mesh.GetVertexAttributeFormat(a), mesh.GetVertexAttributeDimension(a)) : 0);
+
+            // 贴图
+            var texPos = frame.Position;
+            writer.Write(0);
+            var nt = 0;
+            foreach (var t in p.textures)
+            {
+                Texture tex = null;
+                int texId;
+                if (t.Key == "pot_EnvMap") tex = env;
+                else if (b.textures.TryGetValue(t.Key, out texId)) tex = PotScene.GetTexture(texId);
+                if (tex == null) continue;
+                var ptr = tex.GetNativeTexturePtr();
+                if (ptr == IntPtr.Zero) continue;
+                writer.Write(t.Value);
+                writer.Write(t.Key == "pot_EnvMap" ? (1 | (2 << 1)) : SamplerBits(tex));
+                writer.Write(ptr.ToInt64());
+                nt++;
+            }
+            var endPos = frame.Position;
+            frame.Position = texPos;
+            writer.Write(nt);
+            frame.Position = endPos;
+
+            if (WriteBlock(p.vs, b) == 0) writer.Write(0);
+            if (WriteBlock(p.fs, b) == 0) writer.Write(0);
+            return true;
+        }
+
+        // ---------------- 烘焙到贴图 ----------------
+
+        /// <summary>烘焙用的临时绑定（负 id，与对象绑定分开存放）</summary>
+        static readonly Dictionary<int, Binding> bakes = new Dictionary<int, Binding>();
+        static int nextBake = -1;
+        static Mesh bakeQuad;
+
+        static Binding Find(int id)
+        {
+            Binding b;
+            if (id < 0) bakes.TryGetValue(id, out b);
+            else bindings.TryGetValue(id, out b);
+            return b;
+        }
+
+        /// <summary>开始一次烘焙：返回临时绑定 id（负数），之后用 Uniform/UniformArray/Texture 设参数，再调用 Bake</summary>
+        [Preserve]
+        public static int BakeBegin()
+        {
+            var id = nextBake;
+            nextBake = nextBake <= -0x3fffffff ? -1 : nextBake - 1;
+            bakes[id] = new Binding { obj = id };
+            return id;
+        }
+
+        static Mesh BakeQuad()
+        {
+            if (bakeQuad != null) return bakeQuad;
+            // 位置即裁剪坐标（xy 在 [-1,1]），UV 0..1。D3D 等 UV 原点在上的平台，v=0 对应显存第 0 行即裁剪 y=+1
+            var top = SystemInfo.graphicsUVStartsAtTop;
+            Func<float, float> y = v => top ? 1 - 2 * v : 2 * v - 1;
+            bakeQuad = new Mesh { name = "pot_bake_quad" };
+            bakeQuad.vertices = new[] { new Vector3(-1, y(0), 0), new Vector3(1, y(0), 0), new Vector3(1, y(1), 0), new Vector3(-1, y(1), 0) };
+            bakeQuad.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
+            bakeQuad.normals = new[] { Vector3.back, Vector3.back, Vector3.back, Vector3.back };
+            bakeQuad.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+            bakeQuad.UploadMeshData(false);
+            return bakeQuad;
+        }
+
+        static GraphicsFormat BakeFormat(string f)
+        {
+            switch (f)
+            {
+                case "srgb": return GraphicsFormat.R8G8B8A8_SRGB;
+                case "rgba16f": return GraphicsFormat.R16G16B16A16_SFloat;
+                case "rgba32f": return GraphicsFormat.R32G32B32A32_SFloat;
+                case "r8": return GraphicsFormat.R8_UNorm;
+                case "rg8": return GraphicsFormat.R8G8_UNorm;
+                default: return GraphicsFormat.R8G8B8A8_UNorm;
+            }
+        }
+
+        /// <summary>
+        /// 用程序画一个全屏四边形到新建的贴图（可多目标 MRT，片元着色器按 layout(location=i) 输出）。
+        /// targets："格式,mip,wrap,filter,aniso" 以分号分隔；格式 rgba8/srgb/rgba16f/rgba32f/r8/rg8，wrap 0 重复 1 夹取，filter 0 点 1 双线性 2 三线性。
+        /// blend 为 flags 的混合位（0 无）。返回贴图 id 列表（逗号分隔），出错返回 "!原因"。临时绑定随之释放。
+        /// </summary>
+        [Preserve]
+        public static string Bake(int bindId, string program, int width, int height, string targets, int blend)
+        {
+            Binding b;
+            if (!bakes.TryGetValue(bindId, out b)) return "!无效的烘焙句柄";
+            bakes.Remove(bindId);
+            var why = Check();
+            if (why != null) return "!" + why;
+            GpuProgram p;
+            if (!programs.TryGetValue(program ?? "", out p)) return "!程序不存在：" + program;
+            if (width <= 0 || height <= 0 || width > 8192 || height > 8192) return "!尺寸无效：" + width + "x" + height;
+            var specs = (targets ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            if (specs.Length == 0 || specs.Length > 8) return "!目标数应为 1 到 8";
+
+            var rts = new RenderTexture[specs.Length];
+            var ids = new RenderTargetIdentifier[specs.Length];
+            var mips = new bool[specs.Length];
+            for (var i = 0; i < specs.Length; i++)
+            {
+                var s = specs[i].Split(',');
+                var fmt = BakeFormat(s[0].Trim());
+                var mip = s.Length > 1 && s[1] == "1";
+                var desc = new RenderTextureDescriptor(width, height, fmt, 0, mip ? -1 : 1)
+                {
+                    useMipMap = mip,
+                    autoGenerateMips = false,
+                    msaaSamples = 1,
+                };
+                var rt = new RenderTexture(desc) { name = "pot_bake" };
+                rt.wrapMode = s.Length > 2 && s[2] == "1" ? TextureWrapMode.Clamp : TextureWrapMode.Repeat;
+                var filter = s.Length > 3 ? s[3] : "2";
+                rt.filterMode = filter == "0" ? FilterMode.Point : filter == "1" || !mip ? FilterMode.Bilinear : FilterMode.Trilinear;
+                int aniso;
+                rt.anisoLevel = s.Length > 4 && int.TryParse(s[4], out aniso) ? aniso : 1;
+                rt.Create();
+                rts[i] = rt;
+                ids[i] = rt;
+                mips[i] = mip;
+            }
+
+            // 内置量：单位模型矩阵；视图/投影保持上一帧的值（烘焙着色器一般用不到）
+            SetMat("pot_Model", Matrix4x4.identity);
+            SetMat("pot_ModelInv", Matrix4x4.identity);
+            var n = Builtin("pot_NormalMatrix", 9);
+            for (var i = 0; i < 9; i++) n[i] = i % 4 == 0 ? 1 : 0;
+            SetVec("pot_ScreenSize", width, height, 1f / width, 1f / height);
+            SetVec("pot_Time", Time.time, Time.deltaTime, Time.frameCount, Time.unscaledTime);
+
+            frame.SetLength(0);
+            writer.Write(0);
+            // 不剔除、不写深度、关深度测试
+            var flags = 2 | ((blend & 3) << F_BlendShift) | F_NoDepthTest;
+            var ok = WriteDraw(b, p, BakeQuad(), flags, PotRender.EnvTexture);
+            var len = Finish(ok ? 1 : 0);
+            if (len <= 0)
+            {
+                foreach (var rt in rts) UnityEngine.Object.Destroy(rt);
+                return "!无法提交烘焙";
+            }
+            var slot = PotGfx_Submit(frame.GetBuffer(), len);
+            var cmd = new CommandBuffer { name = "PotGfx.Bake" };
+            if (ids.Length == 1) cmd.SetRenderTarget(ids[0]);
+            else cmd.SetRenderTarget(ids, ids[0]);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+            cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
+            for (var i = 0; i < rts.Length; i++) if (mips[i]) cmd.GenerateMips(rts[i]);
+            Graphics.ExecuteCommandBuffer(cmd);
+            cmd.Release();
+
+            var sb = new StringBuilder();
+            for (var i = 0; i < rts.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(PotScene.RegisterTexture(rts[i]));
+            }
+            return sb.ToString();
         }
     }
 }

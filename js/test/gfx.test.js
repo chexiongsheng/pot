@@ -92,3 +92,56 @@ test('gfx：插件卸载后程序延迟释放', async () => {
   await new Promise((r) => setImmediate(r))
   assert.ok(!ctx.engine.programs.has(name))
 })
+
+const NOISE = `uniform vec4 uTint;
+uniform sampler2D uSrc;
+in vec2 vUv;
+layout(location = 0) out vec4 o0;
+layout(location = 1) out vec4 o1;
+void main() {
+  o0 = uTint * texture(uSrc, vUv);
+  o1 = vec4(vUv, 0.0, 1.0);
+}
+`
+
+function bakeGame() {
+  return new Map([
+    ['manifest.json', JSON.stringify({ id: 'bake', plugins: ['mat'] })],
+    ['data/shaders/noise.frag', NOISE],
+    ['src/plugins/mat.ts', `export const name = 'mat'
+export function apply(ctx) {
+  const shader = ctx.gfx.shader({ fragment: 'shaders/noise.frag', fullscreen: true })
+  const src = ctx.scene.texture({ data: new Uint8Array(16), width: 2, height: 2 })
+  const [albedo, orm] = ctx.gfx.bake(shader, {
+    width: 256, height: 128,
+    targets: [{ format: 'srgb' }, { format: 'rgba8', mipmaps: false, wrap: 'clamp', filter: 'point' }],
+    uniforms: { uTint: [1, 0.5, 0.25, 1], uSrc: src },
+  })
+  ctx.scene.spawn({ name: 'box', material: { map: albedo, maskMap: orm } })
+}
+`],
+  ])
+}
+
+test('gfx.bake：全屏程序画到 MRT 贴图，参数与 uniform 传到引擎，卸载时销毁', async () => {
+  const ctx = await startGame(bakeGame())
+  assert.deepEqual(ctx.runtime.failures, [])
+  const name = '<pot/fullscreen.vert>|shaders/noise.frag'
+  const prog = ctx.engine.programs.get(name)
+  assert.ok(prog)
+  assert.match(prog.vs, /gl_Position = vec4\(pot_Position\.xy, 0\.0, 1\.0\);/, '全屏顶点着色器')
+  assert.equal(ctx.engine.bakes.length, 1)
+  const bake = ctx.engine.bakes[0]
+  assert.equal(bake.program, name)
+  assert.equal(bake.width, 256)
+  assert.equal(bake.height, 128)
+  assert.equal(bake.targets, 'srgb,1,0,2,8;rgba8,0,1,0,8')
+  assert.deepEqual(bake.uniforms.uTint, [1, 0.5, 0.25, 1])
+  assert.equal(typeof bake.textures.uSrc, 'number')
+  const box = ctx.engine.byName('box')[0]
+  assert.ok(ctx.engine.textures.get(box.textures.map).bake, 'map 是烘焙结果')
+  assert.ok(ctx.engine.textures.get(box.textures.mask).bake)
+  assert.equal(ctx.engine.bakeBinds.size, 0, '临时绑定已释放')
+  await run(ctx.runtime, ctx.runtime.stop())
+  assert.equal([...ctx.engine.textures.values()].filter((t) => t.bake).length, 0, '卸载后烘焙贴图销毁')
+})

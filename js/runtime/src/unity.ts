@@ -105,6 +105,8 @@ export function createUnityHost(): Host {
       gfxUniform: (id, name, n, x, y, z, w) => G.Uniform(id, name, n, x, y, z, w),
       gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
       gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
+      gfxBakeBegin: () => G.BakeBegin(),
+      gfxBake: (bind, program, width, height, targets, blend) => G.Bake(bind, program, width, height, targets, blend) ?? '!',
     },
   }
 }

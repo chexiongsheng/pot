@@ -12,6 +12,8 @@
  */
 import { Context, Service } from 'cordis'
 import type { Host } from './host'
+import { applyUniforms, Texture } from './scene'
+import type { UniformValue } from './scene'
 
 declare module 'cordis' {
   interface Context {
@@ -29,6 +31,30 @@ export interface ShaderOptions {
   vertexSource?: string
   /** 程序名；默认由路径或源码生成。同名程序全局共享 */
   name?: string
+  /** 全屏程序（给 gfx.bake 用）：省略 vertex 时用 <pot/fullscreen.vert>，片元着色器读 in vec2 vUv */
+  fullscreen?: boolean
+}
+
+export interface BakeTarget {
+  /** rgba8（默认，线性数据）、srgb（颜色，写入时自动转 sRGB）、rgba16f、rgba32f、r8、rg8 */
+  format?: 'rgba8' | 'srgb' | 'rgba16f' | 'rgba32f' | 'r8' | 'rg8'
+  /** 生成 mipmap（默认 true） */
+  mipmaps?: boolean
+  wrap?: 'repeat' | 'clamp'
+  filter?: 'point' | 'bilinear' | 'trilinear'
+  /** 各向异性等级，默认 8 */
+  aniso?: number
+}
+
+export interface BakeOptions {
+  width: number
+  /** 默认等于 width */
+  height?: number
+  /** 输出目标（MRT，片元着色器用 layout(location = i) out 输出）；默认一个 rgba8 */
+  targets?: BakeTarget[]
+  uniforms?: Record<string, UniformValue>
+  /** 与目标原有内容（透明黑）的混合方式，默认 none */
+  blend?: 'none' | 'alpha' | 'add' | 'premultiplied'
 }
 
 /** 着色器程序句柄（随创建它的插件卸载而释放） */
@@ -104,6 +130,13 @@ void main() {
   vColor = pot_VertexColor;
   vTangent = vec4(normalize(mat3(pot_Model) * pot_Tangent.xyz), pot_Tangent.w);
   gl_Position = pot_ViewProj * world;
+}
+`,
+  'pot/fullscreen.vert': `// gfx.bake 用：网格是裁剪空间的全屏四边形，UV 0..1（v=0 对应采样时的 v=0，已处理平台差异）
+out vec2 vUv;
+void main() {
+  vUv = pot_UV;
+  gl_Position = vec4(pot_Position.xy, 0.0, 1.0);
 }
 `,
   'pot/lit': `#ifndef POT_LIT
@@ -218,7 +251,7 @@ function dirname(path: string) {
  * 展开 #include，并用 #line 把行号映射回原文件。
  * read(path) 读取 data/ 下的文件（会登记依赖，文件变化时触发热重载）。
  */
-export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string }, read: (path: string) => string): Source {
+export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string; library?: string }, read: (path: string) => string): Source {
   const files: string[] = ['(预置)']
   const once = new Set<string>()
   const out: string[] = [HEADER.trimEnd()]
@@ -272,7 +305,8 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
   } else if (entry.source !== undefined) {
     expand(stage === 'vertex' ? '(内联顶点着色器)' : '(内联片元着色器)', entry.source, 0, [])
   } else {
-    expand('<pot/standard.vert>', LIBRARY['pot/standard.vert'], 0, [])
+    const lib = entry.library ?? 'pot/standard.vert'
+    expand(`<${lib}>`, LIBRARY[lib], 0, [])
   }
   return { code: out.join('\n') + '\n', files }
 }
@@ -315,11 +349,11 @@ export class GfxService extends Service {
   shader(options: ShaderOptions): Shader {
     const ctx = this.ctx
     const read = (path: string) => ctx.data.text(path)
-    const vertexEntry = { path: options.vertex, source: options.vertexSource }
+    const vertexEntry = { path: options.vertex, source: options.vertexSource, library: options.fullscreen ? 'pot/fullscreen.vert' : undefined }
     const fragmentEntry = { path: options.fragment, source: options.fragmentSource }
     if (fragmentEntry.path === undefined && fragmentEntry.source === undefined) throw new Error('gfx.shader：需要 fragment 或 fragmentSource')
     const name = options.name
-      ?? `${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : '<pot/standard.vert>')}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}`
+      ?? `${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : `<${vertexEntry.library ?? 'pot/standard.vert'}>`)}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}`
     let error = ''
     let vs: Source | undefined
     let fs: Source | undefined
@@ -341,6 +375,41 @@ export class GfxService extends Service {
       return () => this._release(name, clock)
     }, `gfx.shader(${name})`)
     return new Shader(name, error, dispose)
+  }
+
+  /**
+   * 用全屏程序（shader({ fullscreen: true })）一次画到新建的贴图，返回每个目标一张 Texture（随调用方插件卸载销毁）。
+   * 用于程序化材质、查找表、法线生成等：结果可当 material 的 map/normalMap/maskMap，也可作为下一次 bake 的输入。
+   * 采样坐标与 vUv 一致（vUv.y=0 即贴图 v=0），无需关心平台的 UV 原点差异。
+   */
+  bake(shader: Shader | string, options: BakeOptions): Texture[] {
+    const program = typeof shader === 'string' ? shader : shader.name
+    if (typeof shader !== 'string' && shader.error) throw new Error(`gfx.bake：着色器 ${program} 编译失败`)
+    const width = Math.round(options.width)
+    const height = Math.round(options.height ?? options.width)
+    const targets = options.targets?.length ? options.targets : [{}]
+    const spec = targets.map((t) => [
+      t.format ?? 'rgba8',
+      t.mipmaps === false ? 0 : 1,
+      t.wrap === 'clamp' ? 1 : 0,
+      t.filter === 'point' ? 0 : t.filter === 'bilinear' ? 1 : 2,
+      t.aniso ?? 8,
+    ].join(',')).join(';')
+    const blend = ({ none: 0, alpha: 1, add: 2, premultiplied: 3 } as const)[options.blend ?? 'none']
+    const engine = this._host.engine
+    let ids: number[] = []
+    const dispose = this.ctx.effect(() => {
+      const bind = engine.gfxBakeBegin()
+      if (options.uniforms) applyUniforms(engine, bind, options.uniforms)
+      const result = engine.gfxBake(bind, program, width, height, spec, blend)
+      if (result.startsWith('!')) throw new Error(`gfx.bake(${program})：${result.slice(1) || '失败'}`)
+      ids = result.split(',').map(Number)
+      return () => {
+        for (const id of ids) engine.destroyTexture(id)
+      }
+    }, `gfx.bake(${program})`)
+    // 多张贴图共用一个销毁：任何一张 destroy 都会全部释放
+    return ids.map((id) => new Texture(id, width, height, dispose))
   }
 
   /** 引用归零后延迟两帧再释放：热重载时新单元会先重新登记同名程序，旧程序得以平滑替换或在出错时保留 */

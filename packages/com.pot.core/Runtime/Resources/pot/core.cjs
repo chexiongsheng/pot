@@ -58,6 +58,7 @@ var pot = (() => {
     VERSION: () => VERSION,
     ValidationError: () => ValidationError,
     ancestors: () => ancestors,
+    applyUniforms: () => applyUniforms,
     assertSerializable: () => assertSerializable,
     buildOuterStack: () => buildOuterStack,
     c16: () => c16,
@@ -2456,6 +2457,20 @@ var pot = (() => {
     const typed = view instanceof Type ? view : new Type(view);
     return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength ? typed.buffer : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
   }
+  function applyUniforms(engine, id, values) {
+    for (const name of Object.keys(values)) {
+      const v = values[name];
+      if (v === null || v === void 0) engine.gfxTexture(id, name, 0);
+      else if (v instanceof Texture) engine.gfxTexture(id, name, v.id);
+      else if (typeof v === "number") engine.gfxUniform(id, name, 1, v, 0, 0, 0);
+      else if (typeof v === "boolean") engine.gfxUniform(id, name, 1, v ? 1 : 0, 0, 0, 0);
+      else if (typeof v === "string") {
+        const [r, g, b, a] = parseColor(v);
+        engine.gfxUniform(id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a);
+      } else if (v.length <= 4) engine.gfxUniform(id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0);
+      else engine.gfxUniformArray(id, name, bytesOf(v, Float32Array));
+    }
+  }
   function srgbToLinear(v) {
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   }
@@ -2594,19 +2609,7 @@ var pot = (() => {
      * 贴图传 null 解除。
      */
     uniforms(values) {
-      const engine = this._engine;
-      for (const name of Object.keys(values)) {
-        const v = values[name];
-        if (v === null) engine.gfxTexture(this.id, name, 0);
-        else if (v instanceof Texture) engine.gfxTexture(this.id, name, v.id);
-        else if (typeof v === "number") engine.gfxUniform(this.id, name, 1, v, 0, 0, 0);
-        else if (typeof v === "boolean") engine.gfxUniform(this.id, name, 1, v ? 1 : 0, 0, 0, 0);
-        else if (typeof v === "string") {
-          const [r, g, b, a] = parseColor(v);
-          engine.gfxUniform(this.id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a);
-        } else if (v.length <= 4) engine.gfxUniform(this.id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0);
-        else engine.gfxUniformArray(this.id, name, bytesOf(v, Float32Array));
-      }
+      applyUniforms(this._engine, this.id, values);
       return this;
     }
     layer(layer) {
@@ -3067,6 +3070,13 @@ void main() {
   gl_Position = pot_ViewProj * world;
 }
 `,
+    "pot/fullscreen.vert": `// gfx.bake 用：网格是裁剪空间的全屏四边形，UV 0..1（v=0 对应采样时的 v=0，已处理平台差异）
+out vec2 vUv;
+void main() {
+  vUv = pot_UV;
+  gl_Position = vec4(pot_Position.xy, 0.0, 1.0);
+}
+`,
     "pot/lit": `#ifndef POT_LIT
 #define POT_LIT
 // 输出到 HDR 线性缓冲（后处理负责色调映射）；颜色常量多为 sRGB，用 pot_ToLinear 转换
@@ -3218,7 +3228,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     } else if (entry.source !== void 0) {
       expand(stage === "vertex" ? "(内联顶点着色器)" : "(内联片元着色器)", entry.source, 0, []);
     } else {
-      expand("<pot/standard.vert>", LIBRARY["pot/standard.vert"], 0, []);
+      const lib = entry.library ?? "pot/standard.vert";
+      expand(`<${lib}>`, LIBRARY[lib], 0, []);
     }
     return { code: out.join("\n") + "\n", files };
   }
@@ -3253,10 +3264,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     shader(options) {
       const ctx = this.ctx;
       const read = (path) => ctx.data.text(path);
-      const vertexEntry = { path: options.vertex, source: options.vertexSource };
+      const vertexEntry = { path: options.vertex, source: options.vertexSource, library: options.fullscreen ? "pot/fullscreen.vert" : void 0 };
       const fragmentEntry = { path: options.fragment, source: options.fragmentSource };
       if (fragmentEntry.path === void 0 && fragmentEntry.source === void 0) throw new Error("gfx.shader：需要 fragment 或 fragmentSource");
-      const name = options.name ?? `${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : "<pot/standard.vert>")}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}`;
+      const name = options.name ?? `${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : `<${vertexEntry.library ?? "pot/standard.vert"}>`)}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}`;
       let error = "";
       let vs;
       let fs;
@@ -3278,6 +3289,39 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return () => this._release(name, clock);
       }, `gfx.shader(${name})`);
       return new Shader(name, error, dispose);
+    }
+    /**
+     * 用全屏程序（shader({ fullscreen: true })）一次画到新建的贴图，返回每个目标一张 Texture（随调用方插件卸载销毁）。
+     * 用于程序化材质、查找表、法线生成等：结果可当 material 的 map/normalMap/maskMap，也可作为下一次 bake 的输入。
+     * 采样坐标与 vUv 一致（vUv.y=0 即贴图 v=0），无需关心平台的 UV 原点差异。
+     */
+    bake(shader, options) {
+      const program = typeof shader === "string" ? shader : shader.name;
+      if (typeof shader !== "string" && shader.error) throw new Error(`gfx.bake：着色器 ${program} 编译失败`);
+      const width = Math.round(options.width);
+      const height = Math.round(options.height ?? options.width);
+      const targets = options.targets?.length ? options.targets : [{}];
+      const spec = targets.map((t) => [
+        t.format ?? "rgba8",
+        t.mipmaps === false ? 0 : 1,
+        t.wrap === "clamp" ? 1 : 0,
+        t.filter === "point" ? 0 : t.filter === "bilinear" ? 1 : 2,
+        t.aniso ?? 8
+      ].join(",")).join(";");
+      const blend = { none: 0, alpha: 1, add: 2, premultiplied: 3 }[options.blend ?? "none"];
+      const engine = this._host.engine;
+      let ids = [];
+      const dispose = this.ctx.effect(() => {
+        const bind2 = engine.gfxBakeBegin();
+        if (options.uniforms) applyUniforms(engine, bind2, options.uniforms);
+        const result = engine.gfxBake(bind2, program, width, height, spec, blend);
+        if (result.startsWith("!")) throw new Error(`gfx.bake(${program})：${result.slice(1) || "失败"}`);
+        ids = result.split(",").map(Number);
+        return () => {
+          for (const id of ids) engine.destroyTexture(id);
+        };
+      }, `gfx.bake(${program})`);
+      return ids.map((id) => new Texture(id, width, height, dispose));
     }
     /** 引用归零后延迟两帧再释放：热重载时新单元会先重新登记同名程序，旧程序得以平滑替换或在出错时保留 */
     _release(name, clock) {
@@ -3680,7 +3724,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
         gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
         gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
-        gfxTexture: (id, name, tex) => G.Texture(id, name, tex)
+        gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
+        gfxBakeBegin: () => G.BakeBegin(),
+        gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!"
       }
     };
   }

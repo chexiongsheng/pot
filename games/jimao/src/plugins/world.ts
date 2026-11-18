@@ -2,6 +2,7 @@
 import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
 import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
 import { rng } from '../lib/math'
+import { createMats, type Mats } from '../lib/mats'
 import { containerMesh } from '../lib/meshes'
 import { registerSfx, sfx } from '../lib/sfx'
 import * as T from '../lib/textures'
@@ -41,6 +42,16 @@ const SURFACES: Record<string, SurfaceDef> = {
   chainlink: { bake: () => T.chainlink(256), uv: 'object', tiling: 2, tint: true, extra: { mode: 'lit-cutout', cutoff: 0.5 } },
 }
 
+/** 关卡 tex 键 → 原版命名材质（GPU 烘焙）；tint 为 true 时以 piece.color 覆盖材质颜色 */
+const SL: Record<string, { mat: string; uv: 'mesh' | 'world' | 'object'; tint: boolean; extra?: MaterialOptions }> = {
+  asphalt: { mat: 'asphalt', uv: 'world', tint: false, extra: { planar: 1 } },
+  concrete: { mat: 'concrete', uv: 'object', tint: false },
+  slab: { mat: 'concrete', uv: 'world', tint: true, extra: { planar: 1 } },
+  steel: { mat: 'steel_worn', uv: 'object', tint: true },
+  wood: { mat: 'wood_pallet', uv: 'object', tint: true },
+  chainlink: { mat: 'chainlink', uv: 'object', tint: true },
+}
+
 const DECALS: Record<string, { text: string; width: number; height: number; size: number; color: string; letterSpacing?: number }> = {
   logo: { text: 'C-几猫物流', width: 512, height: 128, size: 84, color: '#f2f0ea', letterSpacing: 4 },
   code: { text: 'JMLU 204817 3', width: 512, height: 144, size: 64, color: '#f2f0ea', letterSpacing: 6 },
@@ -65,6 +76,15 @@ export function apply(ctx: Context) {
   const { scene } = ctx
 
   // ---- 程序化贴图（按需烘焙并缓存） ----
+  // GPU 烘焙（原版材质系统机械移植）；没有运行时着色器后端时回退到下面的 CPU 近似贴图
+  let mats: Mats | undefined
+  if (ctx.gfx.supported) {
+    try {
+      mats = createMats(ctx, { tex: tuning.quality.tex })
+    } catch (e: any) {
+      ctx.logger('world').error('GPU 材质不可用，回退 CPU 贴图：%s', e?.message ?? e)
+    }
+  }
   const surfaceCache = new Map<string, T.TexSet>()
   const surfaceTex = (key: string) => {
     let set = surfaceCache.get(key)
@@ -115,6 +135,17 @@ export function apply(ctx: Context) {
     const lit = mode === 'lit' || mode === 'lit-cutout' || mode === 'lit-twosided'
     const tex = piece.tex ?? (lit && m.emission === undefined ? 'steel' : 'none')
     if (tex === 'none' || !lit) return { color: piece.color, material: piece.mat }
+    if (mats) {
+      if (tex.startsWith('paint:')) {
+        const r = mats.get('paint_grey', { color: tex.slice(6), uv: 'mesh' })
+        return { color: r.color, material: { ...m, ...r.material, offset: [rand(), rand()], vertexColors: true } }
+      }
+      const sl = SL[tex]
+      if (sl) {
+        const r = mats.get(sl.mat, { color: sl.tint ? piece.color : undefined, uv: sl.uv })
+        return { color: r.color, material: { ...m, ...r.material, offset: [rand(), rand()], ...sl.extra } }
+      }
+    }
     if (tex.startsWith('paint:')) {
       const set = paintTex(tex.slice(6))
       return {

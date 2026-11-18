@@ -86,6 +86,14 @@
 - `gl_FragCoord.y` 方向与 WebGL 相反（原点在左上），移植屏幕空间效果时用 `pot_ScreenSize.y - gl_FragCoord.y`。
 - 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。
 - 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。
+- `gfx.bake` 的 `vUv` 与采样坐标一致（`vUv.y=0` 即贴图 `v=0`），不要再手动翻 y；颜色目标用 `format: 'srgb'` 并输出线性值，数据目标（遮罩、高度、法线）用 `rgba8`。
+- 程序化材质优先 GPU 烘焙（原版 three.js 的 RenderTarget + 全屏 pass 可直接对照 `gfx.bake` 机械移植），CPU 逐像素生成 1024² 贴图要几秒；作为中间结果的 MRT 用 `filter: 'point', mipmaps: false`。
+
+### 移植原版自定义材质补丁（onBeforeCompile）
+
+- 原版的 `#include <map_fragment>` 等替换不能照搬到 PotLit；把“贴图 + 参数 → albedo / 金属度 / 粗糙度 / AO”的纯函数部分挪进一个 bake 合成 pass，输出 PotLit 的 `map`（sRGB）与 `maskMap`（R 金属度、G AO、B 高度、A 光滑度 = 1 − 粗糙度），材质里 `metallic`、`smoothness` 设 1。
+- three.js 的十六进制颜色按 sRGB 解释并转线性（ColorManagement），传进 bake 的颜色 uniform 若是数组要自己转线性。
+- 依赖世界坐标、法线或屏幕导数的部分（宏观亮度变化、雨痕水珠、远距离镂空抖动）不能烘焙，只能写成完整的自定义着色器或暂时舍弃。
 
 ## 工具与环境
 

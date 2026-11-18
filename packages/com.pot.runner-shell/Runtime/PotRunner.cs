@@ -277,15 +277,17 @@ namespace Pot.Runner
             GUILayout.Space(12);
             GUILayout.Label("最近打开");
             if (recent.Count == 0) GUILayout.Label("（无）");
-            string remove = null;
-            foreach (var spec in recent)
+            string remove = null, open = null;
+            // OpenGame 会把条目挪到 recent 最前，遍历中不能直接调用
+            foreach (var spec in recent.ToArray())
             {
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button(spec, GUILayout.Height(28))) openInput = spec;
-                if (GUILayout.Button("打开", GUILayout.Width(60), GUILayout.Height(28))) OpenGame(spec, false);
+                if (GUILayout.Button("打开", GUILayout.Width(60), GUILayout.Height(28))) open = spec;
                 if (GUILayout.Button("×", GUILayout.Width(28), GUILayout.Height(28))) remove = spec;
                 GUILayout.EndHorizontal();
             }
+            if (open != null) OpenGame(open, false);
             if (remove != null)
             {
                 recent.Remove(remove);

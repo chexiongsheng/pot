@@ -48,11 +48,30 @@ ent.uniforms({ uAmount: 0.15, uTint: '#e9b' })                           // 数�
 ent.shader(null)                                                          // 恢复普通材质
 ```
 
-- `shader` 选项：`fragment`/`vertex`（data 内路径）或 `fragmentSource`/`vertexSource`（内联）、`name`。返回对象有 `ok`、`error`，编译失败不抛错，日志记录并保留上一版。
+- `shader` 选项：`fragment`/`vertex`（data 内路径）或 `fragmentSource`/`vertexSource`（内联）、`name`、`fullscreen`（给 bake 用的全屏程序）。返回对象有 `ok`、`error`，编译失败不抛错，日志记录并保留上一版。
 - `entity.shader` 选项：`blend`：none（默认）/alpha/add/premultiplied；`cull`：back/front/none；`queue`：opaque/transparent（默认按 blend 推断）；`depthWrite`、`depthTest`、`shadows`（投射阴影，不透明时默认开）。
 - 不写 `#version`，由 Runner 补上。`#include <pot/varyings>`（`vWorldPos/vNormal/vUV/vColor/vTangent`）、`<pot/lit>`（`PotSurface`、`pot_DefaultSurface()`、`pot_Lit(s)`，含太阳光、半球环境光、环境反射与雾）、`<pot/standard.vert>`；`#include "相对路径"` 引用游戏内文件。
 - 内置 uniform：`pot_Model`、`pot_ModelInv`、`pot_NormalMatrix`、`pot_View`、`pot_Proj`、`pot_ViewProj`、`pot_CameraPos`、`pot_Time`（x 时间、y dt、z 帧号、w 不受缩放时间）、`pot_ScreenSize`、`pot_SunDir`、`pot_SunColor`、`pot_AmbientSky/Equator/Ground`、`pot_Fog`、`pot_Env`；贴图 `pot_EnvMap`（samplerCube）。顶点输入 `pot_Position`、`pot_Normal`、`pot_UV`、`pot_VertexColor`、`pot_Tangent`。
 - 颜色 uniform 以 sRGB 传入，自动转线性；输出写线性颜色。
+
+#### 烘焙到贴图（gfx.bake）
+
+程序化贴图、查找表、高度转法线等一次性计算用全屏程序画到新贴图，返回的 Texture 可直接当 `map`/`normalMap`/`maskMap`，也能作为下一次 bake 的输入。
+
+```ts
+const surf = ctx.gfx.shader({ fullscreen: true, fragment: 'shaders/rust.frag' })  // 顶点用 <pot/fullscreen.vert>，片元读 in vec2 vUv
+const [albedo, mask] = ctx.gfx.bake(surf, {
+  width: 1024,                                          // height 默认等于 width
+  targets: [{ format: 'srgb' }, { format: 'rgba8' }],   // MRT：layout(location = i) out vec4
+  uniforms: { uSeed: 3, uTint: [0.6, 0.2, 0.1] },
+})
+ent.material({ map: albedo, maskMap: mask, metallic: 1, smoothness: 1 })
+```
+
+- 目标选项：`format`（rgba8 默认 / srgb / rgba16f / rgba32f / r8 / rg8）、`mipmaps`（默认 true）、`wrap`（repeat 默认 / clamp）、`filter`（trilinear 默认 / bilinear / point）、`aniso`（默认 8）。最多 8 个目标，边长不超过 8192。
+- `blend`：none（默认）/alpha/add/premultiplied，与透明黑的初始内容混合。
+- `vUv.y=0` 对应贴图 `v=0`，已处理平台差异。同一帧可连续 bake 任意多次，结果按调用顺序生效。
+- 同一次 bake 返回的贴图共享生命周期：随调用插件卸载释放，任一张 `destroy()` 会一起释放。
 
 ## ctx.state
 

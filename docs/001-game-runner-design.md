@@ -141,6 +141,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 绘制：在 URP 的 `AfterRenderingOpaques` / `AfterRenderingTransparents` 两个 pass 中，由原生插件用 URP 当前的颜色和深度目标直接绘制，因此与普通物体正确遮挡，透明物体按由远到近排序；后处理照常作用。物体仍由普通 Renderer 投射阴影（ShadowsOnly）。
 - 内置 uniform 与库：`pot_Model/View/Proj/...`、`pot_Time`、太阳光、环境光、雾、反射探针；`<pot/varyings>`、`<pot/standard.vert>`、`<pot/lit>`（GGX + 半球环境光 + 环境反射 + 雾）。只写片元着色器即可得到与场景一致的光照。
 - 出错不丢画面：编译失败时保留同名旧程序，错误按 `#line` 映射回游戏源文件和行号。
+- 烘焙：`ctx.gfx.bake()` 用全屏程序画到新建的 RenderTexture（支持 MRT、sRGB/浮点格式、mip 与过滤设置），对应网页上 `WebGLRenderTarget` + 全屏 pass 的用法，程序化材质、查找表、法线生成都由游戏自己写，Runner 不需要为新材质升级。几猫的 27 种原版材质就是这样机械移植的。
 - 代价：编译器约 3 MB；首次编译在加载时发生（几十毫秒级），后续可按源码哈希缓存。暂不接收阴影，暂不进入 URP 的深度预通道和 SSAO。
 
 备用：着色器即数据。固定的解释器着色器读取 Buffer 或贴图中的表达式字节码，在某平台无法运行时编译时（例如受限的小游戏环境）作为降级方案。
@@ -148,6 +149,19 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 已作废：Dev Server 调用 Editor 编译着色器。它让开发依赖 Editor，且发布期仍需变体管理，不满足“Runner 不变”的目标。
 
 普通材质（uber 材质加参数和开关）继续保留，用于不需要自定义效果的物体。变体管理：`core` 自带 `ShaderVariantCollection` 和 Always Included 配置；`build` 根据 `capabilities` 裁剪变体，并预热 PSO。
+
+### 复刻几猫发现的 Runner 能力缺口
+
+通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。已补齐：
+
+- GPU 烘焙到贴图（`gfx.bake`，MRT、sRGB、mip、过滤与环绕）。
+- 原生帧数据槽：原来是 16 槽环形缓冲，同一帧大量提交会互相覆盖，改为按票号索引。
+
+尚缺（复刻时暂用替代方案）：
+
+- Canvas 2D 绘制：原版的喷字贴花、标签、编号用 Canvas 画，这里暂用 `scene.text`，缺描边、做旧、混排。
+- 内置材质的世界空间效果：原版补丁里的宏观亮度/粗糙度变化、雨天条纹与水珠、远距离镂空抖动，PotLit 只覆盖了一部分（湿润）。
+- 自定义着色器不接收阴影：要想把上面这些效果写成游戏自带着色器而不丢阴影，需要把阴影贴图开放给 `<pot/lit>`。
 
 ## 9. 资产即代码
 

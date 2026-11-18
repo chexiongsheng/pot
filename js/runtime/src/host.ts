@@ -104,6 +104,10 @@ export interface Engine {
   gfxUniform(id: number, name: string, n: number, x: number, y: number, z: number, w: number): void
   gfxUniformArray(id: number, name: string, data: ArrayBuffer): void
   gfxTexture(id: number, name: string, tex: number): void
+  /** 开始烘焙：返回临时绑定 id（负数），可用 gfxUniform/gfxUniformArray/gfxTexture 设参数 */
+  gfxBakeBegin(): number
+  /** 画全屏四边形到新贴图；targets 见 PotGfx.Bake；返回逗号分隔的贴图 id，出错以 ! 开头 */
+  gfxBake(bind: number, program: string, width: number, height: number, targets: string, blend: number): string
 }
 
 export interface RaycastResult {

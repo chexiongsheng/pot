@@ -36,3 +36,5 @@ Copy-Item native/pot_gfx/build/Release/pot_gfx.dll packages/com.pot.core/Plugins
 - varying 按名字配对，片元用到的排在前面（D3D11 允许 PS 输入签名是 VS 输出的前缀）。
 - 矩阵列主序；投影矩阵经 `GL.GetGPUProjectionMatrix` 处理，翻转与 Reversed-Z 通过 flags 告知原生端。
 - 目前只实现 D3D11 后端，其他图形 API 下 `PotGfx.Check()` 返回不可用原因，JS 侧 `gfx.supported` 为 false。
+- 每次绘制的数据（uniform、贴图、状态）由 C# 写入一个按票号索引的槽，渲染线程事件按票号取出后删除。槽不设固定数量（同一帧可提交任意多次绘制或烘焙），超过 4096 个未消费槽时视为泄漏并清空。
+- 烘焙（`PotGfx.Bake`）不设视口和渲染目标：C# 用 CommandBuffer 先绑定 RenderTexture（单目标或 MRT）并清空，再发插件事件，原生端在当前绑定的目标上画裁剪空间全屏四边形；flags 带“关深度测试”，混合状态设在 RenderTarget[0] 上，对所有 MRT 目标生效。

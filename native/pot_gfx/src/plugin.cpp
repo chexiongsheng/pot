@@ -5,6 +5,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "backend.h"
@@ -18,10 +19,10 @@ static Backend* g_backend = nullptr;
 static std::string g_info;
 static int g_nextId = 1;
 
-// 帧数据环形槽：主线程 Submit 拷贝进来，渲染线程按槽号读取
-static constexpr int kSlots = 16;
-static std::vector<uint8_t> g_slots[kSlots];
-static int g_slotNext = 0;
+// 帧数据：主线程 Submit 拷贝进来并分配票号，渲染线程按票号取走。
+// 不用固定环形槽：同一帧可能有大量提交（例如加载时连续烘焙几十张贴图），多线程渲染下渲染线程滞后会覆盖未消费的槽。
+static std::unordered_map<int, std::vector<uint8_t>> g_slots;
+static int g_slotNext = 1;
 static std::mutex g_slotMutex;
 
 static void UNITY_INTERFACE_API OnDeviceEvent(UnityGfxDeviceEventType type) {
@@ -57,11 +58,13 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventId, void* data) {
     (void)eventId;
     if (!g_backend) return;
     int slot = (int)(intptr_t)data;
-    if (slot < 0 || slot >= kSlots) return;
     std::vector<uint8_t> frame;
     {
         std::lock_guard<std::mutex> lock(g_slotMutex);
-        frame.swap(g_slots[slot]);
+        auto it = g_slots.find(slot);
+        if (it == g_slots.end()) return;
+        frame.swap(it->second);
+        g_slots.erase(it);
     }
     if (!frame.empty()) g_backend->Render(frame.data(), frame.size());
 }
@@ -117,7 +120,9 @@ UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API PotGfx_Destroy(int id) {
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_Submit(const uint8_t* data, int len) {
     std::lock_guard<std::mutex> lock(g_slotMutex);
     int slot = g_slotNext;
-    g_slotNext = (g_slotNext + 1) % kSlots;
+    g_slotNext = g_slotNext >= 0x3fffffff ? 1 : g_slotNext + 1;
+    // 渲染线程从未消费的数据（例如命令缓冲被丢弃）不会无限堆积
+    if (g_slots.size() > 4096) g_slots.clear();
     g_slots[slot].assign(data, data + (len > 0 ? len : 0));
     return slot;
 }

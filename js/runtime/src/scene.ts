@@ -304,6 +304,22 @@ export interface ObjectInfo {
 
 export type UniformValue = number | boolean | string | ArrayLike<number> | Texture | null
 
+/** 把 uniform 值写到运行时着色器绑定（对象 id，或 gfx.bake 的临时绑定 id） */
+export function applyUniforms(engine: Host['engine'], id: number, values: Record<string, UniformValue>) {
+  for (const name of Object.keys(values)) {
+    const v = values[name]
+    if (v === null || v === undefined) engine.gfxTexture(id, name, 0)
+    else if (v instanceof Texture) engine.gfxTexture(id, name, v.id)
+    else if (typeof v === 'number') engine.gfxUniform(id, name, 1, v, 0, 0, 0)
+    else if (typeof v === 'boolean') engine.gfxUniform(id, name, 1, v ? 1 : 0, 0, 0, 0)
+    else if (typeof v === 'string') {
+      const [r, g, b, a] = parseColor(v)
+      engine.gfxUniform(id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a)
+    } else if (v.length <= 4) engine.gfxUniform(id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0)
+    else engine.gfxUniformArray(id, name, bytesOf(v, Float32Array))
+  }
+}
+
 export interface ShaderBinding {
   uniforms?: Record<string, UniformValue>
   /** 混合：none（默认）、alpha、add 叠加、premultiplied 预乘 */
@@ -475,19 +491,7 @@ export class Entity {
    * 贴图传 null 解除。
    */
   uniforms(values: Record<string, UniformValue>) {
-    const engine = this._engine
-    for (const name of Object.keys(values)) {
-      const v = values[name]
-      if (v === null) engine.gfxTexture(this.id, name, 0)
-      else if (v instanceof Texture) engine.gfxTexture(this.id, name, v.id)
-      else if (typeof v === 'number') engine.gfxUniform(this.id, name, 1, v, 0, 0, 0)
-      else if (typeof v === 'boolean') engine.gfxUniform(this.id, name, 1, v ? 1 : 0, 0, 0, 0)
-      else if (typeof v === 'string') {
-        const [r, g, b, a] = parseColor(v)
-        engine.gfxUniform(this.id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a)
-      } else if (v.length <= 4) engine.gfxUniform(this.id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0)
-      else engine.gfxUniformArray(this.id, name, bytesOf(v, Float32Array))
-    }
+    applyUniforms(this._engine, this.id, values)
     return this
   }
 

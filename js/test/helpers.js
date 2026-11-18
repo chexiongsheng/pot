@@ -103,9 +103,25 @@ class MockEngine {
   }
   gfxDestroyProgram(name) { this.programs?.delete(name) }
   gfxBind(id, program, flags, queue, shadows) { const o = this._get(id); o.gfx = program ? { program, flags, queue, shadows, uniforms: {}, textures: {} } : undefined }
-  gfxUniform(id, name, n, x, y, z, w) { const g = this._get(id).gfx; if (g) g.uniforms[name] = [x, y, z, w].slice(0, n) }
-  gfxUniformArray(id, name, data) { const g = this._get(id).gfx; if (g) g.uniforms[name] = [...new Float32Array(data)] }
-  gfxTexture(id, name, tex) { const g = this._get(id).gfx; if (g) g.textures[name] = tex }
+  gfxUniform(id, name, n, x, y, z, w) { const g = this._gfx(id); if (g) g.uniforms[name] = [x, y, z, w].slice(0, n) }
+  gfxUniformArray(id, name, data) { const g = this._gfx(id); if (g) g.uniforms[name] = [...new Float32Array(data)] }
+  gfxTexture(id, name, tex) { const g = this._gfx(id); if (g) g.textures[name] = tex }
+  _gfx(id) { return id < 0 ? this.bakeBinds?.get(id) : this._get(id).gfx }
+  gfxBakeBegin() { this.bakeBinds ??= new Map(); const id = -((this.bakeId = (this.bakeId ?? 0) + 1)); this.bakeBinds.set(id, { uniforms: {}, textures: {} }); return id }
+  gfxBake(bind, program, width, height, targets, blend) {
+    const g = this.bakeBinds?.get(bind)
+    this.bakeBinds?.delete(bind)
+    if (!g) return '!无效的烘焙句柄'
+    if (!this.programs?.has(program)) return '!程序不存在：' + program
+    this.textures ??= new Map()
+    const ids = targets.split(';').map((t) => {
+      const id = (this.texId = (this.texId ?? 0) + 1)
+      this.textures.set(id, { bake: { program, width, height, target: t, blend, uniforms: g.uniforms, textures: g.textures } })
+      return id
+    })
+    ;(this.bakes ??= []).push({ program, width, height, targets, blend, ...g })
+    return ids.join(',')
+  }
   byName(name) { return [...this.objects.values()].filter((o) => o.name === name) }
 }
 
