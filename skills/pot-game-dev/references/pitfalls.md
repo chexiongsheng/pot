@@ -154,6 +154,18 @@
 
 见 `unity-side.md`。
 
+## 热重载报 `ReferenceError: X is not defined`（导出常量）
+
+现象：`export const A = 1, B = 2, C = 4` 只有第一个能用，其余在运行时未定义，tsc 不报错。做法：一条 `export const` 只声明一个变量。
+
+## 自建粒子：把实例数据塞进普通顶点属性
+
+没有实例化与自定义属性时，每个粒子展开成 4 个顶点：position 放中心，normal 放拉伸轴或 (滚转, 年龄, 明暗)，uv 放 (模式·32 + 帧·4 + 角点, 尺寸)，color 放 rgba。注意 color 的 rgb 会被逐分量 sRGB→线性（不截断），在顶点着色器里做线性→sRGB 逆变换即可取回原值。参考 `games/jimao/src/lib/fx.ts`。
+
+## 射线打地面"未命中"
+
+地坪若用 `collider: false` 的大平面（如 jimao 的 apron），`scene.raycast` 打不到地面。按需在射线后再与地面平面求交，取较近者。
+
 ## 画面全是洋红（粉紫色）
 
 现象：物体都是纯洋红色，日志无报错。这是 Runner 自身缺陷（着色器没打进 Runner），不是游戏代码问题，游戏侧无法也不应修复：游戏不能新增 Unity 着色器（自定义效果用 `ctx.gfx` 的 GLSL，那条路径不会洋红）。遇到时把截图和日志反馈给 Runner 维护者。

@@ -1,7 +1,10 @@
 /** 武器 PAC-9：射线射击、扩散、后坐力、换弹、瞄准、枪模（含双手、刻字）、曳光与命中火花 */
 import type { Context, Entity, MaterialOptions, Vec3 } from '@pot/core'
 import { emit, on, type BulletHit } from '../lib/bus'
+import { isPuddle } from '../lib/apron'
 import { createDecals, decalFor, surfaceAt } from '../lib/decals'
+import { createFx } from '../lib/fx'
+import { origLevel } from '../lib/origlevel'
 import { linearColor, toMesh, type RGB } from '../lib/geo'
 import { buildPac9, PAC9 } from '../lib/gun'
 import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from '../lib/hands'
@@ -43,17 +46,52 @@ export function apply(ctx: Context) {
   const { scene } = ctx
   const cam = scene.camera
   const rand = Math.random
-  // ---- 弹孔贴花（原版 Hb 图集 + j1 池） ----
+  // ---- 弹孔贴花（原版 Hb 图集 + j1 池）与粒子（原版 Bb/Ob + Rf + Ev：水花等） ----
   const decals = createDecals(ctx)
   if (decals) ctx.logger('jimao').info(`弹孔图集绘制 ${decals.atlasMs} ms`)
-  // 调试：ctx.emit('jimao/debug') 沿视线做一次与开枪相同的检测并落弹孔，日志报告表面与池数量
-  if (decals) on(ctx, 'jimao/debug', () => {
+  const fx = createFx(ctx, { mask: 1 << LEVEL_LAYER })
+  if (fx) ctx.logger('jimao').info(`粒子图集生成 ${fx.atlasMs} ms`)
+  const interior = origLevel().data?.interiorBoxes ?? []
+  /** 原版 physics.raycast：碰撞体之外，向下的射线还与地面 y=0（x≤30）或海面 y=-1.6（码头外，记为水面）求交 */
+  type Hit = { id: number; point: Vec3; normal: Vec3; distance: number; surface?: string }
+  const bulletRay = (o: Vec3, d: Vec3): Hit | undefined => {
+    const hit = scene.raycast(o, d, { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER) }) ?? undefined
+    if (d[1] >= -1e-6) return hit
+    let t = -o[1] / d[1], surface: string | undefined
+    if (o[0] + d[0] * t > 30) { t = (-1.6 - o[1]) / d[1]; surface = 'water' }
+    if (t <= 0 || t >= W.range || (hit && hit.distance <= t)) return hit
+    return { id: -1, point: [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t], normal: [0, 1, 0], distance: t, surface }
+  }
+  /** 原版 impact 的表面判定：碰撞盒材质；朝上、贴地且落在积水遮罩里的命中按水面处理 */
+  const surfaceOf = (pt: Vec3, n: Vec3, preset?: string) => {
+    const s = preset ?? surfaceAt(pt)
+    if (s !== 'water' && n[1] > 0.7 && pt[1] < 0.08 && isPuddle(pt[0], -pt[2], interior)) return 'water'
+    return s
+  }
+  /** 非敌人命中：水面 → 水花（原版 fx.splash）+ 水声；其他 → 火花、烟、弹孔 */
+  const impact = (point: Vec3, n: Vec3, surface: string) => {
+    if (surface === 'water' && fx) {
+      fx.splash(point, 1)
+      ctx.audio.play(sfx('water'), { volume: 0.5, position: point })
+      return
+    }
+    ctx.audio.play(sfx('impact'), { volume: 0.4, position: point })
+    const at: Vec3 = [point[0] + n[0] * 0.02, point[1] + n[1] * 0.02, point[2] + n[2] * 0.02]
+    scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffb060', intensity: 8, count: 12, speed: 5.5, speedJitter: 0.6, spread: 0.45, size: 0.018, life: 0.35, lifeJitter: 0.5 })
+    scene.burst({ kind: 'smoke', position: at, direction: n, color: '#8f8a84', count: 4, speed: 0.8, spread: 0.6, size: 0.22, sizeJitter: 0.5, life: 1.1 })
+    const dk = decals && decalFor(surface)
+    if (dk) decals!.add(point, n, dk[0], dk[1], dk[2], dk[3])
+  }
+  // 调试：ctx.emit('jimao/debug') 沿视线做一次与开枪相同的检测与命中特效；给坐标时直接在该点放水花。日志报告表面与池数量
+  on(ctx, 'jimao/debug', (at?: Vec3) => {
+    const log = ctx.logger('jimao')
+    if (at) { fx?.splash(at, 1); log.info(`调试水花 ${at.join(',')} 积水 ${isPuddle(at[0], -at[2], interior)} 粒子 ${JSON.stringify(fx?.stats())}`); return }
     const p = player(ctx)
     if (!p) return
-    const hit = scene.raycast(eyeOf(p), forward(p.yaw, p.pitch), { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER) })
-    const s = hit ? surfaceAt(hit.point) : '-', dk = decalFor(s)
-    if (hit && dk) decals.add(hit.point, hit.normal, dk[0], dk[1], dk[2], dk[3])
-    ctx.logger('jimao').info(`调试射线 ${hit ? hit.point.map(v => v.toFixed(2)).join(',') : '未命中'} 表面 ${s} 弹孔 ${decals.count}`)
+    const hit = bulletRay(eyeOf(p), forward(p.yaw, p.pitch))
+    const s = hit ? surfaceOf(hit.point, hit.normal, hit.surface) : '-'
+    if (hit) impact(hit.point, hit.normal, s)
+    log.info(`调试射线 ${hit ? hit.point.map(v => v.toFixed(2)).join(',') : '未命中'} 表面 ${s} 弹孔 ${decals?.count ?? 0} 粒子 ${JSON.stringify(fx?.stats())}`)
   })
 
   // ---- 枪模（原版几何机械移植，挂在相机下，单独一层，不进平面反射） ----
@@ -168,7 +206,7 @@ export function apply(ctx: Context) {
     ctx.audio.play(sfx('shot'), { volume: 0.75, pitch: 0.95 + rand() * 0.1 })
     emit(ctx, 'jimao/shot', origin)
 
-    const hit = scene.raycast(origin, dir, { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER) })
+    const hit = bulletRay(origin, dir)
     const end: Vec3 = hit ? hit.point : [origin[0] + dir[0] * W.range, origin[1] + dir[1] * W.range, origin[2] + dir[2] * W.range]
     if (hit) {
       const info: BulletHit = { id: hit.id, point: hit.point, damage: W.damage, enemy: false, killed: false, weak: false }
@@ -177,8 +215,6 @@ export function apply(ctx: Context) {
         g.stats.hits++
         emit(ctx, 'jimao/hitmarker', info.killed, info.weak)
         ctx.audio.play(sfx(info.killed ? 'kill' : 'hit'), { volume: 0.5, pitch: info.weak ? 1.25 : 1 })
-      } else {
-        ctx.audio.play(sfx('impact'), { volume: 0.4, position: hit.point })
       }
       const n = hit.normal
       const at: Vec3 = [hit.point[0] + n[0] * 0.02, hit.point[1] + n[1] * 0.02, hit.point[2] + n[2] * 0.02]
@@ -186,10 +222,7 @@ export function apply(ctx: Context) {
         scene.burst({ kind: 'glow', position: at, direction: n, color: info.weak ? '#ff5a40' : '#ffd890', intensity: 6, count: 10, speed: 2.5, spread: 0.6, size: 0.05, life: 0.18 })
         scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffc070', intensity: 8, count: 8, speed: 5, spread: 0.5, size: 0.02, life: 0.3 })
       } else {
-        scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffb060', intensity: 8, count: 12, speed: 5.5, speedJitter: 0.6, spread: 0.45, size: 0.018, life: 0.35, lifeJitter: 0.5 })
-        scene.burst({ kind: 'smoke', position: at, direction: n, color: '#8f8a84', count: 4, speed: 0.8, spread: 0.6, size: 0.22, sizeJitter: 0.5, life: 1.1 })
-        const dk = decals && decalFor(surfaceAt(hit.point))
-        if (dk) decals!.add(hit.point, n, dk[0], dk[1], dk[2], dk[3])
+        impact(hit.point, n, surfaceOf(hit.point, n, hit.surface))
       }
     }
     // 枪口火光

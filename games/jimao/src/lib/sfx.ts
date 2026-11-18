@@ -88,6 +88,17 @@ const CLIPS: Record<string, () => Float32Array> = {
     const r = rng(41)
     return normalize(lowpass(synth(0.1, (t) => (r() * 2 - 1) * env(t, 0.001, 0.02)), 0.6), 0.4)
   },
+  /** 原版 impact_water（g8）：短促水花噪声 + 420→1150 Hz 的气泡上扬音 */
+  water() {
+    const r = rng(47)
+    let a = 0
+    const d = synth(0.5, (t) => {
+      a += ((r() * 2 - 1) - a) * 0.45
+      const bub = t > 0.01 && t < 0.045 ? Math.sin(2 * Math.PI * (420 + (1150 - 420) * (t - 0.01) / 0.035) * (t - 0.01)) * 0.5 : 0
+      return a * env(t, 0.004, 0.09) * (0.8 + 0.2 * Math.sin(t * 90)) + bub
+    })
+    return normalize(d, 0.6)
+  },
   hurt() {
     const r = rng(43)
     return normalize(lowpass(synth(0.25, (t) => (r() * 2 - 1) * env(t, 0.002, 0.06) + Math.sin(2 * Math.PI * 90 * t) * env(t, 0.002, 0.1)), 0.25), 0.7)

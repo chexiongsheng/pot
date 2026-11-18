@@ -69,6 +69,33 @@ function Cb(i: number) {
   return { det: e, nrm: t }
 }
 
+// ---- 积水查询（原版 ground.puddleDepth / isPuddle，three 坐标；CPU 侧保留 Rb 数据） ----
+
+let maskCache: { res: number; data: Uint8Array } | undefined
+function maskData(res = 512) {
+  if (!maskCache) maskCache = { res, data: Rb(res) }
+  return maskCache
+}
+/** 原版 U1：遮罩双线性采样（通道 s），0..1 */
+function U1(i: Uint8Array, e: number, t: number, n: number, s: number) {
+  let o = (t - Li.x0) / Li.size * e - 0.5, r = (n - Li.z0) / Li.size * e - 0.5
+  o = o < 0 ? 0 : o > e - 1.001 ? e - 1.001 : o, r = r < 0 ? 0 : r > e - 1.001 ? e - 1.001 : r
+  const a = o | 0, l = r | 0, c = o - a, u = r - l, h = (l * e + a) * 4 + s, f = e * 4
+  return ((i[h] * (1 - c) + i[h + 4] * c) * (1 - u) + (i[h + f] * (1 - c) + i[h + f + 4] * c) * u) / 255
+}
+const QUAY_X = 30
+type Box3 = { min: { x: number; z: number }; max: { x: number; z: number } }
+/** 原版 puddleDepth(x, z)：three 坐标；interior 为原版 level.interiorBoxes */
+export function puddleDepth(x: number, z: number, interior: Box3[] = []): number {
+  const inLi = x > Li.x0 && x < Li.x0 + Li.size && z > Li.z0 && z < Li.z0 + Li.size
+  let inside = false
+  for (const b of interior) if (b && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z) { inside = true; break }
+  if (x > QUAY_X || !inLi || inside) return -0.2
+  const m = maskData()
+  return 0.5 - U1(m.data, m.res, x, z, 0)
+}
+export const isPuddle = (x: number, z: number, interior?: Box3[]) => puddleDepth(x, z, interior) > 0.015
+
 // ---- 接入 Runner ----
 
 export interface Apron {
@@ -88,7 +115,8 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   if (!gfx.supported) return undefined
   const maskRes = opts.maskRes ?? 512, detailRes = opts.detailRes ?? 256
   const t0 = Date.now()
-  const mask = scene.texture({ data: Rb(maskRes), width: maskRes, height: maskRes, linear: true, wrap: 'clamp', filter: 'trilinear', mipmaps: true })
+  const md = maskCache && maskCache.res === maskRes ? maskCache : (maskCache = { res: maskRes, data: Rb(maskRes) })
+  const mask = scene.texture({ data: md.data, width: maskRes, height: maskRes, linear: true, wrap: 'clamp', filter: 'trilinear', mipmaps: true })
   const t1 = Date.now()
   const { det, nrm } = Cb(detailRes)
   const tex = (data: Uint8Array): Texture => scene.texture({ data, width: detailRes, height: detailRes, linear: true, wrap: 'repeat', filter: 'trilinear', mipmaps: true, aniso: 8 })
