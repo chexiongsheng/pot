@@ -250,6 +250,7 @@ export function merge(list: Geo[]): Geo {
 /** 三角形数 */
 export const triCount = (g: Geo) => (g.index ? g.index.count : g.attributes.position.count) / 3
 
+/** 线性 → sRGB（标准分段公式，大于 1 照常外推；Runner 用同一公式的逆解码，不截断） */
 const toSrgb = (v: number) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)
 
 /**

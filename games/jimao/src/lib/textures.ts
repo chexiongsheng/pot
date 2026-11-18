@@ -299,6 +299,29 @@ export function polymer(size = 256): Baked {
   })
 }
 
+/**
+ * 手套织物（原版 Tn.fabric）：每个 UV 单位 36×36 格平纹编织，经纬交替浮起；灰度乘到材质色上。
+ * 原版贴图覆盖 0.25 米、手套三平面再放大 3 倍 → 每米 12 次重复
+ */
+export function fabric(size = 512): Baked {
+  const f = 36
+  const fz = fbm(size, 128, 128, 2, 91), big = fbm(size, 2, 2, 4, 92)
+  return bake(size, 3, (i, x, y, o) => {
+    const px = (x / size) * f, py = (y / size) * f
+    const ix = Math.floor(px), iy = Math.floor(py), qx = px - ix, qy = py - iy
+    const top = (ix + iy) % 2
+    const pw = Math.sin(qx * Math.PI), pf = Math.sin(qy * Math.PI)
+    const h = top ? pw * (0.6 + 0.4 * pf) : pf * (0.6 + 0.4 * pw) * 0.85
+    const thr = hash(top ? ix : iy, top, 93)
+    const ta = 0.9 * (0.55 + 0.45 * h) * (0.85 + 0.2 * (thr - 0.5) + 0.2 * (fz[i] - 0.5) + 0.2 * (big[i] - 0.5))
+    // 原版 ta 走 SL_TINT=1 的 alpha（线性倍率），这里存进 sRGB 基础色，先编码回 sRGB 才能采样出同样的线性值
+    o.r = o.g = o.b = ta <= 0.0031308 ? ta * 12.92 : 1.055 * Math.pow(ta, 1 / 2.4) - 0.055
+    o.h = 0.2 + h * 0.7 + (fz[i] - 0.5) * 0.15
+    o.ao = 0.5 + 0.5 * h
+    o.rough = 0.92
+  })
+}
+
 /** 木材（托盘、木箱）：顺纹 */
 export function wood(size = 256): Baked {
   const grain = fbm(size, 2, 28, 4, 71), fine = fbm(size, 8, 96, 2, 72), big = fbm(size, 2, 2, 3, 73), knotN = cells(size, 5, 74)

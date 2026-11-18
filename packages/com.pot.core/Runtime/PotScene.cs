@@ -225,6 +225,9 @@ namespace Pot
             renderer.SetPropertyBlock(b);
         }
 
+        /// <summary>sRGB → 线性（标准分段公式，不截断）：顶点色大于 1 时作亮度倍数，Color.linear 会把它截到 1</summary>
+        public static float SrgbToLinear(float v) => v <= 0.04045f ? v / 12.92f : Mathf.Pow((v + 0.055f) / 1.055f, 2.4f);
+
         /// <summary>sRGB 的 HDR 颜色（分量可大于 1）转线性：按最大分量归一化后转换再乘回，避免对 &gt;1 的值做幂运算</summary>
         public static Vector4 HdrToLinear(float r, float g, float b, float a = 1)
         {
@@ -497,8 +500,8 @@ namespace Pot
                 var cs = new Color[vcount];
                 for (var i = 0; i < vcount; i++)
                 {
-                    var col = new Color(c[i * 4], c[i * 4 + 1], c[i * 4 + 2], c[i * 4 + 3]);
-                    cs[i] = linear ? col.linear : col;
+                    float r = c[i * 4], g = c[i * 4 + 1], b = c[i * 4 + 2];
+                    cs[i] = linear ? new Color(SrgbToLinear(r), SrgbToLinear(g), SrgbToLinear(b), c[i * 4 + 3]) : new Color(r, g, b, c[i * 4 + 3]);
                 }
                 mesh.colors = cs;
             }
