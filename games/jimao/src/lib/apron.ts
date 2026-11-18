@@ -78,6 +78,8 @@ export interface Apron {
   /** Cb 细节纹理（海面共用） */
   detail: Texture
   detailN: Texture
+  /** Rb 积水遮罩（r < 0.49 为积水；雨点溅射共用） */
+  mask: Texture
 }
 
 /** 原版 Ib：apron 平面 190×320，平移 (-65,0,0)；不投影、接收阴影 */
@@ -103,7 +105,7 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   const ent = scene.spawn({ shape: 'plane', name: 'apron', position: [-65, 0, 0], scale: [19, 1, 32], collider: false })
     .shader(shader, { uniforms, shadows: false })
   return {
-    detail, detailN,
+    detail, detailN, mask,
     setWet(v) { ent.uniforms({ uWetG: v }) },
     setRain(v) { ent.uniforms({ uRain: v }) },
   }

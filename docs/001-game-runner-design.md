@@ -192,6 +192,14 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 遮蔽只有一个 `ao`：原版海面把 gOcc 乘在直射 radiance 和漫反射 IBL 上，不影响镜面 IBL；`s.ao` 同时作用于环境漫反射和环境反射，不作用于直射。现在折算成 albedo 与 `specular` 乘 gOcc。若再遇到类似补丁，可考虑把 `ao` 拆成 `diffuseOcclusion`、`specularOcclusion`、`directOcclusion`。
 - 高光钳制按光源逐个进行：原版是对所有光源的直射高光之和钳到 40，差别只在多个光源同时打出极亮高光时。
 
+移植原版雨（Fb/Nb：4500 条以相机为中心循环的雨丝、260 条仓库南檐滴水、450 个地面溅射，HG 相函数逆光发亮，室内盒子与天窗遮挡，积水处溅射更密）时补齐与发现：
+
+- 补齐：绑定选项 `frustumCull: false`。gfx 物体原来一律按网格包围盒做视锥剔除，顶点着色器重算位置的效果（雨、广告牌、以相机为中心的粒子）会时有时无。
+- 缺口：没有实例化。原版每实例一个 `aSeed vec4`，现在把实例展开成普通网格（每实例 4 个顶点，种子放在法线和 uv 里），顶点数和上传量是实例化的 4 倍，雨丝 19040 顶点尚可，上万实例的粒子会吃紧。建议 `scene.mesh` 支持 `instances`（每实例属性 + 数量），C# 用 `DrawIndexedInstanced`。
+- 缺口：网格没有自定义顶点属性，只能借用 normals/uvs 位置，且 colors 会被转线性；建议 `scene.mesh` 支持 `attributes: { aSeed: { size: 4, data } }`，GLSL 用同名 `in` 接收。
+- 缺口：没有 `fov`、渲染分辨率之类的相机内置量，目前用 `pot_Proj[1][1]` 和 `pot_ScreenSize` 反推。
+- 未移植：雷声事件（原版每 30 到 60 秒触发一次 `thunder`，驱动闪电与音效），留到灯光一步一起做。gfx 雨可用时关掉了 `scene.weather` 的内置雨滴粒子，地面湿润仍由 weather 提供。
+
 ## 9. 资产即代码
 
 - 优先生成：地形、建筑、低多边形模型、材质和贴图、粒子、合成音效。

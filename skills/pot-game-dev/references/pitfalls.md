@@ -86,6 +86,9 @@
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
 - 移植 three.js 的 `onBeforeCompile` 补丁：改 `directSpecular` 用 `s.specular`/`s.specularMax`；在 `opaque_fragment` 前改 `outgoingLight` 用 `pot_LitColor` 后自己 `pot_ApplyFog`；`s.ao` 同时影响环境漫反射和环境反射、不影响直射，与 three 的 `radiance *= k; iblIrradiance *= k` 不同，后者应折算为 `albedo *= k; specular *= k`。
 - 移植时 three 的 `vGWorld`/`cameraPosition` 用 `(x, y, -z)` 换算，法线 `(nx, ny, nz)` 换回 Unity 是 `(nx, ny, -nz)`；自定义网格按 z 取反并反转三角形绕序。
+- 没有实例化：原版 `InstancedBufferGeometry` + 每实例属性（雨、溅射、粒子）要把实例展开成普通网格，每个实例重复写它的顶点，实例数据塞进 `normals`（3 个浮点，原样传递）和 `uvs`（2 个浮点）；不要用 `colors`，会被当作 sRGB 转线性。
+- 顶点着色器重算位置（以相机为中心循环、广告牌）时网格包围盒不可信，物体会被视锥剔除而时有时无：绑定时加 `frustumCull: false`（对应 three 的 `frustumCulled = false`）。
+- three 的 `AdditiveBlending` 即 `blend: 'add'`（SrcAlpha, One）；`fov` 没有内置量，`2·tan(fov/2)` 用 `2.0 / abs(pot_Proj[1][1])` 求。
 - `gl_FragCoord.y` 方向与 WebGL 相反（原点在左上），移植屏幕空间效果时用 `pot_ScreenSize.y - gl_FragCoord.y`。
 - 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。
 - 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。

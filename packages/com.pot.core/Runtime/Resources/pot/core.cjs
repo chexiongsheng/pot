@@ -2599,6 +2599,7 @@ var pot = (() => {
       if (options.depthWrite ?? queue === "opaque") flags |= 4;
       flags |= { none: 0, alpha: 1, add: 2, premultiplied: 3 }[blend] << 3;
       if (options.depthTest === false) flags |= 128;
+      if (options.frustumCull === false) flags |= 256;
       const shadows = options.shadows ?? queue === "opaque";
       engine.gfxBind(this.id, typeof shader === "string" ? shader : shader.name, flags, queue === "transparent" ? 1 : 0, shadows ? 1 : 0);
       if (options.uniforms) this.uniforms(options.uniforms);

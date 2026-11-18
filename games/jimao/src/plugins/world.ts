@@ -3,6 +3,7 @@ import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
 import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
 import { createApron } from '../lib/apron'
 import { createSea } from '../lib/sea'
+import { createRain } from '../lib/rain'
 import { rng } from '../lib/math'
 import { createMats, MATS, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
@@ -189,6 +190,8 @@ export function apply(ctx: Context) {
 
   // ---- 机械移植的原版关卡：堆场、仓库、围栏、道具、中继 ----
   const orig = origLevel()
+  // ---- 原版雨丝 + 檐口滴水 + 地面溅射（ctx.gfx）；可用时关掉 scene.weather 的内置雨滴粒子 ----
+  const rainFx = apron ? createRain(ctx, { mask: apron.mask, level: orig.data }) : undefined
   /** 材质令牌 → Runner 材质：GPU 烘焙的原版材质；没有运行时着色器时退回纯色 */
   const resolveToken = (t: MatToken): { color: string; material: MaterialOptions } => {
     if (t.kind === 'emissive') return emissiveMaterial(t)
@@ -286,7 +289,7 @@ export function apply(ctx: Context) {
     scene.quality({ renderScale: q.renderScale, shadowDistance: q.shadowDistance, shadowResolution: q.shadowResolution, shadowCascades: q.shadowCascades })
     scene.reflection({ enabled: q.reflection > 0, height: 0, scale: q.reflection > 0 ? q.reflection : undefined, exclude: [VIEW_LAYER], shadows: q.reflectionShadows })
     scene.post({ ao: q.ao, antialias: q.antialias })
-    scene.weather({ ...look.weather, drops: q.drops })
+    scene.weather({ ...look.weather, drops: rainFx ? 0 : q.drops })
   }
   applyQuality(game(ctx)?.settings.quality ?? 2)
   scene.refreshEnvironment()
@@ -327,6 +330,7 @@ export function apply(ctx: Context) {
     const relays = g?.relays ?? []
     relayParts.forEach((r: any, i: number) => r.ud.setState?.(relays[i] ?? 'live'))
     syncOrig(dt)
+    rainFx?.update(dt)
     relayParts.forEach((r: any) => {
       const c = hdr(r.ud.emissiveMaterial.color)
       r.light.intensity(Math.min(2, (r.ud.level ?? 0) * 0.2))

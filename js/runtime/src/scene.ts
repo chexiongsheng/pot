@@ -331,6 +331,8 @@ export interface ShaderBinding {
   /** 写深度（opaque 默认 true，transparent 默认 false） */
   depthWrite?: boolean
   depthTest?: boolean
+  /** 视锥剔除（默认 true，按网格包围盒）。顶点着色器重算位置（粒子、以相机为中心的效果）时设 false */
+  frustumCull?: boolean
   /** 用网格投射阴影（opaque 默认 true） */
   shadows?: boolean
 }
@@ -480,6 +482,7 @@ export class Entity {
     if (options.depthWrite ?? queue === 'opaque') flags |= 4
     flags |= ({ none: 0, alpha: 1, add: 2, premultiplied: 3 } as const)[blend] << 3
     if (options.depthTest === false) flags |= 128
+    if (options.frustumCull === false) flags |= 256
     const shadows = options.shadows ?? queue === 'opaque'
     engine.gfxBind(this.id, typeof shader === 'string' ? shader : shader.name, flags, queue === 'transparent' ? 1 : 0, shadows ? 1 : 0)
     if (options.uniforms) this.uniforms(options.uniforms)
