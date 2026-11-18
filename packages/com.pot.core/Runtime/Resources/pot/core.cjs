@@ -4407,6 +4407,7 @@ struct PotSurface {
   float planar;    // 平面反射权重 0..1（需 scene.reflection 启用；只对接近反射平面、朝上的表面有意义）
   float specular;  // 直射高光倍率（太阳与附加光，默认 1；如海面闪光按方位调制）
   float specularMax; // 直射高光上限（每个光源，线性 HDR；默认 1e4 即不限）
+  vec2 planarOffset; // 平面反射采样的屏幕 uv 偏移（涟漪、风浪让倒影晃动；默认 0）
 };
 
 PotSurface pot_DefaultSurface(vec3 normal) {
@@ -4421,6 +4422,7 @@ PotSurface pot_DefaultSurface(vec3 normal) {
   s.planar = 0.0;
   s.specular = 1.0;
   s.specularMax = 1e4;
+  s.planarOffset = vec2(0.0);
   return s;
 }
 
@@ -4472,16 +4474,20 @@ vec3 pot_ApplyFog(vec3 color, vec3 worldPos) {
 }
 
 // 平面反射（scene.reflection）：rgb = 镜像相机画面，a = 可用权重（未启用或远离反射平面时为 0）
-// n 用于扰动采样位置（涟漪、法线贴图会让倒影晃动）
-vec4 pot_PlanarReflection(vec3 worldPos, vec3 n, float roughness) {
+// n 用于扰动采样位置（涟漪、法线贴图会让倒影晃动）；offset 为额外的屏幕 uv 偏移（量级 0.01..0.1）
+vec4 pot_PlanarReflection(vec3 worldPos, vec3 n, float roughness, vec2 offset) {
   if (pot_Planar.x < 0.5) return vec4(0.0);
   float near = clamp(1.0 - abs(worldPos.y - pot_Planar.y) * 3.0, 0.0, 1.0);
   if (near <= 0.0) return vec4(0.0);
   float dist = length(worldPos - pot_CameraPos.xyz);
   vec3 p = worldPos + vec3(n.x, 0.0, n.z) * (0.05 * dist);
   vec4 c = pot_PlanarVP * vec4(p, 1.0);
-  vec2 uv = clamp(c.xy / max(c.w, 1e-4) * 0.5 + 0.5, vec2(0.001), vec2(0.999));
+  vec2 uv = clamp(c.xy / max(c.w, 1e-4) * 0.5 + 0.5 + offset, vec2(0.001), vec2(0.999));
   return vec4(textureLod(pot_PlanarMap, uv, roughness * 7.0).rgb, near);
+}
+
+vec4 pot_PlanarReflection(vec3 worldPos, vec3 n, float roughness) {
+  return pot_PlanarReflection(worldPos, n, roughness, vec2(0.0));
 }
 
 // 主光阴影：1 = 全亮，0 = 全影。按级联包围球选级联，3x3 双线性 PCF，超出阴影距离淡出
@@ -4575,6 +4581,7 @@ vec3 pot_AdditionalLights(PotSurface s, vec3 n, vec3 v, vec3 f0, vec3 worldPos) 
 // 需要在雾之前叠加效果（如远处雾霭）时用它，最后自行 pot_ApplyFog
 vec3 pot_LitColor(PotSurface s, vec3 worldPos) {
   vec3 n = normalize(s.normal);
+  float r0 = s.roughness;
   // 镜面抗锯齿：法线在像素内的变化折算为粗糙度（同 three.js geometryRoughness），避免细碎法线在高光里闪烁
   vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
   s.roughness = min(max(s.roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
@@ -4587,7 +4594,8 @@ vec3 pot_LitColor(PotSurface s, vec3 worldPos) {
   vec3 ambient = (1.0 - s.metallic) * s.albedo * pot_Hemisphere(n) * s.ao;
   vec3 env = pot_EnvReflection(reflect(-v, n), s.roughness);
   if (s.planar > 0.0) {
-    vec4 pr = pot_PlanarReflection(worldPos, n, s.roughness);
+    // 倒影用原始粗糙度：抗锯齿项会把涟漪处的 mip 拉高，倒影糊成一片
+    vec4 pr = pot_PlanarReflection(worldPos, n, r0, s.planarOffset);
     env = mix(env, pr.rgb, clamp(s.planar * pr.a, 0.0, 1.0));
   }
   vec3 refl = env * fenv * s.ao;

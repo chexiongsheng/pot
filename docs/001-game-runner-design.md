@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 16 |
-| ⚠️ 有出入 | 6 |
-| ❌ 未完成 | 26 |
+| ✅ 已完成 | 17 |
+| ⚠️ 有出入 | 7 |
+| ❌ 未完成 | 27 |
 
 #### 渲染与着色器（gfx）
 
@@ -172,6 +172,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 镜面抗锯齿 | 地面 | `pot_Lit` 把像素内法线变化折算进粗糙度（同 three geometryRoughness） |
 | ✅ | 点光与聚光 `pot_AdditionalLights` | 初始移植 | 每物体最多 16 个，衰减与 URP 相同 |
 | ✅ | 平面反射开放给 gfx `pot_PlanarReflection` | 初始移植 | 原能力仅 PotLit 可用，现绑定 `pot_PlanarMap` / `pot_PlanarVP` |
+| ✅ | 倒影扰动可控 `PotSurface.planarOffset` | 雨滴涟漪 | 原来只按法线做 0.05·距离 的世界偏移，比原版 RR 弱一个数量级，涟漪看不见；现可直接给屏幕 uv 偏移，且倒影 mip 改用镜面抗锯齿之前的粗糙度 |
 | ✅ | 雾与内置材质同源 `pot_FogColor` | 初始移植 | 读 `_PotFog*`，含高度雾与太阳方向散射 |
 | ✅ | 直射高光可调 `specular` / `specularMax` | 海面 | 对应原版改写 directSpecular 的补丁，新增 `pot_BRDFLight` |
 | ✅ | 雾之前插入效果 `pot_LitColor` | 海面 | `pot_Lit = pot_ApplyFog(pot_LitColor(...))` |
@@ -198,7 +199,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ⚠️ | 内置材质世界空间效果 | 初始移植 | 宏观亮度/粗糙度变化、雨痕水珠、远距离抖动镂空只覆盖了湿润 |
 | ❌ | 内置材质顶点动画钩子 | 远景 | 闪灯、海鸥靠 `uTime` 顶点动画，目前闪灯常亮、海鸥跳过 |
 | ❌ | HDR 顶点色 | 远景 | 远景灯带用大于 1 的顶点色发光，Bloom 是否吃到待确认 |
-| ❌ | 批量变换同步 | 远景 | 原版每帧改 64 个矩阵，现在逐个比较逐个下发 |
+| ❌ | 批量变换同步 | 远景、机器狗 | 原版每帧改 64 个矩阵，现在逐个比较逐个下发；每只机器狗约 30 个刚性部件逐帧设世界变换，敌人一多开销明显；建议 `scene.setTransforms(ids, Float32Array)` |
+| ⚠️ | 没有蒙皮网格 `SkinnedMesh` | 机器狗 | 原版机器狗是刚性分件，用父子层级 + 逐帧设部件变换代替骨骼（[hound.ts](games/jimao/src/lib/hound.ts)）；真正的软蒙皮角色（人形、布料）还做不了，建议支持骨骼权重与骨骼矩阵数组 |
+| ❌ | 只碰撞不渲染的实体 | 机器狗 | 命中盒要么挂在可见网格上，要么另建实体再隐藏；建议 `spawn({ collider, visible: false })` 或 `scene.addCollider` 可跟随实体 |
 | ❌ | 点光源物理单位选项 | 远景 | three 强度/π 与 distance 的换算写在游戏里 |
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |

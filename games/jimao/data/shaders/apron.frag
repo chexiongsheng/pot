@@ -1,6 +1,6 @@
 ﻿// 原版地面 apron_wet（pretty.js TR + AR 片段）机械移植；光照改走 <pot/lit>。
 // 坐标：原版用 three 世界坐标，这里 vGWorld = (x, y, -z)。
-// 未移植：uMarks（Pb 标线贴图，Canvas2D 绘制）按 0 处理；RR 平面反射由 pot_Lit 的环境反射代替。
+// 未移植：uMarks（Pb 标线贴图，Canvas2D 绘制）按 0 处理；RR 平面反射走 scene.reflection + s.planarOffset。
 #include <pot/varyings>
 #include <pot/lit>
 
@@ -132,5 +132,12 @@ void main() {
   s.roughness = gRough;
   s.metallic = 0.0;
   s.planar = clamp(gPuddle + gSoak * 0.6 + gFilm * 0.3 + gWet * 0.25, 0.0, 1.0);
+  // 原版 RR：涟漪/风浪法线按视线方向折算为反射图的屏幕 uv 偏移（three 坐标内计算）
+  vec3 gV = normalize(cameraPosition - vGWorld);
+  vec2 gf = normalize(-gV.xz + vec2(1e-5));
+  vec2 gs = vec2(-gf.y, gf.x);
+  float sinE = clamp(gV.y, 0.03, 1.0);
+  float dk = (gPuddle + gFilm * 0.15 + 0.03) / (1.0 + gDist * 0.07);
+  s.planarOffset = clamp(vec2(dot(gNxz, gs) * sinE, dot(gNxz, gf)) * dk, vec2(-0.12), vec2(0.12));
   fragColor = pot_Lit(s, vWorldPos);
 }

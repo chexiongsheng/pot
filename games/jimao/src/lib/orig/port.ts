@@ -3939,4 +3939,4 @@ function pv(i) { // 原版 async，改同步
   return Eb(i, {});
 }
 
-export { Gi as PROP_SIZES, Yg as createProps, _i as registerProp, C1 as createLevel, pv as createBackdrop, By as flatten, Ii as mergeAll, Qi as makeMesh, il as rng }
+export { Gi as PROP_SIZES, Yg as createProps, _i as registerProp, C1 as createLevel, pv as createBackdrop, By as flatten, Ii as mergeAll, Qi as makeMesh, il as rng, Wi, ot, Fn, Dc, sa }

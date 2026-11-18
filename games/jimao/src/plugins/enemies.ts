@@ -2,11 +2,13 @@
 import type { Context, Entity, Vec3 } from '@pot/core'
 import { emit, on } from '../lib/bus'
 import { LEVEL_LAYER, type LevelData } from '../lib/level'
-import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, segmentDistance, sub, yawOf } from '../lib/math'
+import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, RAD, segmentDistance, sub, yawOf } from '../lib/math'
 import { buildEnemy, type EnemyModel } from '../lib/models'
+import { syncHound } from '../lib/hound'
+import { createMats, type Mats } from '../lib/mats'
 import { levelCollision } from '../lib/physics'
 import { sfx } from '../lib/sfx'
-import { chestOf, ENEMIES, eyeOf, game, player, type EnemyType } from '../lib/types'
+import { chestOf, ENEMIES, eyeOf, game, player, type EnemyType, type PlayerState } from '../lib/types'
 
 export const name = 'enemies'
 
@@ -41,6 +43,8 @@ export interface Enemy {
   grounded: boolean
   anim: number
   flash: number
+  /** 猎犬转向角速度（度/秒） */
+  yawRate?: number
 }
 
 interface Bolt { pos: Vec3; vel: Vec3; life: number; damage: number; type: EnemyType }
@@ -57,6 +61,12 @@ const world = levelCollision(level, 'enemy')
   const rand = Math.random
   const models = new Map<number, EnemyModel>()
   const partOwner = new Map<number, { id: number; weak: boolean }>()
+  /** 猎犬外壳/金属用原版 GPU 烘焙材质（没有 gfx 时退回纯色） */
+  let mats: Mats | undefined
+  try { mats = ctx.gfx ? createMats(ctx, { tex: tuning.quality?.tex }) : undefined } catch (err) { ctx.logger('enemies').warn('材质不可用：%s', String(err)) }
+  const toThree = (v: Vec3) => ({ x: v[0], y: v[1], z: -v[2] })
+  /** Unity 偏航（度，0 朝 +Z）→ 原版偏航（弧度，模型朝 +Z 的右手系） */
+  const threeYaw = (yaw: number) => Math.PI - yaw * RAD
 
   // ---- 弹道与爆炸特效池 ----
   const boltPool: Entity[] = []
@@ -71,9 +81,10 @@ const world = levelCollision(level, 'enemy')
   function model(e: Enemy) {
     let m = models.get(e.id)
     if (!m) {
-      m = buildEnemy(ctx, e.type, `${e.type}-${e.id}`)
+      m = buildEnemy(ctx, e.type, `${e.type}-${e.id}`, mats)
       models.set(e.id, m)
       for (const [part, weak] of m.parts) partOwner.set(part, { id: e.id, weak })
+      m.hound?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(e.yaw))
     }
     return m
   }
@@ -132,9 +143,15 @@ const world = levelCollision(level, 'enemy')
     if (!e || e.mode === 'dying') return
     hit.enemy = true
     hit.weak = owner.weak
-    e.hp -= hit.damage * (owner.weak ? tuning.weapon.weakMultiplier : 1)
+    const dmg = hit.damage * (owner.weak ? tuning.weapon.weakMultiplier : 1)
+    e.hp -= dmg
     e.flash = 0.08
     const p = player(ctx)
+    const h = models.get(e.id)?.hound
+    if (h && p) {
+      const d = norm(sub(hit.point, eyeOf(p)))
+      h.anim.hit(dmg, { x: d[0], y: d[1], z: -d[2] }, owner.weak)
+    }
     if (p && e.mode !== 'combat') enterCombat(e, p.pos)
     if (e.hp <= 0) {
       hit.killed = true
@@ -165,6 +182,12 @@ const world = levelCollision(level, 'enemy')
     if (e.type === 'gull') {
       e.vel = [e.vel[0] * 0.5 + (rand() - 0.5) * 2, 1.5, e.vel[2] * 0.5 + (rand() - 0.5) * 2]
     }
+    const h = models.get(e.id)?.hound
+    if (h) {
+      h.anim.die()
+      e.vel[0] *= 0.3; e.vel[2] *= 0.3
+      for (const x of h.hits) x.active(false)
+    }
     emit(ctx, 'jimao/kill', e.type, weak, [...e.pos])
   }
 
@@ -182,7 +205,15 @@ const world = levelCollision(level, 'enemy')
     const T = tuning[e.type]
     const yawR = e.yaw * Math.PI / 180
     const [mx, my, mz] = m.muzzle
-    const origin: Vec3 = [e.pos[0] + Math.sin(yawR) * mz + Math.cos(yawR) * mx, e.pos[1] + my, e.pos[2] + Math.cos(yawR) * mz - Math.sin(yawR) * mx]
+    let origin: Vec3 = [e.pos[0] + Math.sin(yawR) * mz + Math.cos(yawR) * mx, e.pos[1] + my, e.pos[2] + Math.cos(yawR) * mz - Math.sin(yawR) * mx]
+    if (m.hound) {
+      // 原版 z()：炮管骨骼世界位置沿目标方向前推 .43
+      const g = m.hound.anim.gunPos
+      const o: Vec3 = [g.x, g.y, -g.z]
+      const dir = norm(sub(target, o))
+      origin = [o[0] + dir[0] * 0.43, o[1] + dir[1] * 0.43, o[2] + dir[2] * 0.43]
+      m.hound.anim.fired()
+    }
     const d = dist(origin, target)
     const spread = lerp(T.spreadNear, T.spreadFar, clamp(d / T.fireRange, 0, 1))
     const dir = jitter(norm(sub(target, origin)), spread, rand)
@@ -220,8 +251,25 @@ const world = levelCollision(level, 'enemy')
 
   function sync(e: Enemy) {
     const m = model(e)
+    if (m.hound) { syncHound(m.hound); return }
     m.root.position = e.pos
-    m.root.rotation = [e.type === 'gull' ? clamp(e.vel[1] * -4, -20, 20) : 0, e.yaw, e.mode === 'dying' ? Math.min(80, e.dyingT * 160) * (e.type === 'hound' ? 1 : 3) : 0]
+    m.root.rotation = [clamp(e.vel[1] * -4, -20, 20), e.yaw, e.mode === 'dying' ? Math.min(80, e.dyingT * 480) : 0]
+  }
+
+  /** 猎犬：原版步态 H、姿态 O、炮塔/头部追踪、镜头色；死亡时原版 U 的倒地 */
+  function animateHound(e: Enemy, m: EnemyModel, dt: number, p: PlayerState | undefined) {
+    const a = m.hound!.anim
+    if (e.mode === 'dying') { a.dead(dt, e.pos[0], e.pos[1], -e.pos[2]); return }
+    const combat = e.mode === 'combat'
+    if (e.attack === 'telegraph') a.flare = Math.min(1, a.flare + dt * 5)
+    else if (e.attack === 'burst') a.flare = 1
+    a.live(dt, {
+      x: e.pos[0], y: e.pos[1], z: -e.pos[2], yaw: threeYaw(e.yaw), vx: e.vel[0], vz: -e.vel[2],
+      ground: e.grounded ? e.pos[1] : a.ground,
+      target: combat && p ? toThree(p.pos) : null,
+      look: combat && p ? toThree(p.pos) : e.mode === 'search' ? toThree(e.lastKnown) : null,
+      crouch: e.attack !== 'idle' ? 0.05 : 0, engage: combat,
+    })
   }
 
   ctx.on('update', (dt) => {
@@ -254,10 +302,14 @@ const world = levelCollision(level, 'enemy')
             remove(e)
             continue
           }
-        } else if (e.dyingT > 1.6) {
-          explode([e.pos[0], e.pos[1] + 0.8, e.pos[2]], 0, 0)
-          remove(e)
-          continue
+        } else {
+          // 原版 U：滑行减速、倒地；6.5 秒后残骸以 .22m/s 下沉 3.2 秒再回收（原版不爆炸）
+          const k = Math.exp(-5 * dt)
+          e.vel[0] *= k; e.vel[2] *= k
+          e.pos[0] += e.vel[0] * dt; e.pos[2] += e.vel[2] * dt
+          if (e.dyingT > 6.5) e.pos[1] -= 0.22 * dt
+          if (e.dyingT > 9.7) { remove(e); continue }
+          animateHound(e, m, dt, p)
         }
         sync(e)
         continue
@@ -390,20 +442,28 @@ const world = levelCollision(level, 'enemy')
         } else {
           steer(e, target, speed, T.accel, dt, false)
         }
+        // 原版：机身只沿自身前方移动；期望朝向 = 速度方向（停下且交战时朝玩家），转速限 turnRate（扑击时 ×2）
+        {
+          const hs = Math.hypot(e.vel[0], e.vel[2])
+          const want = e.lunge > 0 ? yawOf(toP) : hs > 0.3 ? yawOf(e.vel) : e.mode === 'combat' && e.seeing ? yawOf(toP) : e.yaw
+          const diff = angleDelta(e.yaw, want)
+          const F = clamp(diff * 6, -T.turnRate * 57.3, T.turnRate * 57.3) * (e.lunge > 0 ? 2 : 1)
+          e.yawRate = (e.yawRate ?? 0) + (F - (e.yawRate ?? 0)) * (1 - Math.exp(-10 * dt))
+          e.yaw += e.yawRate * dt
+          const f = e.lunge > 0 ? 1 : Math.max(0, Math.cos(angleDelta(e.yaw, want) * RAD))
+          e.vel[0] = Math.sin(e.yaw * RAD) * hs * f
+          e.vel[2] = Math.cos(e.yaw * RAD) * hs * f
+        }
         e.vel[1] -= 21 * dt
         const res = world.move({ pos: e.pos, vel: e.vel, radius: 0.45, height: 1.3, get grounded() { return e.grounded }, set grounded(v) { e.grounded = v } }, dt, 0.5)
         if (res.wall && e.detourT <= 0) { e.detour = (rand() < 0.5 ? -1 : 1) * 75; e.detourT = 0.9 }
         if (e.pos[1] < -3) { e.pos = [...e.home]; e.vel = [0, 0, 0] }
-        const moving = Math.hypot(e.vel[0], e.vel[2])
-        const face = e.mode === 'combat' && e.seeing ? yawOf(toP) : moving > 0.3 ? yawOf(e.vel) : e.yaw
-        e.yaw += clamp(angleDelta(e.yaw, face), -T.turnRate * 57.3 * dt * 3, T.turnRate * 57.3 * dt * 3)
-        const gait = Math.sin(e.anim * (4 + moving * 2.2)) * Math.min(1, moving / 2) * 35
-        m.legs.forEach((leg, i) => (leg.localRotation = [(i === 0 || i === 3 ? gait : -gait), 0, 0]))
+        animateHound(e, m, dt, p)
       }
 
       // 预警发光
       const tele = e.attack === 'telegraph' ? 0.5 + 0.5 * Math.sin(e.anim * 40) : e.attack === 'burst' ? 1 : 0
-      m.glow.color(e.flash > 0 ? '#ffffff' : tele > 0 ? '#ffd27a' : e.mode === 'combat' ? '#ff5a40' : '#ff9a70')
+      m.glow?.color(e.flash > 0 ? '#ffffff' : tele > 0 ? '#ffd27a' : e.mode === 'combat' ? '#ff5a40' : '#ff9a70')
       m.light.intensity(0.4 + tele * 2.5)
       sync(e)
     }
