@@ -23,6 +23,11 @@ export function apply(ctx: Context) {
     lastSafe: [...points.start.pos], shake: 0,
   })
   const p = ctx.state.define<PlayerState>(PLAYER, { version: 1, init: fresh })
+  // 旧存档里可能留着穿墙出界的位置，读档时直接放回出生点
+  if (!world.contains(p.pos[0], p.pos[2])) {
+    p.pos = [...points.start.pos]; p.vel = [0, 0, 0]; p.yaw = points.start.yaw
+    p.lastSafe = [...points.start.pos]
+  }
   const cam = ctx.scene.camera
   let lastStep = 0
 
@@ -115,6 +120,12 @@ export function apply(ctx: Context) {
     const fall = p.vel[1]
     world.move(body, dt, T.stepUp)
     p.grounded = body.grounded
+    if (!world.contains(p.pos[0], p.pos[2])) {
+      // 兜底：任何原因跑出空气墙围成的区域都拉回最近的安全点
+      const s = world.contains(p.lastSafe[0], p.lastSafe[2]) ? p.lastSafe : points.start.pos
+      p.pos = [s[0], s[1], s[2]]
+      p.vel = [0, 0, 0]
+    }
     if (p.grounded && wasAir && fall < -4) {
       ctx.audio.play(sfx('step'), { volume: 0.6, pitch: 0.8 })
       p.shake = Math.min(1, p.shake + 0.15)

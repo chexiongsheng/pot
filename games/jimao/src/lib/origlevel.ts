@@ -108,7 +108,10 @@ export function origLevel(): OrigLevel {
   const boxes: OrigBox[] = []
   const physics = {
     nav: undefined,
-    addBox(min: number[], max: number[], opts: Record<string, any> = {}) {
+    addBox(minIn: number[] | { x: number; y: number; z: number }, maxIn: number[] | { x: number; y: number; z: number }, opts: Record<string, any> = {}) {
+      // 原版道具碰撞（port.ts 2368 行）传的是复用的 Box3.min/max（Vector3），按下标取会得到 NaN
+      const v = (a: any): number[] => (Array.isArray(a) ? a : [a.x, a.y, a.z])
+      const min = v(minIn), max = v(maxIn)
       const b: OrigBox = {
         min: [min[0], min[1], -max[2]],
         max: [max[0], max[1], -min[2]],

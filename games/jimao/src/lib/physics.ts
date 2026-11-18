@@ -21,10 +21,18 @@ export interface MoveResult {
 }
 
 const EPS = 0.001
+/** 单个子步的最大位移（米），小于角色半径与最薄碰撞盒 */
+const MAX_STEP = 0.2
 
 export class Collision {
-  /** 地面（y=0）存在的最大 x（码头外是海） */
-  constructor(readonly boxes: Box[], readonly groundMaxX: number) {}
+  /** 地面（y=0）存在的最大 x（码头外是海）；bounds 为可玩区域（空气墙围成的 XZ 矩形） */
+  constructor(readonly boxes: Box[], readonly groundMaxX: number, readonly bounds?: { min: [number, number]; max: [number, number] }) {}
+
+  /** 是否在可玩区域内（没有边界数据时恒为 true） */
+  contains(x: number, z: number) {
+    const b = this.bounds
+    return !b || (x >= b.min[0] && x <= b.max[0] && z >= b.min[1] && z <= b.max[1])
+  }
 
   floor(x: number): number | null {
     return x <= this.groundMaxX ? 0 : null
@@ -54,7 +62,26 @@ export class Collision {
     return best
   }
 
+  /**
+   * 按子步推进：每步水平/竖直位移不超过 MAX_STEP。不分步时一帧位移超过“盒厚 + 2×半径”就会直接跨过盒子
+   * （空气墙 0.6 米厚，冲刺 7 m/s 时帧率低于约 6 fps 即穿墙；窗口在后台时 Runner 只有约 4 fps）。
+   */
   move(body: Body, dt: number, stepUp: number): MoveResult {
+    const v = body.vel
+    const dist = Math.max(Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2])) * dt
+    const n = Math.min(64, Math.max(1, Math.ceil(dist / MAX_STEP)))
+    const startGrounded = body.grounded
+    const result: MoveResult = { wall: false, ceiling: false, landed: false }
+    for (let i = 0; i < n; i++) {
+      const r = this.step(body, dt / n, stepUp)
+      result.wall ||= r.wall
+      result.ceiling ||= r.ceiling
+    }
+    result.landed = body.grounded && !startGrounded
+    return result
+  }
+
+  private step(body: Body, dt: number, stepUp: number): MoveResult {
     const { radius: r, height: h } = body
     const p = body.pos, v = body.vel
     const result: MoveResult = { wall: false, ceiling: false, landed: false }
@@ -121,9 +148,14 @@ export function levelCollision(level: LevelData, who: 'player' | 'enemy' = 'play
   // 堆场、仓库、道具、中继的碰撞盒来自机械移植的原版关卡（physics.addBox 收集，已转 Unity 坐标）
   // bulletOnly 不挡移动；playerOnly（码头/围栏外的空气墙）只挡玩家
   const boxes = buildSolids(buildLevel(level, { origStatic: true }))
+  const walls = { min: [Infinity, Infinity] as [number, number], max: [-Infinity, -Infinity] as [number, number] }
   for (const b of origLevel().boxes) {
+    if (b.playerOnly) {
+      walls.min[0] = Math.min(walls.min[0], b.min[0]); walls.min[1] = Math.min(walls.min[1], b.min[2])
+      walls.max[0] = Math.max(walls.max[0], b.max[0]); walls.max[1] = Math.max(walls.max[1], b.max[2])
+    }
     if (b.bulletOnly || (b.playerOnly && who !== 'player')) continue
     boxes.push(b)
   }
-  return new Collision(boxes, level.quay.X)
+  return new Collision(boxes, level.quay.X, Number.isFinite(walls.min[0]) ? walls : undefined)
 }
