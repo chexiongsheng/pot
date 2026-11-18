@@ -1,73 +1,64 @@
 /** 武器 KR-7：射线射击、扩散、后坐力、换弹、瞄准、枪模、曳光与命中火花 */
-import type { Context, Entity, MaterialOptions, SpawnOptions, Vec3 } from '@pot/core'
+import type { Context, Entity, MaterialOptions, Vec3 } from '@pot/core'
 import { emit, on, type BulletHit } from '../lib/bus'
+import { linearColor, toMesh, type RGB } from '../lib/geo'
+import { buildPac9, PAC9 } from '../lib/gun'
 import { ENEMY_LAYER, LEVEL_LAYER, VIEW_LAYER } from '../lib/level'
 import { clamp, damp, forward, jitter, lerp } from '../lib/math'
 import { sfx } from '../lib/sfx'
-import { gunmetal, polymer, upload } from '../lib/textures'
 import { game, player, WEAPON, eyeOf, type WeaponState } from '../lib/types'
 
 export const name = 'weapon'
 
-const HIP: Vec3 = [0.2, -0.2, 0.42]
-const ADS: Vec3 = [0, -0.118, 0.3]
+// 枪模姿态（Unity 坐标，相对相机）：原版 PAC9 的腰射/瞄准位置，瞄准时视线正对全息镜窗口中心（sightY）
+const HIP: Vec3 = [0.118, -0.122, 0.275]
+const HIP_ROT: Vec3 = [-1.95, -4.87, -1.72]
+const ADS: Vec3 = [0, -PAC9.sightY, 0.135]
+/** 原版枪模用独立相机渲染（固定 54°），这里把枪模父节点的 XY 按 tan(fov/2)/tan(54°/2) 缩放，屏幕投影与原版一致 */
+const VIEW_FOV = 54
+const u = (p: readonly number[]): Vec3 => [p[0], p[1], -p[2]]
 
 export function apply(ctx: Context) {
   const W = ctx.data.load('tuning.json').weapon
+  const T = ctx.data.load('tuning.json').player
   const fresh = (): WeaponState => ({ mag: W.mag, reserve: W.reserve, reloading: false, reloadT: 0, reloadTotal: 0, ads: 0, cooldown: 0, bloom: 0, recoilP: 0, recoilY: 0, kick: 0, spread: W.spread })
   const w = ctx.state.define<WeaponState>(WEAPON, { version: 1, init: fresh })
   const { scene } = ctx
   const cam = scene.camera
   const rand = Math.random
 
-  // ---- 枪模（挂在相机下，单独一层，不进平面反射） ----
-  const gun = scene.spawn({ shape: 'empty', name: 'viewmodel', parent: cam, position: HIP })
-  const metalSet = upload(ctx, gunmetal(256))
-  const polySet = upload(ctx, polymer(256))
-  const metal: MaterialOptions = { ...metalSet, smoothness: 0.7, metallic: 1, uv: 'object', tiling: [2, 2], shadows: false, wet: 0 }
-  const poly: MaterialOptions = { ...polySet, smoothness: 0.7, metallic: 1, uv: 'object', tiling: [2, 2], shadows: false, wet: 0 }
-  const part = (pos: Vec3, size: Vec3, color: string, material: MaterialOptions = metal, extra: Partial<SpawnOptions> = {}) =>
-    scene.spawn({ parent: gun, name: 'gun', position: pos, scale: size, color, material, collider: false, layer: VIEW_LAYER, ...extra })
-  const cyl = (pos: Vec3, d: number, len: number, color: string, material: MaterialOptions = metal) =>
-    part(pos, [d, len / 2, d], color, material, { shape: 'cylinder', rotation: [90, 0, 0] })
-  // 机匣（上/下）、拉机柄、抛壳窗
-  part([0, 0.012, 0.02], [0.058, 0.066, 0.36], '#5a5f64')
-  part([0, -0.042, -0.01], [0.052, 0.05, 0.22], '#5a5f64')
-  part([0, 0.03, -0.165], [0.05, 0.022, 0.03], '#5a5f64')
-  part([0.0295, 0.02, 0.0], [0.002, 0.026, 0.07], '#2a2c2e')
-  // 顶部皮卡汀尼导轨：底条 + 横齿
-  part([0, 0.049, 0.05], [0.024, 0.008, 0.42], '#50555a')
-  for (let i = 0; i < 22; i++) part([0, 0.056, -0.135 + i * 0.0175], [0.03, 0.006, 0.0085], '#50555a')
-  // M-LOK 护木与侧面开槽
-  part([0, 0.008, 0.36], [0.064, 0.064, 0.3], '#4a4f54')
-  for (const sx of [-1, 1]) for (let i = 0; i < 5; i++) part([sx * 0.0325, 0.0, 0.25 + i * 0.05], [0.002, 0.012, 0.03], '#111214', poly)
-  part([0, -0.026, 0.36], [0.05, 0.004, 0.28], '#3e4246')
-  // 枪管与制退器
-  cyl([0, 0.006, 0.56], 0.02, 0.12, '#45494d')
-  cyl([0, 0.006, 0.64], 0.032, 0.06, '#3a3d40')
-  for (const sx of [-1, 1]) part([sx * 0.0165, 0.006, 0.645], [0.002, 0.016, 0.03], '#0d0e0f', poly)
-  // 侧挂战术手电
-  cyl([0.044, 0.004, 0.42], 0.026, 0.1, '#3a3d40')
-  part([0.044, 0.004, 0.4705], [0.022, 0.022, 0.002], '#d8e4ff', { mode: 'unlit', shadows: false })
-  // 弹匣（略弧）、握把、扳机护圈、枪托与缓冲管
-  const mag = scene.spawn({ shape: 'empty', name: 'mag', parent: gun, position: [0, -0.07, 0.07] })
-  scene.spawn({ parent: mag, name: 'gun', position: [0, -0.04, 0], rotation: [8, 0, 0], scale: [0.046, 0.09, 0.075], color: '#ffffff', material: poly, collider: false, layer: VIEW_LAYER })
-  scene.spawn({ parent: mag, name: 'gun', position: [0, -0.115, 0.016], rotation: [18, 0, 0], scale: [0.046, 0.07, 0.072], color: '#ffffff', material: poly, collider: false, layer: VIEW_LAYER })
-  part([0, -0.09, -0.08], [0.042, 0.11, 0.055], '#ffffff', poly, { rotation: [-16, 0, 0] })
-  part([0, -0.075, -0.02], [0.012, 0.004, 0.07], '#45494d')
-  cyl([0, 0.01, -0.24], 0.03, 0.12, '#45494d')
-  part([0, -0.01, -0.33], [0.05, 0.085, 0.13], '#ffffff', poly)
-  part([0, -0.01, -0.398], [0.054, 0.1, 0.012], '#2a2c2e', poly)
-  // 全息红点镜：底座、外壳框、镜片、红点（视线高度 ADS 时 y≈0.118）
-  part([0, 0.066, 0.06], [0.04, 0.012, 0.08], '#45494d')
-  part([0, 0.083, 0.035], [0.05, 0.026, 0.03], '#45494d')
-  part([0, 0.156, 0.075], [0.056, 0.008, 0.07], '#45494d')
-  for (const sx of [-1, 1]) part([sx * 0.026, 0.115, 0.075], [0.006, 0.082, 0.07], '#45494d')
-  part([0, 0.075, 0.075], [0.056, 0.008, 0.07], '#45494d')
-  part([0, 0.115, 0.108], [0.046, 0.074, 0.002], '#ff8a70', { mode: 'lit-fade', smoothness: 0.95, metallic: 0.2, shadows: false }, { shape: 'quad', scale: [0.046, 0.074, 1] })
-  part([0, 0.118, 0.106], [0.003, 0.003, 1], '#000000', { mode: 'lit', emission: '#ff2a1a', emissionIntensity: 12, shadows: false }, { shape: 'quad' })
-  const muzzle = scene.spawn({ shape: 'empty', name: 'muzzle', parent: gun, position: [0, 0.006, 0.68] })
-  const flash = scene.spawn({ shape: 'quad', name: 'flash', parent: muzzle, scale: 0.16, color: '#ffcf7a', material: { mode: 'additive', shadows: false }, collider: false, layer: VIEW_LAYER, active: false })
+  // ---- 枪模（原版几何机械移植，挂在相机下，单独一层，不进平面反射） ----
+  const geo = buildPac9()
+  for (const key of Object.keys(geo)) scene.mesh(`pac9-${key}`, toMesh(geo[key]))
+  // 原版材质（颜色为线性值，粗糙度 → 光滑度）
+  const mat = (c: RGB, rough: number, metallic: number): { color: Vec3; material: MaterialOptions } =>
+    ({ color: linearColor(c), material: { smoothness: 1 - rough, metallic, vertexColors: true, shadows: false, wet: 0 } })
+  const anodised = mat([0.0085, 0.009, 0.0105], 0.4, 0.45)
+  const phosphate = mat([0.016, 0.016, 0.0165], 0.5, 0.7)
+  const polymer = mat([0.0125, 0.0128, 0.0135], 0.62, 0)
+  const matte = mat([1, 1, 1], 0.92, 0)
+  const tan = mat([0.105, 0.08, 0.05], 0.62, 0)
+  const brass = mat([0.62, 0.42, 0.16], 0.35, 1)
+  const fovRoot = scene.spawn({ shape: 'empty', name: 'viewmodel-fov', parent: cam })
+  const gun = scene.spawn({ shape: 'empty', name: 'viewmodel', parent: fovRoot, position: HIP, rotation: HIP_ROT })
+  const part = (key: string, parent: Entity, m: { color: Vec3; material: MaterialOptions }) =>
+    scene.spawn({ shape: `mesh:pac9-${key}`, name: 'gun', parent, color: m.color, material: m.material, collider: false, layer: VIEW_LAYER })
+  part('ano', gun, anodised)
+  part('gun', gun, phosphate)
+  part('poly', gun, polymer)
+  part('plain', gun, matte)
+  part('bolt', gun, phosphate)
+  const MAG = u(PAC9.magPos)
+  const mag = scene.spawn({ shape: 'empty', name: 'mag', parent: gun, position: MAG })
+  part('mag', mag, tan)
+  part('round', mag, brass)
+  // 全息镜：镜片（窗口略放大）+ 红点，位于视线高度 sightY、镜窗前后位置 lensF
+  const win = PAC9.window
+  const ww = (win[1][0] - win[0][0]) * 1.01, wh = (win[3][1] - win[0][1]) * 1.01
+  scene.spawn({ shape: 'quad', name: 'lens', parent: gun, position: [0, PAC9.sightY, PAC9.lensF + 0.0025], scale: [ww, wh, 1], color: [0.55, 0.6, 0.55, 0.12], material: { mode: 'lit-fade', smoothness: 0.95, metallic: 0.2, shadows: false }, collider: false, layer: VIEW_LAYER })
+  scene.spawn({ shape: 'quad', name: 'reticle', parent: gun, position: [0, PAC9.sightY, PAC9.lensF + 0.002], scale: 0.0012, color: '#000000', material: { mode: 'lit', emission: '#ff2a1a', emissionIntensity: 12, shadows: false }, collider: false, layer: VIEW_LAYER })
+  const muzzle = scene.spawn({ shape: 'empty', name: 'muzzle', parent: gun, position: u(PAC9.muzzle) })
+  const flash = scene.spawn({ shape: 'quad', name: 'flash', parent: muzzle, scale: 0.12, color: '#ffcf7a', material: { mode: 'additive', shadows: false }, collider: false, layer: VIEW_LAYER, active: false })
   const flashLight = scene.light({ type: 'point', name: 'muzzle-light', parent: muzzle, intensity: 0, range: 7, color: '#ffbe6a' })
 
   // ---- 曳光池 ----
@@ -209,10 +200,13 @@ export function apply(ctx: Context) {
     w.kick = damp(w.kick, 0, 18, dt)
     // 枪模位置：瞄准插值 + 后坐 + 换弹下沉 + 冲刺倾斜
     const a = w.ads
+    const fov = (g.settings.fov ?? T.fov) + (T.fovAds - T.fov) * a + (p.sprinting ? T.fovSprint : 0)
+    const k = Math.tan(fov * Math.PI / 360) / Math.tan(VIEW_FOV * Math.PI / 360)
+    fovRoot.scale = [k, k, 1]
     const reloadDip = w.reloading ? Math.sin(Math.PI * clamp(w.reloadT / w.reloadTotal, 0, 1)) : 0
-    const sway = Math.sin(p.bob * Math.PI) * 0.012 * (1 - a) * Math.min(1, p.speed / 4)
-    gun.localPosition = [lerp(HIP[0], ADS[0], a) + sway, lerp(HIP[1], ADS[1], a) - reloadDip * 0.12 - Math.abs(sway) * 0.5, lerp(HIP[2], ADS[2], a) - w.kick * 0.045]
-    gun.localRotation = [-w.kick * 4 + reloadDip * 35, p.sprinting ? -25 : 0, p.sprinting ? 12 : reloadDip * -20]
-    mag.localPosition = [0, -0.07 - (reloadDip > 0.6 ? (reloadDip - 0.6) * 0.6 : 0), 0.07]
+    const sway = Math.sin(p.bob * Math.PI) * 0.008 * (1 - a) * Math.min(1, p.speed / 4)
+    gun.localPosition = [lerp(HIP[0], ADS[0], a) + sway, lerp(HIP[1], ADS[1], a) - reloadDip * 0.08 - Math.abs(sway) * 0.5, lerp(HIP[2], ADS[2], a) - w.kick * 0.03]
+    gun.localRotation = [lerp(HIP_ROT[0], 0, a) - w.kick * 4 + reloadDip * 35, lerp(HIP_ROT[1], 0, a) + (p.sprinting ? -25 : 0), lerp(HIP_ROT[2], 0, a) + (p.sprinting ? 12 : reloadDip * -20)]
+    mag.localPosition = [MAG[0], MAG[1] - (reloadDip > 0.6 ? (reloadDip - 0.6) * 0.5 : 0), MAG[2]]
   })
 }

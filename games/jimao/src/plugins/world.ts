@@ -153,7 +153,7 @@ export function apply(ctx: Context) {
   }
 
   // ---- 光照：黄昏逆光 ----
-  scene.view({ near: 0.05, far: 600 })
+  scene.view({ near: 0.02, far: 600 })
   scene.light({ type: 'directional', name: 'sun', rotation: look.sun.rotation, intensity: look.sun.intensity, color: look.sun.color, shadows: 'soft' })
   scene.ambient({ sky: look.ambient.sky, equator: look.ambient.equator, ground: look.ambient.ground }, look.ambient.reflection)
   scene.sky(look.sky)

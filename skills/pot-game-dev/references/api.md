@@ -29,7 +29,7 @@
 | `spawn({ material })` | `mode`：lit/lit-cutout/lit-twosided/lit-fade/unlit/unlit-fade/additive；`map`/`normalMap`/`maskMap`（mask：R 金属 G AO B 高度 A 光滑）；`smoothness`/`metallic`（与 mask 相乘，用贴图时传 1）；`uv`：mesh/world/object（三平面）；`tiling`/`offset`；`vertexColors`；`emission`/`emissionIntensity`；`wet`（湿润响应，0 关）；`planar`（接收平面反射）；`shadows` |
 | `texture({ data, width, height, linear })` | RGBA8 像素，行从下到上；法线和遮罩贴图传 `linear: true` |
 | `text({ text, width, height, size, color, bold, letterSpacing })` | 生成文字贴图，用于贴花 |
-| `mesh(name, { positions, normals, uvs, colors, indices })` | 注册程序化网格，`shape: 'mesh:name'` 使用 |
+| `mesh(name, { positions, normals, uvs, colors, indices })` | 注册程序化网格，`shape: 'mesh:name'` 使用。左手系、+Z 为前、顺时针为正面；`colors` 为 RGBA（sRGB，可大于 1 作亮度倍数），材质开 `vertexColors` 才生效。移植 Three.js 建模代码用 `toMesh()` 转换（见 pitfalls） |
 | `view({ near, far })` / `quality({ renderScale, shadowDistance, shadowResolution, shadowCascades })` | 相机与画质 |
 | `sky(...)` / `ambient(...)` / `fog(...)` / `weather({ wetness, puddles, rain, drops })` | 程序化天空、环境光、高度雾、雨与湿地 |
 | `reflection({ enabled, height, scale, exclude, shadows })` | 地面平面反射，`exclude` 为不进反射的层 |
