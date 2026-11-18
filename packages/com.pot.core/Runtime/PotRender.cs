@@ -256,6 +256,9 @@ namespace Pot
         static int probeDelay = -1;
         static bool skyAmbient;
 
+        /// <summary>环境反射立方体贴图（sky 配置开启 reflection 时有效），供运行时着色器的 pot_EnvMap 使用</summary>
+        internal static Texture EnvTexture => probe != null ? probe.realtimeTexture : null;
+
         static void Sky(string json)
         {
             var cfg = new SkyCfg();
@@ -832,6 +835,7 @@ namespace Pot
             DestroyPlanar();
             foreach (var ps in systems.Values) if (ps != null) Object.Destroy(ps.gameObject);
             systems.Clear();
+            PotGfx.Clear();
             Ssao(1.6f, float.NaN, float.NaN);
             var cam = PotScene.Camera;
             if (cam != null)

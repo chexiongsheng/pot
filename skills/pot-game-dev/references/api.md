@@ -22,7 +22,7 @@
 
 ### 材质与渲染（URP，Linear 色彩空间）
 
-所有颜色都按 sRGB 传入，Runner 负责转线性。游戏不能带着色器或 C#，外观全部通过下列参数表达。
+所有颜色都按 sRGB 传入，Runner 负责转线性。游戏不能带 Unity 着色器或 C#；普通外观通过下列参数表达，参数表达不了的效果用下一节的 GLSL 着色器。
 
 | API | 说明 |
 |---|---|
@@ -35,6 +35,24 @@
 | `reflection({ enabled, height, scale, exclude, shadows })` | 地面平面反射，`exclude` 为不进反射的层 |
 | `post({ tonemap, exposure, contrast, saturation, bloom, vignette, vignetteColor, grain, chromatic, ao, antialias, ... })` | 后处理，只改传入字段；受伤红晕用 `vignetteColor` 而不是 UI 叠框 |
 | `burst({ kind: 'spark' \| 'glow' \| 'smoke', pos, dir, color, count, ... })` | 一次性粒子 |
+
+### 自定义着色器（ctx.gfx，GLSL ES 3.10）
+
+参数表达不了的效果（水、全息、溶解、顶点动画等）由游戏自带 GLSL 实现，Runner 运行时编译，改 `.glsl/.frag/.vert` 即热重载。先查 `ctx.gfx.supported`，不支持时退回普通材质。
+
+```ts
+const water = ctx.gfx.shader({ fragment: 'shaders/water.frag' })          // 路径相对 data/，顶点默认 <pot/standard.vert>
+const clay = ctx.gfx.shader({ vertex: 'shaders/wobble.vert', fragment: 'shaders/clay.frag' })
+ent.shader(water, { blend: 'alpha', uniforms: { uShallow: '#6fd', uDeep: '#036' } })
+ent.uniforms({ uAmount: 0.15, uTint: '#e9b' })                           // 数字/颜色/vec2-4 数组/Texture/null
+ent.shader(null)                                                          // 恢复普通材质
+```
+
+- `shader` 选项：`fragment`/`vertex`（data 内路径）或 `fragmentSource`/`vertexSource`（内联）、`name`。返回对象有 `ok`、`error`，编译失败不抛错，日志记录并保留上一版。
+- `entity.shader` 选项：`blend`：none（默认）/alpha/add/premultiplied；`cull`：back/front/none；`queue`：opaque/transparent（默认按 blend 推断）；`depthWrite`、`depthTest`、`shadows`（投射阴影，不透明时默认开）。
+- 不写 `#version`，由 Runner 补上。`#include <pot/varyings>`（`vWorldPos/vNormal/vUV/vColor/vTangent`）、`<pot/lit>`（`PotSurface`、`pot_DefaultSurface()`、`pot_Lit(s)`，含太阳光、半球环境光、环境反射与雾）、`<pot/standard.vert>`；`#include "相对路径"` 引用游戏内文件。
+- 内置 uniform：`pot_Model`、`pot_ModelInv`、`pot_NormalMatrix`、`pot_View`、`pot_Proj`、`pot_ViewProj`、`pot_CameraPos`、`pot_Time`（x 时间、y dt、z 帧号、w 不受缩放时间）、`pot_ScreenSize`、`pot_SunDir`、`pot_SunColor`、`pot_AmbientSky/Equator/Ground`、`pot_Fog`、`pot_Env`；贴图 `pot_EnvMap`（samplerCube）。顶点输入 `pot_Position`、`pot_Normal`、`pot_UV`、`pot_VertexColor`、`pot_Tangent`。
+- 颜色 uniform 以 sRGB 传入，自动转线性；输出写线性颜色。
 
 ## ctx.state
 

@@ -302,6 +302,27 @@ export interface ObjectInfo {
   unit: string
 }
 
+export type UniformValue = number | boolean | string | ArrayLike<number> | Texture | null
+
+export interface ShaderBinding {
+  uniforms?: Record<string, UniformValue>
+  /** 混合：none（默认）、alpha、add 叠加、premultiplied 预乘 */
+  blend?: 'none' | 'alpha' | 'add' | 'premultiplied'
+  /** 绘制阶段：opaque 不透明之后、transparent 透明之后（由远到近）。默认按 blend 推断 */
+  queue?: 'opaque' | 'transparent'
+  /** 剔除：back（默认）、front、none */
+  cull?: 'back' | 'front' | 'none'
+  /** 写深度（opaque 默认 true，transparent 默认 false） */
+  depthWrite?: boolean
+  depthTest?: boolean
+  /** 用网格投射阴影（opaque 默认 true） */
+  shadows?: boolean
+}
+
+function srgbToLinear(v: number) {
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+}
+
 export function parseColor(color: Color): [number, number, number, number] {
   if (typeof color === 'string') {
     const hex = color.replace('#', '')
@@ -423,6 +444,50 @@ export class Entity {
 
   collider(enabled: boolean) {
     this._engine.collider(this.id, enabled)
+    return this
+  }
+
+  /**
+   * 改用运行时着色器绘制（ctx.gfx.shader 创建；也可传程序名）。null 恢复普通材质。
+   * 网格仍由 Unity 渲染器投射阴影（shadows: false 关闭）；暂不接收阴影。
+   */
+  shader(shader: { name: string } | string | null, options: ShaderBinding = {}) {
+    const engine = this._engine
+    if (!shader) {
+      engine.gfxBind(this.id, '', 0, 0, 0)
+      return this
+    }
+    const blend = options.blend ?? 'none'
+    const queue = options.queue ?? (blend === 'none' ? 'opaque' : 'transparent')
+    const cull = options.cull ?? 'back'
+    let flags = cull === 'front' ? 1 : cull === 'none' ? 2 : 0
+    if (options.depthWrite ?? queue === 'opaque') flags |= 4
+    flags |= ({ none: 0, alpha: 1, add: 2, premultiplied: 3 } as const)[blend] << 3
+    if (options.depthTest === false) flags |= 128
+    const shadows = options.shadows ?? queue === 'opaque'
+    engine.gfxBind(this.id, typeof shader === 'string' ? shader : shader.name, flags, queue === 'transparent' ? 1 : 0, shadows ? 1 : 0)
+    if (options.uniforms) this.uniforms(options.uniforms)
+    return this
+  }
+
+  /**
+   * 设置运行时着色器的 uniform（先调用 shader）。数字、布尔、数组（矩阵按列主序）、颜色字符串（转为线性 rgba）、Texture；
+   * 贴图传 null 解除。
+   */
+  uniforms(values: Record<string, UniformValue>) {
+    const engine = this._engine
+    for (const name of Object.keys(values)) {
+      const v = values[name]
+      if (v === null) engine.gfxTexture(this.id, name, 0)
+      else if (v instanceof Texture) engine.gfxTexture(this.id, name, v.id)
+      else if (typeof v === 'number') engine.gfxUniform(this.id, name, 1, v, 0, 0, 0)
+      else if (typeof v === 'boolean') engine.gfxUniform(this.id, name, 1, v ? 1 : 0, 0, 0, 0)
+      else if (typeof v === 'string') {
+        const [r, g, b, a] = parseColor(v)
+        engine.gfxUniform(this.id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a)
+      } else if (v.length <= 4) engine.gfxUniform(this.id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0)
+      else engine.gfxUniformArray(this.id, name, bytesOf(v, Float32Array))
+    }
     return this
   }
 

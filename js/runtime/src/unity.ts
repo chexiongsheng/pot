@@ -17,6 +17,7 @@ export function createUnityHost(): Host {
   const U = Pot.PotUI
   const A = Pot.PotAudio
   const R = Pot.PotRender
+  const G = Pot.PotGfx
   return {
     platform: 'unity',
     log: (level, text) => H.Log(level, text),
@@ -97,6 +98,13 @@ export function createUnityHost(): Host {
       ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
       render: (kind, json) => R.Configure(kind, json) ?? '',
       burst: (json) => R.Burst(json),
+      gfxBackend: () => G.Backend() ?? '',
+      gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? '',
+      gfxDestroyProgram: (name) => G.DestroyProgram(name),
+      gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
+      gfxUniform: (id, name, n, x, y, z, w) => G.Uniform(id, name, n, x, y, z, w),
+      gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
+      gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
     },
   }
 }

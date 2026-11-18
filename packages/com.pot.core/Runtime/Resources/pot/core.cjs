@@ -25,6 +25,7 @@ var pot = (() => {
   __export(index_exports, {
     API_VERSION: () => API_VERSION,
     AudioService: () => AudioService,
+    BUILTIN_UNIFORMS: () => BUILTIN_UNIFORMS,
     CORE_SERVICES: () => CORE_SERVICES,
     CacheService: () => CacheService,
     ClockService: () => ClockService,
@@ -36,8 +37,10 @@ var pot = (() => {
     EventsService: () => EventsService,
     Fiber: () => Fiber,
     FiberState: () => FiberState,
+    GfxService: () => GfxService,
     Inject: () => Inject,
     InputService: () => InputService,
+    LIBRARY: () => LIBRARY,
     Logger: () => Logger,
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
@@ -46,6 +49,7 @@ var pot = (() => {
     Runtime: () => Runtime,
     SceneService: () => SceneService,
     Service: () => Service,
+    Shader: () => Shader,
     StateService: () => StateService,
     StateTypeError: () => StateTypeError,
     Texture: () => Texture,
@@ -79,8 +83,10 @@ var pot = (() => {
     isConstructor: () => isConstructor,
     isObject: () => isObject,
     joinPrototype: () => joinPrototype,
+    mapErrors: () => mapErrors,
     markFiber: () => markFiber,
     parseColor: () => parseColor,
+    preprocess: () => preprocess,
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
     symbols: () => symbols,
@@ -692,13 +698,13 @@ var pot = (() => {
       return `\x1B[3${code < 8 ? code : "8;5;" + code}${exporter.colors >= 2 ? decoration : ""}m${value}\x1B[0m`;
     }
     static code(name, level) {
-      let hash2 = 0;
+      let hash3 = 0;
       for (let i = 0; i < name.length; i++) {
-        hash2 = (hash2 << 3) - hash2 + name.charCodeAt(i) + 13;
-        hash2 |= 0;
+        hash3 = (hash3 << 3) - hash3 + name.charCodeAt(i) + 13;
+        hash3 |= 0;
       }
       const colors = !level ? [] : level >= 2 ? c256 : c16;
-      return colors[Math.abs(hash2) % colors.length];
+      return colors[Math.abs(hash3) % colors.length];
     }
     static format(exporter, message) {
       const args = message.args.slice();
@@ -2450,6 +2456,9 @@ var pot = (() => {
     const typed = view instanceof Type ? view : new Type(view);
     return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength ? typed.buffer : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
   }
+  function srgbToLinear(v) {
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
   function parseColor(color) {
     if (typeof color === "string") {
       const hex = color.replace("#", "");
@@ -2556,6 +2565,48 @@ var pot = (() => {
     }
     collider(enabled) {
       this._engine.collider(this.id, enabled);
+      return this;
+    }
+    /**
+     * 改用运行时着色器绘制（ctx.gfx.shader 创建；也可传程序名）。null 恢复普通材质。
+     * 网格仍由 Unity 渲染器投射阴影（shadows: false 关闭）；暂不接收阴影。
+     */
+    shader(shader, options = {}) {
+      const engine = this._engine;
+      if (!shader) {
+        engine.gfxBind(this.id, "", 0, 0, 0);
+        return this;
+      }
+      const blend = options.blend ?? "none";
+      const queue = options.queue ?? (blend === "none" ? "opaque" : "transparent");
+      const cull = options.cull ?? "back";
+      let flags = cull === "front" ? 1 : cull === "none" ? 2 : 0;
+      if (options.depthWrite ?? queue === "opaque") flags |= 4;
+      flags |= { none: 0, alpha: 1, add: 2, premultiplied: 3 }[blend] << 3;
+      if (options.depthTest === false) flags |= 128;
+      const shadows = options.shadows ?? queue === "opaque";
+      engine.gfxBind(this.id, typeof shader === "string" ? shader : shader.name, flags, queue === "transparent" ? 1 : 0, shadows ? 1 : 0);
+      if (options.uniforms) this.uniforms(options.uniforms);
+      return this;
+    }
+    /**
+     * 设置运行时着色器的 uniform（先调用 shader）。数字、布尔、数组（矩阵按列主序）、颜色字符串（转为线性 rgba）、Texture；
+     * 贴图传 null 解除。
+     */
+    uniforms(values) {
+      const engine = this._engine;
+      for (const name of Object.keys(values)) {
+        const v = values[name];
+        if (v === null) engine.gfxTexture(this.id, name, 0);
+        else if (v instanceof Texture) engine.gfxTexture(this.id, name, v.id);
+        else if (typeof v === "number") engine.gfxUniform(this.id, name, 1, v, 0, 0, 0);
+        else if (typeof v === "boolean") engine.gfxUniform(this.id, name, 1, v ? 1 : 0, 0, 0, 0);
+        else if (typeof v === "string") {
+          const [r, g, b, a] = parseColor(v);
+          engine.gfxUniform(this.id, name, 4, srgbToLinear(r), srgbToLinear(g), srgbToLinear(b), a);
+        } else if (v.length <= 4) engine.gfxUniform(this.id, name, v.length, v[0] ?? 0, v[1] ?? 0, v[2] ?? 0, v[3] ?? 0);
+        else engine.gfxUniformArray(this.id, name, bytesOf(v, Float32Array));
+      }
       return this;
     }
     layer(layer) {
@@ -2943,8 +2994,316 @@ var pot = (() => {
     }
   };
 
+  // runtime/src/gfx.ts
+  var Shader = class {
+    constructor(name, error, _dispose) {
+      __publicField(this, "name", name);
+      __publicField(this, "error", error);
+      __publicField(this, "_dispose", _dispose);
+    }
+    /** 本次编译是否成功（失败时若有同名旧程序，画面仍用旧程序） */
+    get ok() {
+      return !this.error;
+    }
+    destroy() {
+      return this._dispose?.();
+    }
+  };
+  var BUILTIN_UNIFORMS = `uniform mat4 pot_Model;
+uniform mat4 pot_ModelInv;
+uniform mat3 pot_NormalMatrix;
+uniform mat4 pot_View;
+uniform mat4 pot_Proj;
+uniform mat4 pot_ViewProj;
+uniform vec4 pot_CameraPos;
+uniform vec4 pot_Time;
+uniform vec4 pot_ScreenSize;
+uniform vec4 pot_SunDir;
+uniform vec4 pot_SunColor;
+uniform vec4 pot_AmbientSky;
+uniform vec4 pot_AmbientEquator;
+uniform vec4 pot_AmbientGround;
+uniform vec4 pot_Fog;
+uniform vec4 pot_Env;
+`;
+  var HEADER = `#version 310 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+precision highp samplerCube;
+`;
+  var VERTEX_INPUTS = `layout(location = 0) in vec3 pot_Position;
+layout(location = 1) in vec3 pot_Normal;
+layout(location = 2) in vec2 pot_UV;
+layout(location = 3) in vec4 pot_VertexColor;
+layout(location = 4) in vec4 pot_Tangent;
+`;
+  var LIBRARY = {
+    "pot/varyings": `#ifndef POT_VARYINGS
+#define POT_VARYINGS
+#ifdef POT_VERTEX
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec2 vUV;
+out vec4 vColor;
+out vec4 vTangent;
+#else
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec2 vUV;
+in vec4 vColor;
+in vec4 vTangent;
+#endif
+#endif
+`,
+    "pot/standard.vert": `#include <pot/varyings>
+void main() {
+  vec4 world = pot_Model * vec4(pot_Position, 1.0);
+  vWorldPos = world.xyz;
+  vNormal = normalize(pot_NormalMatrix * pot_Normal);
+  vUV = pot_UV;
+  vColor = pot_VertexColor;
+  vTangent = vec4(normalize(mat3(pot_Model) * pot_Tangent.xyz), pot_Tangent.w);
+  gl_Position = pot_ViewProj * world;
+}
+`,
+    "pot/lit": `#ifndef POT_LIT
+#define POT_LIT
+// 输出到 HDR 线性缓冲（后处理负责色调映射）；颜色常量多为 sRGB，用 pot_ToLinear 转换
+struct PotSurface {
+  vec3 albedo;     // 线性
+  float metallic;
+  float roughness;
+  vec3 normal;     // 世界空间，已归一化
+  vec3 emission;   // 线性，HDR
+  float ao;
+  float alpha;
+};
+
+PotSurface pot_DefaultSurface(vec3 normal) {
+  PotSurface s;
+  s.albedo = vec3(0.8);
+  s.metallic = 0.0;
+  s.roughness = 0.5;
+  s.normal = normal;
+  s.emission = vec3(0.0);
+  s.ao = 1.0;
+  s.alpha = 1.0;
+  return s;
+}
+
+vec3 pot_ToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+vec3 pot_ToSrgb(vec3 c) {
+  c = max(c, vec3(0.0));
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+const float POT_PI = 3.14159265359;
+
+vec3 pot_Hemisphere(vec3 n) {
+  float y = n.y;
+  vec3 up = mix(pot_AmbientEquator.rgb, pot_AmbientSky.rgb, clamp(y, 0.0, 1.0));
+  return mix(up, pot_AmbientGround.rgb, clamp(-y, 0.0, 1.0));
+}
+
+vec3 pot_EnvReflection(vec3 r, float roughness) {
+  vec3 env = textureLod(pot_EnvMap, r, roughness * 6.0).rgb;
+  return mix(pot_Hemisphere(r), env, pot_Env.y) * pot_Env.x;
+}
+
+float pot_FogFactor(vec3 worldPos) {
+  float d = length(worldPos - pot_CameraPos.xyz) * pot_Fog.w;
+  return exp(-d * d);
+}
+
+vec3 pot_ApplyFog(vec3 color, vec3 worldPos) {
+  return mix(pot_Fog.rgb, color, pot_FogFactor(worldPos));
+}
+
+// GGX 太阳光 + 半球环境光 + 环境反射，含雾
+vec4 pot_Lit(PotSurface s, vec3 worldPos) {
+  vec3 n = normalize(s.normal);
+  vec3 v = normalize(pot_CameraPos.xyz - worldPos);
+  vec3 l = normalize(pot_SunDir.xyz);
+  vec3 h = normalize(l + v);
+  float nl = max(dot(n, l), 0.0);
+  float nv = max(dot(n, v), 1e-4);
+  float nh = max(dot(n, h), 0.0);
+  float vh = max(dot(v, h), 0.0);
+  float a = max(s.roughness * s.roughness, 2e-3);
+  float a2 = a * a;
+  float dd = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / (POT_PI * dd * dd);
+  float k = (s.roughness + 1.0) * (s.roughness + 1.0) / 8.0;
+  float G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+  vec3 f0 = mix(vec3(0.04), s.albedo, s.metallic);
+  vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+  vec3 spec = D * G * F / max(4.0 * nl * nv, 1e-4);
+  vec3 kd = (1.0 - F) * (1.0 - s.metallic);
+  vec3 direct = (kd * s.albedo / POT_PI + spec) * pot_SunColor.rgb * nl * POT_PI;
+  vec3 fenv = f0 + (max(vec3(1.0 - s.roughness), f0) - f0) * pow(1.0 - nv, 5.0);
+  vec3 ambient = (1.0 - s.metallic) * s.albedo * pot_Hemisphere(n) * s.ao;
+  vec3 refl = pot_EnvReflection(reflect(-v, n), s.roughness) * fenv * s.ao;
+  vec3 color = direct + ambient + refl + s.emission;
+  return vec4(pot_ApplyFog(color, worldPos), s.alpha);
+}
+#endif
+`
+  };
+  function normalize2(path) {
+    const parts = [];
+    for (const p of path.replace(/\\/g, "/").replace(/^data\//, "").split("/")) {
+      if (!p || p === ".") continue;
+      if (p === "..") parts.pop();
+      else parts.push(p);
+    }
+    return parts.join("/");
+  }
+  function dirname(path) {
+    const i = path.lastIndexOf("/");
+    return i < 0 ? "" : path.slice(0, i + 1);
+  }
+  function preprocess(stage, entry, read) {
+    const files = ["(预置)"];
+    const once = /* @__PURE__ */ new Set();
+    const out = [HEADER.trimEnd()];
+    out.push(`#define ${stage === "vertex" ? "POT_VERTEX" : "POT_FRAGMENT"} 1`);
+    out.push(BUILTIN_UNIFORMS.trimEnd());
+    if (stage === "vertex") out.push(VERTEX_INPUTS.trimEnd());
+    else out.push("uniform samplerCube pot_EnvMap;");
+    const expand = (name, text, depth, stack) => {
+      if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(" → ")}`);
+      const index = files.length;
+      files.push(name);
+      out.push(`#line 1 ${index}`);
+      const lines = text.replace(/\r\n?/g, "\n").split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\s*#\s*version\b/.test(line)) {
+          out.push("");
+          continue;
+        }
+        const m = /^\s*#\s*include\s+(?:<([^>]+)>|"([^"]+)")/.exec(line);
+        if (!m) {
+          out.push(line);
+          continue;
+        }
+        let target;
+        let body;
+        if (m[1]) {
+          target = `<${m[1]}>`;
+          const lib = LIBRARY[m[1]];
+          if (lib === void 0) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join("、")}）`);
+          body = lib;
+        } else {
+          target = normalize2(dirname(name.startsWith("<") ? "" : name) + m[2]);
+          if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(" → ")}`);
+          body = read(target);
+        }
+        if (once.has(target) && m[1]) {
+          out.push("");
+          continue;
+        }
+        once.add(target);
+        expand(target, body, depth + 1, [...stack, target]);
+        out.push(`#line ${i + 2} ${index}`);
+      }
+    };
+    if (entry.path !== void 0) {
+      const path = normalize2(entry.path);
+      expand(path, read(path), 0, [path]);
+    } else if (entry.source !== void 0) {
+      expand(stage === "vertex" ? "(内联顶点着色器)" : "(内联片元着色器)", entry.source, 0, []);
+    } else {
+      expand("<pot/standard.vert>", LIBRARY["pot/standard.vert"], 0, []);
+    }
+    return { code: out.join("\n") + "\n", files };
+  }
+  function mapErrors(message, vs, fs) {
+    const lines = message.split("\n");
+    let current2;
+    return lines.map((line) => {
+      if (/^\[vertex\]/.test(line)) current2 = vs;
+      else if (/^\[fragment\]/.test(line)) current2 = fs;
+      else if (/^\[link\]|^\[mapIO\]/.test(line)) current2 = void 0;
+      return line.replace(/(ERROR|WARNING): (\d+):(\d+):/g, (all, kind, file, row) => {
+        const name = current2?.files[Number(file)];
+        return name ? `${kind}: ${name}:${row}:` : all;
+      });
+    }).join("\n");
+  }
+  var GfxService = class extends Service {
+    constructor(ctx, _host) {
+      super(ctx, "gfx");
+      __publicField(this, "_host", _host);
+      /** 程序名 → 引用数（同名程序可被多个插件共享） */
+      __publicField(this, "_refs", /* @__PURE__ */ new Map());
+    }
+    /** 后端名（d3d11）；为空表示当前平台不支持运行时着色器 */
+    get backend() {
+      return this._host.engine.gfxBackend();
+    }
+    get supported() {
+      return !!this.backend;
+    }
+    /** 编译着色器程序。失败不抛错（返回的 Shader.error 为错误信息，并输出日志），以便热重载时保留旧画面 */
+    shader(options) {
+      const ctx = this.ctx;
+      const read = (path) => ctx.data.text(path);
+      const vertexEntry = { path: options.vertex, source: options.vertexSource };
+      const fragmentEntry = { path: options.fragment, source: options.fragmentSource };
+      if (fragmentEntry.path === void 0 && fragmentEntry.source === void 0) throw new Error("gfx.shader：需要 fragment 或 fragmentSource");
+      const name = options.name ?? `${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : "<pot/standard.vert>")}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}`;
+      let error = "";
+      let vs;
+      let fs;
+      try {
+        vs = preprocess("vertex", vertexEntry, read);
+        fs = preprocess("fragment", fragmentEntry, read);
+      } catch (e) {
+        error = String(e?.message ?? e);
+      }
+      const engine = this._host.engine;
+      const clock = ctx.clock;
+      const dispose = ctx.effect(() => {
+        if (vs && fs) {
+          const result = engine.gfxProgram(name, vs.code, fs.code);
+          if (result) error = mapErrors(result, vs, fs);
+        }
+        if (error) ctx.logger("gfx").error("着色器 %s 编译失败：\n%s", name, error);
+        this._refs.set(name, (this._refs.get(name) ?? 0) + 1);
+        return () => this._release(name, clock);
+      }, `gfx.shader(${name})`);
+      return new Shader(name, error, dispose);
+    }
+    /** 引用归零后延迟两帧再释放：热重载时新单元会先重新登记同名程序，旧程序得以平滑替换或在出错时保留 */
+    _release(name, clock) {
+      const n2 = (this._refs.get(name) ?? 1) - 1;
+      if (n2 > 0) {
+        this._refs.set(name, n2);
+        return;
+      }
+      this._refs.delete(name);
+      clock.waitFrames(2).then(() => {
+        if (!this._refs.has(name)) this._host.engine.gfxDestroyProgram(name);
+      });
+    }
+  };
+  __publicField(GfxService, "inject", ["data", "clock"]);
+  function hash2(text) {
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
+  }
+
   // runtime/src/plugins.ts
-  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "plugins"];
+  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "plugins"];
   function compileModule(code, filename) {
     const indirectEval = eval;
     return indirectEval(`(function (exports, require, module, __filename) {${code}
@@ -3138,6 +3497,7 @@ var pot = (() => {
       await install(bind(InputService, host));
       await install(bind(UIService, host));
       await install(bind(AudioService, host));
+      await install(bind(GfxService, host));
       await install(bind(PluginsService, host, modules, this.options.loader));
       if (this.options.state) this.root.state.importJSON(this.options.state);
       return this;
@@ -3233,6 +3593,7 @@ var pot = (() => {
     const U = Pot.PotUI;
     const A = Pot.PotAudio;
     const R = Pot.PotRender;
+    const G = Pot.PotGfx;
     return {
       platform: "unity",
       log: (level, text) => H.Log(level, text),
@@ -3312,7 +3673,14 @@ var pot = (() => {
         matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
         ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
         render: (kind, json) => R.Configure(kind, json) ?? "",
-        burst: (json) => R.Burst(json)
+        burst: (json) => R.Burst(json),
+        gfxBackend: () => G.Backend() ?? "",
+        gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
+        gfxDestroyProgram: (name) => G.DestroyProgram(name),
+        gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
+        gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
+        gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
+        gfxTexture: (id, name, tex) => G.Texture(id, name, tex)
       }
     };
   }

@@ -15,6 +15,7 @@ import { StateService } from './state'
 import { TimerService } from './timer'
 import { UIService } from './ui'
 import { AudioService } from './audio'
+import { GfxService } from './gfx'
 
 export const API_VERSION = '0.1'
 export const VERSION = '0.1.0'
@@ -107,6 +108,7 @@ export class Runtime {
     await install(bind(InputService, host))
     await install(bind(UIService, host))
     await install(bind(AudioService, host))
+    await install(bind(GfxService, host))
     await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this

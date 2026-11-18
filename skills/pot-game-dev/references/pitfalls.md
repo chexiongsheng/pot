@@ -79,6 +79,14 @@
 - 现象：UI、菜单也一起停了。
 - 做法：游戏暂停用自己的 phase；`time pause` 只用于开发调试。
 
+### 自定义着色器的限制（ctx.gfx）
+
+- 目前只支持 Windows D3D11；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
+- 用自定义着色器的物体暂不接收阴影（仍可投射），也不进 SSAO。
+- `gl_FragCoord.y` 方向与 WebGL 相反（原点在左上），移植屏幕空间效果时用 `pot_ScreenSize.y - gl_FragCoord.y`。
+- 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。
+- 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。
+
 ## 工具与环境
 
 ### 类型检查用错 tsc
@@ -102,6 +110,6 @@
 
 ## 画面全是洋红（粉紫色）
 
-现象：物体都是纯洋红色，日志无报错。这是 Runner 自身缺陷（着色器没打进 Runner），不是游戏代码问题，游戏侧无法也不应修复：游戏不能新增 Unity 着色器，外观只能通过 Game API 的材质参数和数据表达。遇到时把截图和日志反馈给 Runner 维护者。
+现象：物体都是纯洋红色，日志无报错。这是 Runner 自身缺陷（着色器没打进 Runner），不是游戏代码问题，游戏侧无法也不应修复：游戏不能新增 Unity 着色器（自定义效果用 `ctx.gfx` 的 GLSL，那条路径不会洋红）。遇到时把截图和日志反馈给 Runner 维护者。
 
 （Runner 维护者注意：Runner 内置着色器必须放在 core 的 Resources 或 Always Included 中；构建 Runner 不要加 `-nographics`，否则着色器不会编译。）

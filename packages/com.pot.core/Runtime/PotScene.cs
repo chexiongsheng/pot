@@ -411,6 +411,12 @@ namespace Pot
             return id;
         }
 
+        internal static Texture GetTexture(int id)
+        {
+            Texture t;
+            return textures.TryGetValue(id, out t) ? t : null;
+        }
+
         /// <summary>
         /// 从 RGBA8 像素创建贴图（行从下到上）。linear：数据是否为线性（法线、遮罩为 true，颜色为 false）。
         /// wrap：0 重复 1 截断；filter：0 点 1 双线性 2 三线性；aniso：各向异性等级。返回贴图 id。

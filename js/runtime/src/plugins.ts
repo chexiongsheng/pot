@@ -1,4 +1,4 @@
-/**
+﻿/**
  * plugins：游戏单元（unit）的加载与挂载。
  * 一个单元 = 一个插件文件 src/plugins/<name>.ts。
  * - Runner（开发期）：devtools 提供的 UnitLoader 直接读源码转译执行，每次编译都是新的模块对象，旧版本释放后可被 GC。
@@ -21,7 +21,7 @@ declare module 'cordis' {
   }
 }
 
-export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'plugins']
+export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'gfx', 'plugins']
 
 export interface UnitSource {
   exports: any

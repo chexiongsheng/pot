@@ -24,12 +24,14 @@ namespace Pot
             instance = this;
             PotRender.ResetGlobals();
             RenderPipelineManager.beginCameraRendering += PotRender.BeginCamera;
+            RenderPipelineManager.beginCameraRendering += PotGfx.BeginCamera;
         }
 
         void OnDestroy()
         {
             if (instance != this) return;
             RenderPipelineManager.beginCameraRendering -= PotRender.BeginCamera;
+            RenderPipelineManager.beginCameraRendering -= PotGfx.BeginCamera;
             instance = null;
         }
 

@@ -92,6 +92,18 @@ export interface Engine {
   render(kind: string, json: string): string
   /** 粒子迸发（JSON 参数见 PotRender.Burst） */
   burst(json: string): void
+
+  // ---- 运行时着色器（PotGfx.cs / native/pot_gfx） ----
+  /** 后端名（d3d11）；空串表示不支持 */
+  gfxBackend(): string
+  /** 编译并注册程序（同名替换）；成功返回空串，失败返回错误且保留旧程序 */
+  gfxProgram(name: string, vs: string, fs: string): string
+  gfxDestroyProgram(name: string): void
+  /** program 为空串表示解除；flags 见 PotGfx.Bind；queue 0 不透明 1 透明 */
+  gfxBind(id: number, program: string, flags: number, queue: number, shadows: number): void
+  gfxUniform(id: number, name: string, n: number, x: number, y: number, z: number, w: number): void
+  gfxUniformArray(id: number, name: string, data: ArrayBuffer): void
+  gfxTexture(id: number, name: string, tex: number): void
 }
 
 export interface RaycastResult {

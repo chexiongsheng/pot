@@ -130,13 +130,24 @@ my-game/
 
 ## 8. 渲染与着色器策略
 
-Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLSL 源码提交，浏览器自带编译链路（如 ANGLE）。Unity 和 UE 出于变体规模、PSO 卡顿、编译器体积、平台限制和材质元数据等原因选择离线预编译。本项目的策略：
+Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLSL 源码提交，浏览器自带编译链路（如 ANGLE）。Unity 和 UE 出于变体规模、PSO 卡顿、编译器体积、平台限制和材质元数据等原因选择离线预编译。
 
-- 通用 uber 材质加参数和开关：主力方案，保留引擎的光照、阴影和后处理。
-- 着色器即数据：固定的解释器着色器，读取 Buffer 或贴图中的表达式字节码（SDF、噪声、颜色运算），用于程序化贴图、材质和特效。JS 端负责生成字节码。
-- 运行时编译 GLSL（GLES/WebGL 原生插件）：暂不做，只作为远期选项。
+目标：Runner 不变，游戏就能实现网页上能做到的任意效果；Runner 不依赖 Editor。因此着色器是游戏内容，不是 Runner 的一部分。
 
-变体管理：`core` 自带 `ShaderVariantCollection` 和 Always Included 配置；`build` 根据 `capabilities` 裁剪变体，并预热 PSO。
+主路线：着色器作为游戏内容，Runner 运行时编译 GLSL ES（原生插件 `native/pot_gfx`）。
+
+- 游戏包里放 GLSL ES 3.10 源码（`data/shaders/*.frag|vert`），通过 `ctx.gfx.shader()` 加载，`entity.shader()` / `entity.uniforms()` 绑定，和其他数据一样热重载。
+- 编译链：glslang → SPIR-V → SPIRV-Cross → 目标平台语言（D3D11 为 HLSL SM5.0 后再 D3DCompile；GLES/WebGL 为 GLSL 300 es；Metal 为 MSL）→ 驱动编译。这与浏览器（ANGLE）的做法同构，Unity 自身的跨平台着色器管线也是同一套工具。
+- 绘制：在 URP 的 `AfterRenderingOpaques` / `AfterRenderingTransparents` 两个 pass 中，由原生插件用 URP 当前的颜色和深度目标直接绘制，因此与普通物体正确遮挡，透明物体按由远到近排序；后处理照常作用。物体仍由普通 Renderer 投射阴影（ShadowsOnly）。
+- 内置 uniform 与库：`pot_Model/View/Proj/...`、`pot_Time`、太阳光、环境光、雾、反射探针；`<pot/varyings>`、`<pot/standard.vert>`、`<pot/lit>`（GGX + 半球环境光 + 环境反射 + 雾）。只写片元着色器即可得到与场景一致的光照。
+- 出错不丢画面：编译失败时保留同名旧程序，错误按 `#line` 映射回游戏源文件和行号。
+- 代价：编译器约 3 MB；首次编译在加载时发生（几十毫秒级），后续可按源码哈希缓存。暂不接收阴影，暂不进入 URP 的深度预通道和 SSAO。
+
+备用：着色器即数据。固定的解释器着色器读取 Buffer 或贴图中的表达式字节码，在某平台无法运行时编译时（例如受限的小游戏环境）作为降级方案。
+
+已作废：Dev Server 调用 Editor 编译着色器。它让开发依赖 Editor，且发布期仍需变体管理，不满足“Runner 不变”的目标。
+
+普通材质（uber 材质加参数和开关）继续保留，用于不需要自定义效果的物体。变体管理：`core` 自带 `ShaderVariantCollection` 和 Always Included 配置；`build` 根据 `capabilities` 裁剪变体，并预热 PSO。
 
 ## 9. 资产即代码
 
@@ -145,7 +156,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 生成耗时：分帧生成，优先生成玩家附近的内容。生成结果缓存到本地（原始网格和贴图数据），第二次启动直接读缓存。
 - 发布时可选烘焙：在编辑器里用同一份脚本预先生成，产出普通 Unity 资源，交给引擎管线压缩和优化。一份代码两种用法。
 - 资产代码只依赖纯数学库：建模代码只产出顶点、法线、UV、顶点色和索引，不碰渲染器、DOM 和引擎对象。这样同一份代码可以在浏览器、Node 和 Runner 里运行，也能直接搬运现成的 Web 资产代码（例如 Three.js 的几何体与 BufferGeometryUtils，按源文件打成 vendor 放进游戏包）。坐标系与色彩空间的差异在出口统一转换一次，建模代码本身保持原样。jimao 的枪模就是这样从原版机械移植的，改动只有函数名。
-- 外观差距分三层：几何（可直接移植）、材质参数（颜色、粗糙度、金属度，可直接移植）、着色器补丁（原版的 onBeforeCompile，需要 Runner 提供对应的通用材质能力，不能由游戏自带）。
+- 外观差距分三层：几何（可直接移植）、材质参数（颜色、粗糙度、金属度，可直接移植）、着色器补丁（原版的 onBeforeCompile，由游戏自带 GLSL 实现，见第 8 节）。
 
 ## 10. 开发闭环
 
@@ -198,7 +209,7 @@ MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 W
 
 发布：新建或使用模板发布工程，引入 `core` 和 `build`，导入游戏包，然后用命令行 `-batchmode` 构建各平台产物。
 
-自定义 Runner：游戏需要通用 Runner 没有的原生能力（SDK、自定义着色器、C# 插件）时，在 `manifest.extraPackages` 中声明，再用 `build` 一键构建包含这些扩展的专属 Runner。这样可以避开 Expo Go 早期“通用客户端跑不了自定义原生代码”的问题。
+自定义 Runner：游戏需要通用 Runner 没有的原生能力（SDK、C# 插件）时，在 `manifest.extraPackages` 中声明，再用 `build` 一键构建包含这些扩展的专属 Runner。自定义着色器不在此列，它属于游戏内容（第 8 节）。这样可以避开 Expo Go 早期“通用客户端跑不了自定义原生代码”的问题。
 
 ## 13. 风险与待定事项
 
@@ -207,6 +218,7 @@ MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 W
 - iOS 上 Runner 的安装：走 TestFlight，或开发者用自己的证书从 Runner 工程编译安装。
 - 微信小游戏：Unity WebGL 或团结引擎的转换路径可行，Puerts 在小游戏上的支持程度待实测。
 - UE 内核：包体大，没有 Web 和小游戏平台，远期作为“高画质原生 Runner”考虑。API 层尽量设计成与引擎无关。
+- 运行时着色器的平台覆盖：目前只有 D3D11 后端；Vulkan、GLES、Metal 后端待实现。iOS 允许运行时编译 MSL（`newLibraryWithSource`），WebGL 直接提交 GLSL，小游戏环境待实测。
 
 ## 14. 热重载
 
@@ -282,5 +294,6 @@ HTTP：`GET /files/<相对 root 的路径>`，目录返回递归清单 `{files:[
 - JS：32 项用例（运行时、源码加载与共享模块、热重载事务与回滚、启动失败单元自动恢复、泄漏检查、Dev Server 转发与 `/files`）。
 - Unity：Win64 Runner 实测：`PotRunner.exe games/hello` 不开 Dev Server 直接运行并热重载；无参数 `pot dev` 后 Runner 自动连上，`pot open` 本地目录、`http://127.0.0.1:7788/files/games/hello/` 镜像（轮询热重载）、`.potg` 均可打开；启动时语法错误的单元修好后自动挂载；截图、eval 正常。
 - 发布：`Pot.Build.PotBuild.Build` 构建 `games/hello` 为独立 exe，启动后从 Resources 加载 `bundle.cjs`。
+- 运行时着色器（D3D11）：`PotRunner.exe games/shaders` 实测，水面（alpha）、全息球（add）、顶点变形方块（自定义 vert + frag）均正确绘制，与普通材质的柱子遮挡正确，方块正常投影；修改 `.frag` 后热重载生效，故意写错时浮层显示 `shaders/holo.frag:12` 的错误，画面保持旧程序。JS 用例增至 35 项。
 
 尚未实现：Android/iOS 真机验证、程序化网格与 uber 材质、物理、UI、音频、`record`/`replay`、多设备。

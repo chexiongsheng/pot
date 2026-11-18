@@ -29,6 +29,10 @@ dist/
 
 # pot
 third_party/puerts/
+third_party/glslang/
+third_party/SPIRV-Cross/
+native/pot_gfx/cfg.txt
+native/pot_gfx/build.txt
 games/*/.pot/
 runner/Assets/PotGame/
 runner/Builds/

@@ -1,0 +1,7 @@
+{
+  "id": "pot.shaders",
+  "name": "Runtime Shaders",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "plugins": ["stage"]
+}

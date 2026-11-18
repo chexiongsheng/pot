@@ -86,6 +86,26 @@ class MockEngine {
   ambientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) { this.ambientState = { sky: [sr, sg, sb], equator: [er, eg, eb], ground: [gr, gg, gb], reflection } }
   render(kind, json) { (this.renderState ??= {})[kind] = Object.assign((this.renderState[kind] ?? {}), JSON.parse(json)); return '' }
   burst(json) { (this.bursts ??= []).push(JSON.parse(json)) }
+  gfxBackend() { return 'mock' }
+  gfxProgram(name, vs, fs) {
+    this.programs ??= new Map()
+    // 模拟编译：片元源码含 COMPILE_ERROR 时报错（glslang 格式，文件号:行号）
+    const lines = fs.split('\n')
+    let file = 0, row = 0
+    for (const line of lines) {
+      const m = /^#line (\d+) (\d+)/.exec(line)
+      if (m) { row = Number(m[1]); file = Number(m[2]); continue }
+      if (line.includes('COMPILE_ERROR')) return `[fragment] ERROR: ${file}:${row}: 'COMPILE_ERROR' : undeclared identifier`
+      row++
+    }
+    this.programs.set(name, { vs, fs, version: (this.programs.get(name)?.version ?? 0) + 1 })
+    return ''
+  }
+  gfxDestroyProgram(name) { this.programs?.delete(name) }
+  gfxBind(id, program, flags, queue, shadows) { const o = this._get(id); o.gfx = program ? { program, flags, queue, shadows, uniforms: {}, textures: {} } : undefined }
+  gfxUniform(id, name, n, x, y, z, w) { const g = this._get(id).gfx; if (g) g.uniforms[name] = [x, y, z, w].slice(0, n) }
+  gfxUniformArray(id, name, data) { const g = this._get(id).gfx; if (g) g.uniforms[name] = [...new Float32Array(data)] }
+  gfxTexture(id, name, tex) { const g = this._get(id).gfx; if (g) g.textures[name] = tex }
   byName(name) { return [...this.objects.values()].filter((o) => o.name === name) }
 }
 
