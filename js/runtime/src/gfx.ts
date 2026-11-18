@@ -162,6 +162,8 @@ struct PotSurface {
   float ao;
   float alpha;
   float planar;    // 平面反射权重 0..1（需 scene.reflection 启用；只对接近反射平面、朝上的表面有意义）
+  float specular;  // 直射高光倍率（太阳与附加光，默认 1；如海面闪光按方位调制）
+  float specularMax; // 直射高光上限（每个光源，线性 HDR；默认 1e4 即不限）
 };
 
 PotSurface pot_DefaultSurface(vec3 normal) {
@@ -174,6 +176,8 @@ PotSurface pot_DefaultSurface(vec3 normal) {
   s.ao = 1.0;
   s.alpha = 1.0;
   s.planar = 0.0;
+  s.specular = 1.0;
+  s.specularMax = 1e4;
   return s;
 }
 
@@ -291,7 +295,18 @@ vec3 pot_BRDF(PotSurface s, vec3 n, vec3 v, vec3 l, vec3 f0) {
   vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
   vec3 spec = D * G * F / max(4.0 * nl * nv, 1e-4);
   vec3 kd = (1.0 - F) * (1.0 - s.metallic);
-  return (kd * s.albedo / POT_PI + spec) * nl * POT_PI;
+  return (kd * s.albedo / POT_PI + spec * s.specular) * nl * POT_PI;
+}
+
+// 同 pot_BRDF，但把直射高光（乘光色后）截到 s.specularMax 以内（three.js 常见的 directSpecular 钳制）
+vec3 pot_BRDFLight(PotSurface s, vec3 n, vec3 v, vec3 l, vec3 f0, vec3 lightColor) {
+  if (s.specularMax >= 1e4) return pot_BRDF(s, n, v, l, f0) * lightColor;
+  PotSurface d = s; d.specular = 0.0;
+  vec3 diff = pot_BRDF(d, n, v, l, f0) * lightColor;
+  PotSurface p = s; p.albedo = vec3(0.0); p.metallic = 1.0;
+  // metallic=1、albedo=0 时 kd=0，但 f0 由调用方给出，只剩高光项
+  vec3 spec = pot_BRDF(p, n, v, l, f0) * lightColor;
+  return diff + min(spec, vec3(s.specularMax * s.specular));
 }
 
 // 附加光（场景里的点光、聚光；Runner 每个物体挑最多 16 个），衰减与 URP 相同
@@ -308,13 +323,14 @@ vec3 pot_AdditionalLights(PotSurface s, vec3 n, vec3 v, vec3 f0, vec3 worldPos) 
     float sp = clamp(dot(pot_LightSpot[i].xyz, l) * pot_LightAtten[i].x + pot_LightAtten[i].y, 0.0, 1.0);
     float att = sm * sm / d2 * sp * sp;
     if (att <= 0.0) continue;
-    sum += pot_BRDF(s, n, v, l, f0) * pot_LightColor[i].rgb * att;
+    sum += pot_BRDFLight(s, n, v, l, f0, pot_LightColor[i].rgb) * att;
   }
   return sum;
 }
 
-// GGX 太阳光（含阴影）+ 点光/聚光 + 半球环境光 + 环境反射（可混入平面反射），含雾
-vec4 pot_Lit(PotSurface s, vec3 worldPos) {
+// GGX 太阳光（含阴影）+ 点光/聚光 + 半球环境光 + 环境反射（可混入平面反射），不含雾
+// 需要在雾之前叠加效果（如远处雾霭）时用它，最后自行 pot_ApplyFog
+vec3 pot_LitColor(PotSurface s, vec3 worldPos) {
   vec3 n = normalize(s.normal);
   // 镜面抗锯齿：法线在像素内的变化折算为粗糙度（同 three.js geometryRoughness），避免细碎法线在高光里闪烁
   vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
@@ -322,7 +338,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   vec3 v = normalize(pot_CameraPos.xyz - worldPos);
   vec3 f0 = mix(vec3(0.04), s.albedo, s.metallic);
   float nv = max(dot(n, v), 1e-4);
-  vec3 direct = pot_BRDF(s, n, v, normalize(pot_SunDir.xyz), f0) * pot_SunColor.rgb * pot_Shadow(worldPos);
+  vec3 direct = pot_BRDFLight(s, n, v, normalize(pot_SunDir.xyz), f0, pot_SunColor.rgb) * pot_Shadow(worldPos);
   direct += pot_AdditionalLights(s, n, v, f0, worldPos);
   vec3 fenv = f0 + (max(vec3(1.0 - s.roughness), f0) - f0) * pow(1.0 - nv, 5.0);
   vec3 ambient = (1.0 - s.metallic) * s.albedo * pot_Hemisphere(n) * s.ao;
@@ -332,8 +348,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     env = mix(env, pr.rgb, clamp(s.planar * pr.a, 0.0, 1.0));
   }
   vec3 refl = env * fenv * s.ao;
-  vec3 color = direct + ambient + refl + s.emission;
-  return vec4(pot_ApplyFog(color, worldPos), s.alpha);
+  return direct + ambient + refl + s.emission;
+}
+
+// pot_LitColor + 雾
+vec4 pot_Lit(PotSurface s, vec3 worldPos) {
+  return vec4(pot_ApplyFog(pot_LitColor(s, worldPos), worldPos), s.alpha);
 }
 #endif
 `,

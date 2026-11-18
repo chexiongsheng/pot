@@ -2,6 +2,7 @@
 import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
 import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
 import { createApron } from '../lib/apron'
+import { createSea } from '../lib/sea'
 import { rng } from '../lib/math'
 import { createMats, MATS, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
@@ -160,7 +161,9 @@ export function apply(ctx: Context) {
 
   // ---- 原版地面（apron：积水/干湿/油污/接缝，ctx.gfx 着色器）；不可用时用下面的近似地面 ----
   const apron = createApron(ctx, { maskRes: tuning.quality.tex >= 1024 ? 1024 : 512, detailRes: tuning.quality.tex >= 1024 ? 512 : 256 })
-  const replaced = apron ? new Set(['ground', 'quay-deck']) : new Set<string>()
+  // ---- 原版海面（Gerstner 波、泡沫、闪光、远处雾霭）；不可用时保留 level.ts 的盒子海面 ----
+  const sea = apron ? createSea(ctx, apron) : false
+  const replaced = new Set<string>([...(apron ? ['ground', 'quay-deck'] : []), ...(sea ? ['sea'] : [])])
 
   // ---- 关卡几何：地面、码头、海面、起重机、远景（原版 ground/backdrop 未移植前的近似） ----
   for (const piece of buildLevel(level, { origStatic: true })) {

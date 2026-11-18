@@ -4,7 +4,7 @@
  * - Cb：可平铺细节 det 与法线 nrm
  * - 着色器见 data/shaders/apron.frag（TR + AR 片段移植，光照走 <pot/lit>）
  * 坐标：遮罩与着色器都用原版 three 坐标（x, z）；Unity z = -three z，着色器里自行换算。
- * 缺口：Pb 标线贴图用 Canvas2D 绘制（Runner 无 2D 画布），暂用 level.ts 的标线几何代替；RR 平面反射暂用环境反射代替。
+ * 缺口：Pb 标线贴图用 Canvas2D 绘制（Runner 无 2D 画布），暂用 level.ts 的标线几何代替。
  */
 import type { Context, Texture } from '@pot/core'
 
@@ -75,6 +75,9 @@ export interface Apron {
   /** 原版 uWetG（0 干 .. 1 湿） */
   setWet(v: number): void
   setRain(v: number): void
+  /** Cb 细节纹理（海面共用） */
+  detail: Texture
+  detailN: Texture
 }
 
 /** 原版 Ib：apron 平面 190×320，平移 (-65,0,0)；不投影、接收阴影 */
@@ -100,6 +103,7 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   const ent = scene.spawn({ shape: 'plane', name: 'apron', position: [-65, 0, 0], scale: [19, 1, 32], collider: false })
     .shader(shader, { uniforms, shadows: false })
   return {
+    detail, detailN,
     setWet(v) { ent.uniforms({ uWetG: v }) },
     setRain(v) { ent.uniforms({ uRain: v }) },
   }

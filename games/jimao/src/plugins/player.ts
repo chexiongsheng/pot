@@ -132,8 +132,8 @@ export function apply(ctx: Context) {
       }
     }
 
-    // 落水救援
-    if (p.pos[1] < T.seaY) {
+    // 落水救援（原版：低于海面 2.2 m）
+    if (p.pos[1] < T.seaY - 2.2) {
       p.pos[0] = p.lastSafe[0] - 1.5
       p.pos[1] = p.lastSafe[1]
       p.pos[2] = p.lastSafe[2]

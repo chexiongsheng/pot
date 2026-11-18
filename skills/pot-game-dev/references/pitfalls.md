@@ -84,6 +84,8 @@
 - 目前只支持 Windows D3D11；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
 - 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
+- 移植 three.js 的 `onBeforeCompile` 补丁：改 `directSpecular` 用 `s.specular`/`s.specularMax`；在 `opaque_fragment` 前改 `outgoingLight` 用 `pot_LitColor` 后自己 `pot_ApplyFog`；`s.ao` 同时影响环境漫反射和环境反射、不影响直射，与 three 的 `radiance *= k; iblIrradiance *= k` 不同，后者应折算为 `albedo *= k; specular *= k`。
+- 移植时 three 的 `vGWorld`/`cameraPosition` 用 `(x, y, -z)` 换算，法线 `(nx, ny, nz)` 换回 Unity 是 `(nx, ny, -nz)`；自定义网格按 z 取反并反转三角形绕序。
 - `gl_FragCoord.y` 方向与 WebGL 相反（原点在左上），移植屏幕空间效果时用 `pot_ScreenSize.y - gl_FragCoord.y`。
 - 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。
 - 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。

@@ -182,6 +182,16 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - Canvas 2D：原版标线贴图（黄白线、文字、泊位编号、轮胎痕）用 Canvas 画（`Pb`），现在沿用标线几何，缺磨损、轮胎痕和地面文字。
 - 附加光没有阴影：路灯、桅杆灯照在地面上的光斑不会被集装箱挡住。URP 的附加光阴影图需要另外复算图集矩阵，暂缓。
 
+移植原版海面（kb：变密格网 + 远处四边形，4 个 Gerstner 波顶点位移，11 个波的斜率法线，码头与船体泡沫、浮渣，风区与涌浪，太阳闪光，远处雾霭）时补齐：
+
+- 直射高光可调：`PotSurface` 新增 `specular`（直射高光倍率）和 `specularMax`（逐光源钳制上限），对应原版改写 `reflectedLight.directSpecular` 的补丁；`<pot/lit>` 新增 `pot_BRDFLight`。
+- 雾之前插入效果：新增 `pot_LitColor`（不含雾），`pot_Lit` 即 `pot_ApplyFog(pot_LitColor(...))`。原版海面在 `opaque_fragment` 前混远处雾霭，之后才上雾，原来的 `pot_Lit` 做不到。
+
+仍有出入：
+
+- 遮蔽只有一个 `ao`：原版海面把 gOcc 乘在直射 radiance 和漫反射 IBL 上，不影响镜面 IBL；`s.ao` 同时作用于环境漫反射和环境反射，不作用于直射。现在折算成 albedo 与 `specular` 乘 gOcc。若再遇到类似补丁，可考虑把 `ao` 拆成 `diffuseOcclusion`、`specularOcclusion`、`directOcclusion`。
+- 高光钳制按光源逐个进行：原版是对所有光源的直射高光之和钳到 40，差别只在多个光源同时打出极亮高光时。
+
 ## 9. 资产即代码
 
 - 优先生成：地形、建筑、低多边形模型、材质和贴图、粒子、合成音效。
