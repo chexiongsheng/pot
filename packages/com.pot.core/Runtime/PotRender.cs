@@ -424,6 +424,11 @@ namespace Pot
         static float planarScale = 0.5f;
         static int planarExclude;
 
+        /// <summary>给 PotGfx：平面反射贴图（未启用时为 null）、反射平面高度、镜像相机</summary>
+        internal static Texture PlanarTexture => planarCam != null ? planarRT : null;
+        internal static float PlanarHeight => planarHeight;
+        internal static Camera PlanarCamera => planarCam;
+
         static void Reflection(string json)
         {
             var cfg = new ReflectionCfg();

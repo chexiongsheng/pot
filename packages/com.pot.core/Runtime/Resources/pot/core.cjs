@@ -3031,6 +3031,14 @@ uniform vec4 pot_Env;
 uniform mat4 pot_ShadowMatrix[4];
 uniform vec4 pot_ShadowSpheres[4];
 uniform vec4 pot_ShadowParams;
+uniform vec4 pot_FogParams;
+uniform vec4 pot_Planar;
+uniform mat4 pot_PlanarVP;
+uniform vec4 pot_LightPos[16];
+uniform vec4 pot_LightColor[16];
+uniform vec4 pot_LightSpot[16];
+uniform vec4 pot_LightAtten[16];
+uniform vec4 pot_LightCount;
 `;
   var HEADER = `#version 310 es
 precision highp float;
@@ -3091,6 +3099,7 @@ struct PotSurface {
   vec3 emission;   // 线性，HDR
   float ao;
   float alpha;
+  float planar;    // 平面反射权重 0..1（需 scene.reflection 启用；只对接近反射平面、朝上的表面有意义）
 };
 
 PotSurface pot_DefaultSurface(vec3 normal) {
@@ -3102,6 +3111,7 @@ PotSurface pot_DefaultSurface(vec3 normal) {
   s.emission = vec3(0.0);
   s.ao = 1.0;
   s.alpha = 1.0;
+  s.planar = 0.0;
   return s;
 }
 
@@ -3127,13 +3137,42 @@ vec3 pot_EnvReflection(vec3 r, float roughness) {
   return mix(pot_Hemisphere(r), env, pot_Env.y) * pot_Env.x;
 }
 
+// 雾（与 PotCommon.hlsl 一致）：pot_Fog = (线性颜色, 密度)，pot_FogParams = (高度衰减, 基准高度, 太阳散射, 0)
 float pot_FogFactor(vec3 worldPos) {
-  float d = length(worldPos - pot_CameraPos.xyz) * pot_Fog.w;
-  return exp(-d * d);
+  if (pot_Fog.w <= 0.0) return 1.0;
+  vec3 c = pot_CameraPos.xyz;
+  vec3 d = worldPos - c;
+  float od = pot_Fog.w * length(d);
+  if (pot_FogParams.x > 0.0) {
+    float k = pot_FogParams.x;
+    float f = exp(-k * max(c.y - pot_FogParams.y, -20.0));
+    float kdy = k * d.y;
+    float t = abs(kdy) > 1e-3 ? (1.0 - exp(-kdy)) / kdy : 1.0;
+    od *= f * t;
+  }
+  return exp(-od * od);
+}
+
+vec3 pot_FogColor(vec3 viewDir) {
+  float s = pow(clamp(dot(viewDir, normalize(pot_SunDir.xyz)), 0.0, 1.0), 8.0);
+  return pot_Fog.rgb + pot_SunColor.rgb * (pot_FogParams.z * s);
 }
 
 vec3 pot_ApplyFog(vec3 color, vec3 worldPos) {
-  return mix(pot_Fog.rgb, color, pot_FogFactor(worldPos));
+  return mix(pot_FogColor(normalize(worldPos - pot_CameraPos.xyz)), color, pot_FogFactor(worldPos));
+}
+
+// 平面反射（scene.reflection）：rgb = 镜像相机画面，a = 可用权重（未启用或远离反射平面时为 0）
+// n 用于扰动采样位置（涟漪、法线贴图会让倒影晃动）
+vec4 pot_PlanarReflection(vec3 worldPos, vec3 n, float roughness) {
+  if (pot_Planar.x < 0.5) return vec4(0.0);
+  float near = clamp(1.0 - abs(worldPos.y - pot_Planar.y) * 3.0, 0.0, 1.0);
+  if (near <= 0.0) return vec4(0.0);
+  float dist = length(worldPos - pot_CameraPos.xyz);
+  vec3 p = worldPos + vec3(n.x, 0.0, n.z) * (0.05 * dist);
+  vec4 c = pot_PlanarVP * vec4(p, 1.0);
+  vec2 uv = clamp(c.xy / max(c.w, 1e-4) * 0.5 + 0.5, vec2(0.001), vec2(0.999));
+  return vec4(textureLod(pot_PlanarMap, uv, roughness * 7.0).rgb, near);
 }
 
 // 主光阴影：1 = 全亮，0 = 全影。按级联包围球选级联，3x3 双线性 PCF，超出阴影距离淡出
@@ -3174,14 +3213,8 @@ float pot_Shadow(vec3 worldPos) {
   return mix(1.0, mix(1.0, lit, pot_ShadowParams.x), 1.0 - fade);
 }
 
-// GGX 太阳光（含阴影）+ 半球环境光 + 环境反射，含雾
-vec4 pot_Lit(PotSurface s, vec3 worldPos) {
-  vec3 n = normalize(s.normal);
-  // 镜面抗锯齿：法线在像素内的变化折算为粗糙度（同 three.js geometryRoughness），避免细碎法线在高光里闪烁
-  vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
-  s.roughness = min(max(s.roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
-  vec3 v = normalize(pot_CameraPos.xyz - worldPos);
-  vec3 l = normalize(pot_SunDir.xyz);
+// 单个光源的直射项（GGX + Lambert，与 URP LightingPhysicallyBased 同量纲：乘 π 后对应 Unity 光强）
+vec3 pot_BRDF(PotSurface s, vec3 n, vec3 v, vec3 l, vec3 f0) {
   vec3 h = normalize(l + v);
   float nl = max(dot(n, l), 0.0);
   float nv = max(dot(n, v), 1e-4);
@@ -3193,14 +3226,50 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   float D = a2 / (POT_PI * dd * dd);
   float k = (s.roughness + 1.0) * (s.roughness + 1.0) / 8.0;
   float G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
-  vec3 f0 = mix(vec3(0.04), s.albedo, s.metallic);
   vec3 F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
   vec3 spec = D * G * F / max(4.0 * nl * nv, 1e-4);
   vec3 kd = (1.0 - F) * (1.0 - s.metallic);
-  vec3 direct = (kd * s.albedo / POT_PI + spec) * pot_SunColor.rgb * nl * POT_PI * pot_Shadow(worldPos);
+  return (kd * s.albedo / POT_PI + spec) * nl * POT_PI;
+}
+
+// 附加光（场景里的点光、聚光；Runner 每个物体挑最多 16 个），衰减与 URP 相同
+vec3 pot_AdditionalLights(PotSurface s, vec3 n, vec3 v, vec3 f0, vec3 worldPos) {
+  vec3 sum = vec3(0.0);
+  int count = int(pot_LightCount.x + 0.5);
+  for (int i = 0; i < 16; i++) {
+    if (i >= count) break;
+    vec3 dl = pot_LightPos[i].xyz - worldPos;
+    float d2 = max(dot(dl, dl), 1e-4);
+    vec3 l = dl * inversesqrt(d2);
+    float f = d2 * pot_LightPos[i].w;
+    float sm = clamp(1.0 - f * f, 0.0, 1.0);
+    float sp = clamp(dot(pot_LightSpot[i].xyz, l) * pot_LightAtten[i].x + pot_LightAtten[i].y, 0.0, 1.0);
+    float att = sm * sm / d2 * sp * sp;
+    if (att <= 0.0) continue;
+    sum += pot_BRDF(s, n, v, l, f0) * pot_LightColor[i].rgb * att;
+  }
+  return sum;
+}
+
+// GGX 太阳光（含阴影）+ 点光/聚光 + 半球环境光 + 环境反射（可混入平面反射），含雾
+vec4 pot_Lit(PotSurface s, vec3 worldPos) {
+  vec3 n = normalize(s.normal);
+  // 镜面抗锯齿：法线在像素内的变化折算为粗糙度（同 three.js geometryRoughness），避免细碎法线在高光里闪烁
+  vec3 dxy = max(abs(dFdx(n)), abs(dFdy(n)));
+  s.roughness = min(max(s.roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
+  vec3 v = normalize(pot_CameraPos.xyz - worldPos);
+  vec3 f0 = mix(vec3(0.04), s.albedo, s.metallic);
+  float nv = max(dot(n, v), 1e-4);
+  vec3 direct = pot_BRDF(s, n, v, normalize(pot_SunDir.xyz), f0) * pot_SunColor.rgb * pot_Shadow(worldPos);
+  direct += pot_AdditionalLights(s, n, v, f0, worldPos);
   vec3 fenv = f0 + (max(vec3(1.0 - s.roughness), f0) - f0) * pow(1.0 - nv, 5.0);
   vec3 ambient = (1.0 - s.metallic) * s.albedo * pot_Hemisphere(n) * s.ao;
-  vec3 refl = pot_EnvReflection(reflect(-v, n), s.roughness) * fenv * s.ao;
+  vec3 env = pot_EnvReflection(reflect(-v, n), s.roughness);
+  if (s.planar > 0.0) {
+    vec4 pr = pot_PlanarReflection(worldPos, n, s.roughness);
+    env = mix(env, pr.rgb, clamp(s.planar * pr.a, 0.0, 1.0));
+  }
+  vec3 refl = env * fenv * s.ao;
   vec3 color = direct + ambient + refl + s.emission;
   return vec4(pot_ApplyFog(color, worldPos), s.alpha);
 }
@@ -3227,7 +3296,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     out.push(`#define ${stage === "vertex" ? "POT_VERTEX" : "POT_FRAGMENT"} 1`);
     out.push(BUILTIN_UNIFORMS.trimEnd());
     if (stage === "vertex") out.push(VERTEX_INPUTS.trimEnd());
-    else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;");
+    else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;");
     const expand = (name, text, depth, stack) => {
       if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(" → ")}`);
       const index = files.length;

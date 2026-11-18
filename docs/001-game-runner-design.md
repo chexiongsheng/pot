@@ -158,6 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 原生帧数据槽：原来是 16 槽环形缓冲，同一帧大量提交会互相覆盖，改为按票号索引。
 - 自定义着色器接收主光阴影：C# 端按 URP `MainLightShadowCasterPass` 的同一算法复算级联矩阵（URP 设置的全局变量要到 Submit 才生效，直接读只能拿到上一帧），把 URP 的 shadowmap 作为 `pot_ShadowMap` 绑定；`<pot/lit>` 新增 `pot_Shadow(worldPos)`（选级联、3×3 双线性 PCF、按 reversed Z 比较、阴影距离淡出），`pot_Lit` 的太阳光已乘上它。
 - 镜面抗锯齿：`pot_Lit` 把法线在像素内的变化折算进粗糙度（同 three.js 的 geometryRoughness）。移植原版地面时发现细碎法线在逆光高光里大片闪烁，原版靠 three 内置的这一步压住。
+- 自定义着色器接收点光和聚光：C# 端每帧取 URP 剔除后的附加光（参数按 URP `InitializeLightConstants` 计算），每个物体按包围盒与光照范围相交、亮度/距离² 排序挑最多 16 个，写入 `pot_LightPos/Color/Spot/Atten[16]` 与 `pot_LightCount`；`<pot/lit>` 新增 `pot_BRDF`、`pot_AdditionalLights`，衰减公式与 URP 相同，`pot_Lit` 已包含。
+- 平面反射开放给自定义着色器：这项能力 PotRender 早就有（`scene.reflection`，镜像相机 + 斜裁剪投影渲染到 HDR 贴图），之前只给 PotLit 用，误记成了缺口。现在绑定为 `pot_PlanarMap`，并提供 `pot_Planar`（开关、平面高度）和镜像相机的 `pot_PlanarVP`；`PotSurface.planar` 设权重即可，`pot_PlanarReflection(worldPos, n, roughness)` 也可单独调用。停机坪积水已能倒映集装箱和起重机。
+- 雾与内置材质同源：gfx 原来读 `RenderSettings.fog*`，而 `scene.fog` 写的是 `_PotFog*`，两边颜色和浓度都对不上。现在读 `_PotFog*`，并按 PotCommon.hlsl 移植高度雾和太阳方向散射（`pot_FogParams`、`pot_FogColor(viewDir)`）。
 
 尚缺（复刻时暂用替代方案）：
 
@@ -175,10 +178,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 移植原版地面（apron：积水高度、干湿、油污、磨损遮罩，细节与法线贴图，接缝、裂缝、雨滴涟漪）后新发现。遮罩 512² 和细节 256² 在 JS 里生成分别约 124ms 和 31ms，可以接受：
 
-- 平面反射：原版积水用反射相机渲染到贴图（`zb`），再按法线扰动采样，现在用 `pot_Lit` 的环境反射代替，积水里看不到集装箱和起重机。需要通用的“从镜像机位渲染场景到贴图”能力，或者屏幕空间反射。
-- 自定义着色器不接收点光和聚光：`pot_Lit` 只算太阳、半球环境光和环境反射，原版夜景里路灯、桅杆灯照在湿地面上的光斑没有了。需要把 URP 附加光源数据（Forward+ 或逐对象光源列表）开放给 `<pot/lit>`。
+- 自定义物体不进平面反射：GfxPass 只挂在主相机上，镜像相机渲染时 gfx 物体（停机坪、以后的海面）不会出现在倒影里。要让 gfx 也画进反射，需要给镜像相机同样挂 pass 并用它的矩阵打包一次。
 - Canvas 2D：原版标线贴图（黄白线、文字、泊位编号、轮胎痕）用 Canvas 画（`Pb`），现在沿用标线几何，缺磨损、轮胎痕和地面文字。
-- 雾：`pot_ApplyFog` 只有指数平方雾，`scene.fog` 的高度雾、太阳方向散射没有同步给自定义着色器，远处地面和内置材质的雾色会有差别。
+- 附加光没有阴影：路灯、桅杆灯照在地面上的光斑不会被集装箱挡住。URP 的附加光阴影图需要另外复算图集矩阵，暂缓。
 
 ## 9. 资产即代码
 

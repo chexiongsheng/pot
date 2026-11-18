@@ -304,6 +304,11 @@ namespace Pot
         static readonly Color[] shOut = new Color[3];
         static readonly int sunDirId = Shader.PropertyToID("_PotSunDir");
         static readonly int sunColorId = Shader.PropertyToID("_PotSunColor");
+        static readonly int fogColorId = Shader.PropertyToID("_PotFogColor");
+        static readonly int fogDensityId = Shader.PropertyToID("_PotFogDensity");
+        static readonly int fogHeightId = Shader.PropertyToID("_PotFogHeight");
+        static readonly int fogBaseId = Shader.PropertyToID("_PotFogBase");
+        static readonly int fogSunId = Shader.PropertyToID("_PotFogSun");
 
         static float[] Builtin(string name, int n)
         {
@@ -346,9 +351,16 @@ namespace Pot
             SetVec("pot_AmbientSky", shOut[0].r, shOut[0].g, shOut[0].b, 1);
             SetVec("pot_AmbientEquator", shOut[1].r, shOut[1].g, shOut[1].b, 1);
             SetVec("pot_AmbientGround", shOut[2].r, shOut[2].g, shOut[2].b, 1);
-            var fc = RenderSettings.fogColor.linear;
-            SetVec("pot_Fog", fc.r, fc.g, fc.b, RenderSettings.fog ? RenderSettings.fogDensity : 0);
+            // 雾与 PotCommon.hlsl 同源（_PotFog*，由 scene.fog 设置），不读 RenderSettings
+            var fc = Shader.GetGlobalVector(fogColorId);
+            SetVec("pot_Fog", fc.x, fc.y, fc.z, Shader.GetGlobalFloat(fogDensityId));
+            SetVec("pot_FogParams", Shader.GetGlobalFloat(fogHeightId), Shader.GetGlobalFloat(fogBaseId), Shader.GetGlobalFloat(fogSunId), 0);
             SetVec("pot_Env", RenderSettings.reflectionIntensity, PotRender.EnvTexture != null ? 1 : 0, 0, 0);
+            var pc = PotRender.PlanarCamera;
+            var planarOn = pc != null && pc != cam && PotRender.PlanarTexture != null;
+            SetVec("pot_Planar", planarOn ? 1 : 0, PotRender.PlanarHeight, 0, 0);
+            // 非 GPU 投影：uv = ndc.xy*0.5+0.5（Unity 在 D3D 上翻转 RT 的渲染方向，与 gfx.bake 同约定）
+            SetMat("pot_PlanarVP", planarOn ? pc.projectionMatrix * pc.worldToCameraMatrix : Matrix4x4.identity);
         }
 
         static void ObjectBuiltins(Transform t)
@@ -410,6 +422,90 @@ namespace Pot
             SetVec("pot_ShadowParams", light.shadowStrength, n, rd.cameraData.maxShadowDistance, SystemInfo.usesReversedZBuffer ? 1 : 0);
             shadowTex = tex;
             return tex;
+        }
+
+        // ---------------- 附加光源（点光 / 聚光） ----------------
+
+        const int MaxLights = 16;
+        struct GfxLight { public Vector3 pos; public float range; public Vector4 color, spot, atten; public float lum; }
+        static readonly List<GfxLight> frameLights = new List<GfxLight>();
+        static int lightFrame = -1;
+        static Camera lightCam;
+        static readonly float[] lightPos = new float[MaxLights * 4];
+        static readonly float[] lightColor = new float[MaxLights * 4];
+        static readonly float[] lightSpot = new float[MaxLights * 4];
+        static readonly float[] lightAtten = new float[MaxLights * 4];
+        static readonly int[] pick = new int[MaxLights];
+        static readonly float[] pickScore = new float[MaxLights];
+
+        /// <summary>本帧可见的附加光源（URP 剔除结果，除主光外的点光、聚光），参数与 URP 的 InitializeLightConstants 一致</summary>
+        static void LightBuiltins(ref RenderingData rd)
+        {
+            var cam = rd.cameraData.camera;
+            if (lightFrame == Time.frameCount && lightCam == cam) return;
+            lightFrame = Time.frameCount;
+            lightCam = cam;
+            frameLights.Clear();
+            builtins["pot_LightPos"] = lightPos;
+            builtins["pot_LightColor"] = lightColor;
+            builtins["pot_LightSpot"] = lightSpot;
+            builtins["pot_LightAtten"] = lightAtten;
+            var vls = rd.lightData.visibleLights;
+            for (var i = 0; i < vls.Length; i++)
+            {
+                if (i == rd.lightData.mainLightIndex) continue;
+                var vl = vls[i];
+                if (vl.lightType != LightType.Point && vl.lightType != LightType.Spot) continue;
+                var c = vl.finalColor;
+                var lum = c.r * 0.2126f + c.g * 0.7152f + c.b * 0.0722f;
+                if (lum <= 0) continue;
+                var m = vl.localToWorldMatrix;
+                var gl = new GfxLight { pos = m.GetColumn(3), range = Mathf.Max(vl.range, 1e-3f), color = new Vector4(c.r, c.g, c.b, 0), lum = lum };
+                if (vl.lightType == LightType.Spot)
+                {
+                    var fw = (Vector3)m.GetColumn(2);
+                    var cosOuter = Mathf.Cos(Mathf.Deg2Rad * vl.spotAngle * 0.5f);
+                    var inner = vl.light != null ? vl.light.innerSpotAngle : vl.spotAngle * 0.8f;
+                    var cosInner = Mathf.Cos(Mathf.Deg2Rad * inner * 0.5f);
+                    var inv = 1f / Mathf.Max(0.001f, cosInner - cosOuter);
+                    gl.spot = new Vector4(-fw.x, -fw.y, -fw.z, 0);
+                    gl.atten = new Vector4(inv, -cosOuter * inv, 0, 0);
+                }
+                else
+                {
+                    gl.spot = new Vector4(0, 0, 1, 0);
+                    gl.atten = new Vector4(0, 1, 0, 0);
+                }
+                frameLights.Add(gl);
+            }
+        }
+
+        /// <summary>按物体包围盒挑最多 16 个影响它的附加光（包围盒与光照范围相交，按 亮度/距离² 取前 16）</summary>
+        static void ObjectLights(Renderer r, Vector3 fallback)
+        {
+            var n = 0;
+            var bounds = r != null ? r.bounds : new Bounds(fallback, Vector3.zero);
+            for (var i = 0; i < frameLights.Count; i++)
+            {
+                var l = frameLights[i];
+                var d2 = bounds.SqrDistance(l.pos);
+                if (d2 >= l.range * l.range) continue;
+                var score = l.lum / (d2 + 1f);
+                if (n < MaxLights) { pick[n] = i; pickScore[n] = score; n++; continue; }
+                var worst = 0;
+                for (var k = 1; k < MaxLights; k++) if (pickScore[k] < pickScore[worst]) worst = k;
+                if (score > pickScore[worst]) { pick[worst] = i; pickScore[worst] = score; }
+            }
+            for (var k = 0; k < n; k++)
+            {
+                var l = frameLights[pick[k]];
+                var o = k * 4;
+                lightPos[o] = l.pos.x; lightPos[o + 1] = l.pos.y; lightPos[o + 2] = l.pos.z; lightPos[o + 3] = 1f / (l.range * l.range);
+                lightColor[o] = l.color.x; lightColor[o + 1] = l.color.y; lightColor[o + 2] = l.color.z; lightColor[o + 3] = 0;
+                lightSpot[o] = l.spot.x; lightSpot[o + 1] = l.spot.y; lightSpot[o + 2] = l.spot.z; lightSpot[o + 3] = 0;
+                lightAtten[o] = l.atten.x; lightAtten[o + 1] = l.atten.y; lightAtten[o + 2] = 0; lightAtten[o + 3] = 0;
+            }
+            SetVec("pot_LightCount", n, 0, 0, 0);
         }
 
         static int AttrFormat(VertexAttributeFormat f, int dim)
@@ -517,6 +613,7 @@ namespace Pot
             var flipped = cameraData.IsCameraProjectionMatrixFlipped();
             FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
             var shadowMap = ShadowBuiltins(ref renderingData);
+            LightBuiltins(ref renderingData);
             var frameFlags = (flipped ? F_FrontCCW : 0) | (SystemInfo.usesReversedZBuffer ? F_ReversedZ : 0);
             var env = PotRender.EnvTexture;
 
@@ -530,6 +627,7 @@ namespace Pot
                 var mesh = mf != null ? mf.sharedMesh : null;
                 if (mesh == null || mesh.vertexCount == 0) continue;
                 ObjectBuiltins(go.transform);
+                ObjectLights(go.GetComponent<Renderer>(), go.transform.position);
                 if (WriteDraw(b, programs[b.program], mesh, b.flags | frameFlags, env, shadowMap)) count++;
             }
             return Finish(count);
@@ -578,12 +676,13 @@ namespace Pot
                 int texId;
                 if (t.Key == "pot_EnvMap") tex = env;
                 else if (t.Key == "pot_ShadowMap") tex = shadowMap != null ? shadowMap : Texture2D.whiteTexture;
+                else if (t.Key == "pot_PlanarMap") tex = PotRender.PlanarTexture != null ? PotRender.PlanarTexture : Texture2D.blackTexture;
                 else if (b.textures.TryGetValue(t.Key, out texId)) tex = PotScene.GetTexture(texId);
                 if (tex == null) continue;
                 var ptr = tex.GetNativeTexturePtr();
                 if (ptr == IntPtr.Zero) continue;
                 writer.Write(t.Value);
-                writer.Write(t.Key == "pot_EnvMap" ? (1 | (2 << 1)) : t.Key == "pot_ShadowMap" ? 1 : SamplerBits(tex));
+                writer.Write(t.Key == "pot_EnvMap" || t.Key == "pot_PlanarMap" ? (1 | (2 << 1)) : t.Key == "pot_ShadowMap" ? 1 : SamplerBits(tex));
                 writer.Write(ptr.ToInt64());
                 nt++;
             }
@@ -710,8 +809,16 @@ namespace Pot
             var sp = Builtin("pot_ShadowParams", 4);
             var savedStrength = sp[0];
             sp[0] = 0; // 烘焙不接收阴影
+            var lc = Builtin("pot_LightCount", 4);
+            var savedLights = lc[0];
+            lc[0] = 0; // 也不受附加光、平面反射影响
+            var pl = Builtin("pot_Planar", 4);
+            var savedPlanar = pl[0];
+            pl[0] = 0;
             var ok = WriteDraw(b, p, BakeQuad(), flags, PotRender.EnvTexture);
             sp[0] = savedStrength;
+            lc[0] = savedLights;
+            pl[0] = savedPlanar;
             var len = Finish(ok ? 1 : 0);
             if (len <= 0)
             {
