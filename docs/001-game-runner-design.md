@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 22 |
+| ✅ 已完成 | 23 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 28 |
+| ❌ 未完成 | 29 |
 
 #### 渲染与着色器（gfx）
 
@@ -178,6 +178,8 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 雾之前插入效果 `pot_LitColor` | 海面 | `pot_Lit = pot_ApplyFog(pot_LitColor(...))` |
 | ✅ | 关闭视锥剔除 `frustumCull: false` | 雨 | 顶点着色器重算位置的效果（雨、粒子）不再时有时无 |
 | ✅ | 自定义后处理链 `gfx.post` | 后处理 | 全屏 pass 链、按比例或固定尺寸目标、`history` 双缓冲、内置 `scene` / `depth` |
+| ✅ | three 方言 `gfx.standard` / `dialect: 'three'` | 枪模、场景材质 | three r180 的 meshphysical 原文与 ShaderChunk 直接编译，支持 `onBeforeCompile` 补丁（`threeChunks`）；光照、阴影、雾、环境改读 pot 内置。枪模 Bf 与场景 sl 材质 h3 已换回原版原文，D3D11 上 60fps |
+| ❌ | `pot_gfx` 只有 D3D11 后端 | WebGL 版 | WebGL / GLES / Metal 下运行时着色器全部不可用，画面退回 PotLit；下一步做 GLES3 后端 |
 | ✅ | 屏幕空间内置量 | 后处理 | `pot_ScreenVP/InvVP`、`pot_DepthParams`、`<pot/post>` 的深度与世界坐标重建 |
 | ⚠️ | 遮蔽只有一个 `ao` | 海面 | 原版只遮直射与漫反射 IBL；建议拆成 diffuse / specular / direct 三项 |
 | ⚠️ | 高光钳制逐光源进行 | 海面 | 原版是所有光源之和钳到 40，只在多光源极亮时有差别 |

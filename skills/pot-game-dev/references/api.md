@@ -55,6 +55,29 @@ ent.shader(null)                                                          // 恢
 - 内置 uniform：`pot_Model`、`pot_ModelInv`、`pot_NormalMatrix`、`pot_View`、`pot_Proj`、`pot_ViewProj`、`pot_CameraPos`、`pot_Time`（x 时间、y dt、z 帧号、w 不受缩放时间）、`pot_ScreenSize`、`pot_SunDir`、`pot_SunColor`、`pot_AmbientSky/Equator/Ground`、`pot_Fog`（线性颜色、密度，与 `scene.fog` 同源）、`pot_FogParams`（高度衰减、基准高度、太阳散射）、`pot_Env`、`pot_ShadowMatrix[4]`、`pot_ShadowSpheres[4]`、`pot_ShadowParams`（x 强度，0 表示本帧无阴影；y 级联数；z 阴影距离；w reversed Z）、`pot_LightPos/Color/Spot/Atten[16]` 与 `pot_LightCount`（本物体的附加光）、`pot_Planar`（x 开关，y 反射平面高度）、`pot_PlanarVP`（镜像相机视图投影，`uv = ndc.xy*0.5+0.5`）；贴图 `pot_EnvMap`（samplerCube）、`pot_ShadowMap`（主光阴影图，用 texelFetch 读深度）、`pot_PlanarMap`（平面反射，带 mip）。顶点输入 `pot_Position`、`pot_Normal`、`pot_UV`、`pot_VertexColor`、`pot_Tangent`。
 - 颜色 uniform 以 sRGB 传入，自动转线性；输出写线性颜色。
 
+#### three 方言（gfx.standard）
+
+移植 three.js 的 `MeshStandardMaterial` 及其 `onBeforeCompile` 补丁时不必改写成 pot 着色器：`gfx.standard` 直接编译 three r180 的 meshphysical 原文，光照、阴影、雾、环境反射改读 pot 场景。
+
+```ts
+import { threeChunks } from '@pot/core'
+const m = ctx.gfx.standard({
+  name: 'crate', map: albedo, normalMap: nrm, roughnessMap: orm, metalnessMap: orm, aoMap: orm, repeat: [2, 2],
+  color: '#ffffff', roughness: 1, metalness: 1, side: 'double', alphaTest: 0.5, defines: { SL_TINT: 1 },
+  onBeforeCompile(s) {                       // 与 three 相同：改 vertexShader / fragmentShader / uniforms / defines
+    s.uniforms.uWet = shared                 // { value } 可在多个材质间共享，binding() 时取当前值
+    s.fragmentShader = s.fragmentShader.replace('#include <aomap_fragment>', threeChunks.aomap_fragment.replace(...))
+  },
+})
+if (m.ok) ent.shader(m.shader, m.binding({ shadows: true }))
+```
+
+- 选项与 three 同名：`color/roughness/metalness/emissive/map/normalMap/normalScale/roughnessMap/metalnessMap/aoMap/emissiveMap/alphaMap/repeat/offset/vertexColors/transparent/opacity/alphaTest/side/fog/depthWrite/envMapIntensity/defines/uniforms`。颜色 `'#rrggbb'`/`0xrrggbb` 为 sRGB，数组为线性（同 `new Color(r, g, b)`）。
+- `threeChunks` 是 three 原版 ShaderChunk（只读），对应补丁里的 `ShaderChunk.xxx.replace(...)`。
+- 同源码同 defines 的材质共享一个程序（名为 `three:${name}:${hash}`），只有 uniform 不同的材质不会重复编译。
+- 自定义着色器也可用 `gfx.shader({ dialect: 'three', vertexSource, fragmentSource, defines })` 使用同一套前缀与 chunk。
+- 输出为线性 HDR，不做色调映射；贴图按 three 约定：albedo 用 sRGB 贴图，数据贴图用线性。
+
 #### 烘焙到贴图（gfx.bake）
 
 程序化贴图、查找表、高度转法线等一次性计算用全屏程序画到新贴图，返回的 Texture 可直接当 `map`/`normalMap`/`maskMap`，也能作为下一次 bake 的输入。

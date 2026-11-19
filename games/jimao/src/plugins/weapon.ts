@@ -1,7 +1,8 @@
 /** 武器 PAC-9：射线射击、扩散、后坐力、换弹、瞄准、枪模（含双手、刻字）、曳光与命中火花 */
-import type { Context, Entity, MaterialOptions, Vec3 } from '@pot/core'
+import type { Context, Entity, MaterialOptions, StandardMaterial, Vec3 } from '@pot/core'
 import { emit, on, type BulletHit } from '../lib/bus'
 import { isPuddle } from '../lib/apron'
+import { createPac9Materials, wetness } from '../lib/pac9-mats'
 import { createDecals, decalFor, surfaceAt } from '../lib/decals'
 import { createFx } from '../lib/fx'
 import { origLevel } from '../lib/origlevel'
@@ -114,16 +115,40 @@ export function apply(ctx: Context) {
   const gun = scene.spawn({ shape: 'empty', name: 'viewmodel', parent: fovRoot, position: u(EU.p), rotation: euler(EU.r[0], EU.r[1], EU.r[2]) })
   const meshPart = (mesh: string, parent: Entity, m: { color: Vec3 | string; material: MaterialOptions }, active = true) =>
     scene.spawn({ shape: `mesh:${mesh}`, name: 'gun', parent, color: m.color, material: m.material, collider: false, layer: VIEW_LAYER, active })
-  const part = (key: string, parent: Entity, m: { color: Vec3; material: MaterialOptions }) => meshPart(`pac9-${key}`, parent, m)
-  part('ano', gun, anodised)
-  part('gun', gun, phosphate)
-  part('poly', gun, polymer)
-  part('plain', gun, matte)
-  const bolt = part('bolt', gun, phosphate)
+  // 原版枪身材质（MeshStandardMaterial + Bf 补丁原文，three 方言编译）；平台没有运行时着色器时退回内置材质
+  const orig = ctx.gfx.supported ? createPac9Materials(ctx) : undefined
+  if (!orig) ctx.logger('jimao').warn('枪模原版材质不可用（运行时着色器不支持或编译失败），使用内置材质近似')
+  const wetParts: Entity[] = []
+  const part = (key: string, parent: Entity, m: { color: Vec3; material: MaterialOptions }, three?: StandardMaterial) => {
+    const e = meshPart(`pac9-${key}`, parent, m)
+    if (three) {
+      e.shader(three.shader, three.binding())
+      if ('uRain' in three.uniforms) wetParts.push(e)
+    }
+    return e
+  }
+  part('ano', gun, anodised, orig?.anodised)
+  part('gun', gun, phosphate, orig?.phosphate)
+  part('poly', gun, polymer, orig?.polymer)
+  part('plain', gun, matte, orig?.matte)
+  const bolt = part('bolt', gun, phosphate, orig?.phosphate)
   const MAG = u(PAC9.magPos)
   const mag = scene.spawn({ shape: 'empty', name: 'mag', parent: gun, position: MAG })
-  part('mag', mag, tan)
+  part('mag', mag, tan, orig?.tan)
   const round = part('round', mag, brass)
+  /** 原版 setWetness：相机在 interiorBoxes[0] 内趋向 0.3，室外趋向 1 */
+  let wet = wetness.value, wetSent = -1
+  const updateWetness = (dt: number) => {
+    const b = interior[0]
+    if (!b || !wetParts.length) return
+    const c = cam.position, x = c[0], y = c[1], z = -c[2]
+    const inside = x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z && y < b.max.y
+    wet += ((inside ? 0.3 : 1) - wet) * Math.min(1, dt * (inside ? 0.25 : 0.6))
+    wetness.value = Math.max(0, Math.min(1, wet))
+    if (Math.abs(wetness.value - wetSent) < 2e-3) return
+    wetSent = wetness.value
+    for (const e of wetParts) e.uniforms({ uRain: wetSent })
+  }
 
   // ---- 双手（原版 Vv / dm 机械移植）：右手握把固定，食指三档扳机姿态；左手按换弹关键帧运动 ----
   const H = buildHands()
@@ -252,6 +277,7 @@ export function apply(ctx: Context) {
     if (!g || !p) return
     const visible = g.phase === 'playing' || g.phase === 'intro' || g.phase === 'paused' || g.phase === 'dead'
     gun.active(visible && p.health > 0)
+    updateWetness(dt)
     // 特效衰减（暂停时冻结）
     if (g.phase !== 'paused') {
       for (const t of tracers) if (t.life > 0 && (t.life -= dt) <= 0) t.e.active(false)

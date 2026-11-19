@@ -55,6 +55,7 @@ var pot = (() => {
     SceneService: () => SceneService,
     Service: () => Service,
     Shader: () => Shader,
+    StandardMaterial: () => StandardMaterial,
     StateService: () => StateService,
     StateTypeError: () => StateTypeError,
     Texture: () => Texture,
@@ -99,6 +100,7 @@ var pot = (() => {
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
     symbols: () => symbols,
+    threeChunks: () => threeChunks,
     unitOf: () => unitOf,
     unitOfFiber: () => unitOfFiber,
     unity: () => unity,
@@ -4338,6 +4340,931 @@ var pot = (() => {
     }
   };
 
+  // runtime/src/three-chunks.ts
+  var THREE_CHUNKS = {
+    "alphahash_fragment": "#ifdef USE_ALPHAHASH\n\n	if ( diffuseColor.a < getAlphaHashThreshold( vPosition ) ) discard;\n\n#endif\n",
+    "alphahash_pars_fragment": "#ifdef USE_ALPHAHASH\n\n	/**\n	 * See: https://casual-effects.com/research/Wyman2017Hashed/index.html\n	 */\n\n	const float ALPHA_HASH_SCALE = 0.05; // Derived from trials only, and may be changed.\n\n	float hash2D( vec2 value ) {\n\n		return fract( 1.0e4 * sin( 17.0 * value.x + 0.1 * value.y ) * ( 0.1 + abs( sin( 13.0 * value.y + value.x ) ) ) );\n\n	}\n\n	float hash3D( vec3 value ) {\n\n		return hash2D( vec2( hash2D( value.xy ), value.z ) );\n\n	}\n\n	float getAlphaHashThreshold( vec3 position ) {\n\n		// Find the discretized derivatives of our coordinates\n		float maxDeriv = max(\n			length( dFdx( position.xyz ) ),\n			length( dFdy( position.xyz ) )\n		);\n		float pixScale = 1.0 / ( ALPHA_HASH_SCALE * maxDeriv );\n\n		// Find two nearest log-discretized noise scales\n		vec2 pixScales = vec2(\n			exp2( floor( log2( pixScale ) ) ),\n			exp2( ceil( log2( pixScale ) ) )\n		);\n\n		// Compute alpha thresholds at our two noise scales\n		vec2 alpha = vec2(\n			hash3D( floor( pixScales.x * position.xyz ) ),\n			hash3D( floor( pixScales.y * position.xyz ) )\n		);\n\n		// Factor to interpolate lerp with\n		float lerpFactor = fract( log2( pixScale ) );\n\n		// Interpolate alpha threshold from noise at two scales\n		float x = ( 1.0 - lerpFactor ) * alpha.x + lerpFactor * alpha.y;\n\n		// Pass into CDF to compute uniformly distrib threshold\n		float a = min( lerpFactor, 1.0 - lerpFactor );\n		vec3 cases = vec3(\n			x * x / ( 2.0 * a * ( 1.0 - a ) ),\n			( x - 0.5 * a ) / ( 1.0 - a ),\n			1.0 - ( ( 1.0 - x ) * ( 1.0 - x ) / ( 2.0 * a * ( 1.0 - a ) ) )\n		);\n\n		// Find our final, uniformly distributed alpha threshold (ατ)\n		float threshold = ( x < ( 1.0 - a ) )\n			? ( ( x < a ) ? cases.x : cases.y )\n			: cases.z;\n\n		// Avoids ατ == 0. Could also do ατ =1-ατ\n		return clamp( threshold , 1.0e-6, 1.0 );\n\n	}\n\n#endif\n",
+    "alphamap_fragment": "#ifdef USE_ALPHAMAP\n\n	diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).g;\n\n#endif\n",
+    "alphamap_pars_fragment": "#ifdef USE_ALPHAMAP\n\n	uniform sampler2D alphaMap;\n\n#endif\n",
+    "alphatest_fragment": "#ifdef USE_ALPHATEST\n\n	#ifdef ALPHA_TO_COVERAGE\n\n	diffuseColor.a = smoothstep( alphaTest, alphaTest + fwidth( diffuseColor.a ), diffuseColor.a );\n	if ( diffuseColor.a == 0.0 ) discard;\n\n	#else\n\n	if ( diffuseColor.a < alphaTest ) discard;\n\n	#endif\n\n#endif\n",
+    "alphatest_pars_fragment": "#ifdef USE_ALPHATEST\n	uniform float alphaTest;\n#endif\n",
+    "aomap_fragment": "#ifdef USE_AOMAP\n\n	// reads channel R, compatible with a combined OcclusionRoughnessMetallic (RGB) texture\n	float ambientOcclusion = ( texture2D( aoMap, vAoMapUv ).r - 1.0 ) * aoMapIntensity + 1.0;\n\n	reflectedLight.indirectDiffuse *= ambientOcclusion;\n\n	#if defined( USE_CLEARCOAT )\n		clearcoatSpecularIndirect *= ambientOcclusion;\n	#endif\n\n	#if defined( USE_SHEEN )\n		sheenSpecularIndirect *= ambientOcclusion;\n	#endif\n\n	#if defined( USE_ENVMAP ) && defined( STANDARD )\n\n		float dotNV = saturate( dot( geometryNormal, geometryViewDir ) );\n\n		reflectedLight.indirectSpecular *= computeSpecularOcclusion( dotNV, ambientOcclusion, material.roughness );\n\n	#endif\n\n#endif\n",
+    "aomap_pars_fragment": "#ifdef USE_AOMAP\n\n	uniform sampler2D aoMap;\n	uniform float aoMapIntensity;\n\n#endif\n",
+    "batching_pars_vertex": "#ifdef USE_BATCHING\n	#if ! defined( GL_ANGLE_multi_draw )\n	#define gl_DrawID _gl_DrawID\n	uniform int _gl_DrawID;\n	#endif\n\n	uniform highp sampler2D batchingTexture;\n	uniform highp usampler2D batchingIdTexture;\n	mat4 getBatchingMatrix( const in float i ) {\n\n		int size = textureSize( batchingTexture, 0 ).x;\n		int j = int( i ) * 4;\n		int x = j % size;\n		int y = j / size;\n		vec4 v1 = texelFetch( batchingTexture, ivec2( x, y ), 0 );\n		vec4 v2 = texelFetch( batchingTexture, ivec2( x + 1, y ), 0 );\n		vec4 v3 = texelFetch( batchingTexture, ivec2( x + 2, y ), 0 );\n		vec4 v4 = texelFetch( batchingTexture, ivec2( x + 3, y ), 0 );\n		return mat4( v1, v2, v3, v4 );\n\n	}\n\n	float getIndirectIndex( const in int i ) {\n\n		int size = textureSize( batchingIdTexture, 0 ).x;\n		int x = i % size;\n		int y = i / size;\n		return float( texelFetch( batchingIdTexture, ivec2( x, y ), 0 ).r );\n\n	}\n\n#endif\n\n#ifdef USE_BATCHING_COLOR\n\n	uniform sampler2D batchingColorTexture;\n	vec3 getBatchingColor( const in float i ) {\n\n		int size = textureSize( batchingColorTexture, 0 ).x;\n		int j = int( i );\n		int x = j % size;\n		int y = j / size;\n		return texelFetch( batchingColorTexture, ivec2( x, y ), 0 ).rgb;\n\n	}\n\n#endif\n",
+    "batching_vertex": "#ifdef USE_BATCHING\n	mat4 batchingMatrix = getBatchingMatrix( getIndirectIndex( gl_DrawID ) );\n#endif\n",
+    "begin_vertex": "vec3 transformed = vec3( position );\n\n#ifdef USE_ALPHAHASH\n\n	vPosition = vec3( position );\n\n#endif\n",
+    "beginnormal_vertex": "vec3 objectNormal = vec3( normal );\n\n#ifdef USE_TANGENT\n\n	vec3 objectTangent = vec3( tangent.xyz );\n\n#endif\n",
+    "bsdfs": "float G_BlinnPhong_Implicit( /* const in float dotNL, const in float dotNV */ ) {\n\n	// geometry term is (n dot l)(n dot v) / 4(n dot l)(n dot v)\n	return 0.25;\n\n}\n\nfloat D_BlinnPhong( const in float shininess, const in float dotNH ) {\n\n	return RECIPROCAL_PI * ( shininess * 0.5 + 1.0 ) * pow( dotNH, shininess );\n\n}\n\nvec3 BRDF_BlinnPhong( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in vec3 specularColor, const in float shininess ) {\n\n	vec3 halfDir = normalize( lightDir + viewDir );\n\n	float dotNH = saturate( dot( normal, halfDir ) );\n	float dotVH = saturate( dot( viewDir, halfDir ) );\n\n	vec3 F = F_Schlick( specularColor, 1.0, dotVH );\n\n	float G = G_BlinnPhong_Implicit( /* dotNL, dotNV */ );\n\n	float D = D_BlinnPhong( shininess, dotNH );\n\n	return F * ( G * D );\n\n} // validated\n",
+    "bumpmap_pars_fragment": "#ifdef USE_BUMPMAP\n\n	uniform sampler2D bumpMap;\n	uniform float bumpScale;\n\n	// Bump Mapping Unparametrized Surfaces on the GPU by Morten S. Mikkelsen\n	// https://mmikk.github.io/papers3d/mm_sfgrad_bump.pdf\n\n	// Evaluate the derivative of the height w.r.t. screen-space using forward differencing (listing 2)\n\n	vec2 dHdxy_fwd() {\n\n		vec2 dSTdx = dFdx( vBumpMapUv );\n		vec2 dSTdy = dFdy( vBumpMapUv );\n\n		float Hll = bumpScale * texture2D( bumpMap, vBumpMapUv ).x;\n		float dBx = bumpScale * texture2D( bumpMap, vBumpMapUv + dSTdx ).x - Hll;\n		float dBy = bumpScale * texture2D( bumpMap, vBumpMapUv + dSTdy ).x - Hll;\n\n		return vec2( dBx, dBy );\n\n	}\n\n	vec3 perturbNormalArb( vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDirection ) {\n\n		// normalize is done to ensure that the bump map looks the same regardless of the texture's scale\n		vec3 vSigmaX = normalize( dFdx( surf_pos.xyz ) );\n		vec3 vSigmaY = normalize( dFdy( surf_pos.xyz ) );\n		vec3 vN = surf_norm; // normalized\n\n		vec3 R1 = cross( vSigmaY, vN );\n		vec3 R2 = cross( vN, vSigmaX );\n\n		float fDet = dot( vSigmaX, R1 ) * faceDirection;\n\n		vec3 vGrad = sign( fDet ) * ( dHdxy.x * R1 + dHdxy.y * R2 );\n		return normalize( abs( fDet ) * surf_norm - vGrad );\n\n	}\n\n#endif\n",
+    "clearcoat_normal_fragment_begin": "#ifdef USE_CLEARCOAT\n\n	vec3 clearcoatNormal = nonPerturbedNormal;\n\n#endif\n",
+    "clearcoat_normal_fragment_maps": "#ifdef USE_CLEARCOAT_NORMALMAP\n\n	vec3 clearcoatMapN = texture2D( clearcoatNormalMap, vClearcoatNormalMapUv ).xyz * 2.0 - 1.0;\n	clearcoatMapN.xy *= clearcoatNormalScale;\n\n	clearcoatNormal = normalize( tbn2 * clearcoatMapN );\n\n#endif\n",
+    "clearcoat_pars_fragment": "#ifdef USE_CLEARCOATMAP\n\n	uniform sampler2D clearcoatMap;\n\n#endif\n\n#ifdef USE_CLEARCOAT_NORMALMAP\n\n	uniform sampler2D clearcoatNormalMap;\n	uniform vec2 clearcoatNormalScale;\n\n#endif\n\n#ifdef USE_CLEARCOAT_ROUGHNESSMAP\n\n	uniform sampler2D clearcoatRoughnessMap;\n\n#endif\n",
+    "clipping_planes_fragment": "#if NUM_CLIPPING_PLANES > 0\n\n	vec4 plane;\n\n	#ifdef ALPHA_TO_COVERAGE\n\n		float distanceToPlane, distanceGradient;\n		float clipOpacity = 1.0;\n\n		#pragma unroll_loop_start\n		for ( int i = 0; i < UNION_CLIPPING_PLANES; i ++ ) {\n\n			plane = clippingPlanes[ i ];\n			distanceToPlane = - dot( vClipPosition, plane.xyz ) + plane.w;\n			distanceGradient = fwidth( distanceToPlane ) / 2.0;\n			clipOpacity *= smoothstep( - distanceGradient, distanceGradient, distanceToPlane );\n\n			if ( clipOpacity == 0.0 ) discard;\n\n		}\n		#pragma unroll_loop_end\n\n		#if UNION_CLIPPING_PLANES < NUM_CLIPPING_PLANES\n\n			float unionClipOpacity = 1.0;\n\n			#pragma unroll_loop_start\n			for ( int i = UNION_CLIPPING_PLANES; i < NUM_CLIPPING_PLANES; i ++ ) {\n\n				plane = clippingPlanes[ i ];\n				distanceToPlane = - dot( vClipPosition, plane.xyz ) + plane.w;\n				distanceGradient = fwidth( distanceToPlane ) / 2.0;\n				unionClipOpacity *= 1.0 - smoothstep( - distanceGradient, distanceGradient, distanceToPlane );\n\n			}\n			#pragma unroll_loop_end\n\n			clipOpacity *= 1.0 - unionClipOpacity;\n\n		#endif\n\n		diffuseColor.a *= clipOpacity;\n\n		if ( diffuseColor.a == 0.0 ) discard;\n\n	#else\n\n		#pragma unroll_loop_start\n		for ( int i = 0; i < UNION_CLIPPING_PLANES; i ++ ) {\n\n			plane = clippingPlanes[ i ];\n			if ( dot( vClipPosition, plane.xyz ) > plane.w ) discard;\n\n		}\n		#pragma unroll_loop_end\n\n		#if UNION_CLIPPING_PLANES < NUM_CLIPPING_PLANES\n\n			bool clipped = true;\n\n			#pragma unroll_loop_start\n			for ( int i = UNION_CLIPPING_PLANES; i < NUM_CLIPPING_PLANES; i ++ ) {\n\n				plane = clippingPlanes[ i ];\n				clipped = ( dot( vClipPosition, plane.xyz ) > plane.w ) && clipped;\n\n			}\n			#pragma unroll_loop_end\n\n			if ( clipped ) discard;\n\n		#endif\n\n	#endif\n\n#endif\n",
+    "clipping_planes_pars_fragment": "#if NUM_CLIPPING_PLANES > 0\n\n	varying vec3 vClipPosition;\n\n	uniform vec4 clippingPlanes[ NUM_CLIPPING_PLANES ];\n\n#endif\n",
+    "clipping_planes_pars_vertex": "#if NUM_CLIPPING_PLANES > 0\n\n	varying vec3 vClipPosition;\n\n#endif\n",
+    "clipping_planes_vertex": "#if NUM_CLIPPING_PLANES > 0\n\n	vClipPosition = - mvPosition.xyz;\n\n#endif\n",
+    "color_fragment": "#if defined( USE_COLOR_ALPHA )\n\n	diffuseColor *= vColor;\n\n#elif defined( USE_COLOR )\n\n	diffuseColor.rgb *= vColor;\n\n#endif\n",
+    "color_pars_fragment": "#if defined( USE_COLOR_ALPHA )\n\n	varying vec4 vColor;\n\n#elif defined( USE_COLOR )\n\n	varying vec3 vColor;\n\n#endif\n",
+    "color_pars_vertex": "#if defined( USE_COLOR_ALPHA )\n\n	varying vec4 vColor;\n\n#elif defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR ) || defined( USE_BATCHING_COLOR )\n\n	varying vec3 vColor;\n\n#endif\n",
+    "color_vertex": "#if defined( USE_COLOR_ALPHA )\n\n	vColor = vec4( 1.0 );\n\n#elif defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR ) || defined( USE_BATCHING_COLOR )\n\n	vColor = vec3( 1.0 );\n\n#endif\n\n#ifdef USE_COLOR\n\n	vColor *= color;\n\n#endif\n\n#ifdef USE_INSTANCING_COLOR\n\n	vColor.xyz *= instanceColor.xyz;\n\n#endif\n\n#ifdef USE_BATCHING_COLOR\n\n	vec3 batchingColor = getBatchingColor( getIndirectIndex( gl_DrawID ) );\n\n	vColor.xyz *= batchingColor.xyz;\n\n#endif\n",
+    "colorspace_fragment": "gl_FragColor = linearToOutputTexel( gl_FragColor );\n",
+    "colorspace_pars_fragment": "vec4 LinearTransferOETF( in vec4 value ) {\n	return value;\n}\n\nvec4 sRGBTransferEOTF( in vec4 value ) {\n	return vec4( mix( pow( value.rgb * 0.9478672986 + vec3( 0.0521327014 ), vec3( 2.4 ) ), value.rgb * 0.0773993808, vec3( lessThanEqual( value.rgb, vec3( 0.04045 ) ) ) ), value.a );\n}\n\nvec4 sRGBTransferOETF( in vec4 value ) {\n	return vec4( mix( pow( value.rgb, vec3( 0.41666 ) ) * 1.055 - vec3( 0.055 ), value.rgb * 12.92, vec3( lessThanEqual( value.rgb, vec3( 0.0031308 ) ) ) ), value.a );\n}\n",
+    "common": "#define PI 3.141592653589793\n#define PI2 6.283185307179586\n#define PI_HALF 1.5707963267948966\n#define RECIPROCAL_PI 0.3183098861837907\n#define RECIPROCAL_PI2 0.15915494309189535\n#define EPSILON 1e-6\n\n#ifndef saturate\n// <tonemapping_pars_fragment> may have defined saturate() already\n#define saturate( a ) clamp( a, 0.0, 1.0 )\n#endif\n#define whiteComplement( a ) ( 1.0 - saturate( a ) )\n\nfloat pow2( const in float x ) { return x*x; }\nvec3 pow2( const in vec3 x ) { return x*x; }\nfloat pow3( const in float x ) { return x*x*x; }\nfloat pow4( const in float x ) { float x2 = x*x; return x2*x2; }\nfloat max3( const in vec3 v ) { return max( max( v.x, v.y ), v.z ); }\nfloat average( const in vec3 v ) { return dot( v, vec3( 0.3333333 ) ); }\n\n// expects values in the range of [0,1]x[0,1], returns values in the [0,1] range.\n// do not collapse into a single function per: http://byteblacksmith.com/improvements-to-the-canonical-one-liner-glsl-rand-for-opengl-es-2-0/\nhighp float rand( const in vec2 uv ) {\n\n	const highp float a = 12.9898, b = 78.233, c = 43758.5453;\n	highp float dt = dot( uv.xy, vec2( a,b ) ), sn = mod( dt, PI );\n\n	return fract( sin( sn ) * c );\n\n}\n\n#ifdef HIGH_PRECISION\n	float precisionSafeLength( vec3 v ) { return length( v ); }\n#else\n	float precisionSafeLength( vec3 v ) {\n		float maxComponent = max3( abs( v ) );\n		return length( v / maxComponent ) * maxComponent;\n	}\n#endif\n\nstruct IncidentLight {\n	vec3 color;\n	vec3 direction;\n	bool visible;\n};\n\nstruct ReflectedLight {\n	vec3 directDiffuse;\n	vec3 directSpecular;\n	vec3 indirectDiffuse;\n	vec3 indirectSpecular;\n};\n\n#ifdef USE_ALPHAHASH\n\n	varying vec3 vPosition;\n\n#endif\n\nvec3 transformDirection( in vec3 dir, in mat4 matrix ) {\n\n	return normalize( ( matrix * vec4( dir, 0.0 ) ).xyz );\n\n}\n\nvec3 inverseTransformDirection( in vec3 dir, in mat4 matrix ) {\n\n	// dir can be either a direction vector or a normal vector\n	// upper-left 3x3 of matrix is assumed to be orthogonal\n\n	return normalize( ( vec4( dir, 0.0 ) * matrix ).xyz );\n\n}\n\nmat3 transposeMat3( const in mat3 m ) {\n\n	mat3 tmp;\n\n	tmp[ 0 ] = vec3( m[ 0 ].x, m[ 1 ].x, m[ 2 ].x );\n	tmp[ 1 ] = vec3( m[ 0 ].y, m[ 1 ].y, m[ 2 ].y );\n	tmp[ 2 ] = vec3( m[ 0 ].z, m[ 1 ].z, m[ 2 ].z );\n\n	return tmp;\n\n}\n\nbool isPerspectiveMatrix( mat4 m ) {\n\n	return m[ 2 ][ 3 ] == - 1.0;\n\n}\n\nvec2 equirectUv( in vec3 dir ) {\n\n	// dir is assumed to be unit length\n\n	float u = atan( dir.z, dir.x ) * RECIPROCAL_PI2 + 0.5;\n\n	float v = asin( clamp( dir.y, - 1.0, 1.0 ) ) * RECIPROCAL_PI + 0.5;\n\n	return vec2( u, v );\n\n}\n\nvec3 BRDF_Lambert( const in vec3 diffuseColor ) {\n\n	return RECIPROCAL_PI * diffuseColor;\n\n} // validated\n\nvec3 F_Schlick( const in vec3 f0, const in float f90, const in float dotVH ) {\n\n	// Original approximation by Christophe Schlick '94\n	// float fresnel = pow( 1.0 - dotVH, 5.0 );\n\n	// Optimized variant (presented by Epic at SIGGRAPH '13)\n	// https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf\n	float fresnel = exp2( ( - 5.55473 * dotVH - 6.98316 ) * dotVH );\n\n	return f0 * ( 1.0 - fresnel ) + ( f90 * fresnel );\n\n} // validated\n\nfloat F_Schlick( const in float f0, const in float f90, const in float dotVH ) {\n\n	// Original approximation by Christophe Schlick '94\n	// float fresnel = pow( 1.0 - dotVH, 5.0 );\n\n	// Optimized variant (presented by Epic at SIGGRAPH '13)\n	// https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf\n	float fresnel = exp2( ( - 5.55473 * dotVH - 6.98316 ) * dotVH );\n\n	return f0 * ( 1.0 - fresnel ) + ( f90 * fresnel );\n\n} // validated\n",
+    "cube_uv_reflection_fragment": "#ifdef ENVMAP_TYPE_CUBE_UV\n\n	#define cubeUV_minMipLevel 4.0\n	#define cubeUV_minTileSize 16.0\n\n	// These shader functions convert between the UV coordinates of a single face of\n	// a cubemap, the 0-5 integer index of a cube face, and the direction vector for\n	// sampling a textureCube (not generally normalized ).\n\n	float getFace( vec3 direction ) {\n\n		vec3 absDirection = abs( direction );\n\n		float face = - 1.0;\n\n		if ( absDirection.x > absDirection.z ) {\n\n			if ( absDirection.x > absDirection.y )\n\n				face = direction.x > 0.0 ? 0.0 : 3.0;\n\n			else\n\n				face = direction.y > 0.0 ? 1.0 : 4.0;\n\n		} else {\n\n			if ( absDirection.z > absDirection.y )\n\n				face = direction.z > 0.0 ? 2.0 : 5.0;\n\n			else\n\n				face = direction.y > 0.0 ? 1.0 : 4.0;\n\n		}\n\n		return face;\n\n	}\n\n	// RH coordinate system; PMREM face-indexing convention\n	vec2 getUV( vec3 direction, float face ) {\n\n		vec2 uv;\n\n		if ( face == 0.0 ) {\n\n			uv = vec2( direction.z, direction.y ) / abs( direction.x ); // pos x\n\n		} else if ( face == 1.0 ) {\n\n			uv = vec2( - direction.x, - direction.z ) / abs( direction.y ); // pos y\n\n		} else if ( face == 2.0 ) {\n\n			uv = vec2( - direction.x, direction.y ) / abs( direction.z ); // pos z\n\n		} else if ( face == 3.0 ) {\n\n			uv = vec2( - direction.z, direction.y ) / abs( direction.x ); // neg x\n\n		} else if ( face == 4.0 ) {\n\n			uv = vec2( - direction.x, direction.z ) / abs( direction.y ); // neg y\n\n		} else {\n\n			uv = vec2( direction.x, direction.y ) / abs( direction.z ); // neg z\n\n		}\n\n		return 0.5 * ( uv + 1.0 );\n\n	}\n\n	vec3 bilinearCubeUV( sampler2D envMap, vec3 direction, float mipInt ) {\n\n		float face = getFace( direction );\n\n		float filterInt = max( cubeUV_minMipLevel - mipInt, 0.0 );\n\n		mipInt = max( mipInt, cubeUV_minMipLevel );\n\n		float faceSize = exp2( mipInt );\n\n		highp vec2 uv = getUV( direction, face ) * ( faceSize - 2.0 ) + 1.0; // #25071\n\n		if ( face > 2.0 ) {\n\n			uv.y += faceSize;\n\n			face -= 3.0;\n\n		}\n\n		uv.x += face * faceSize;\n\n		uv.x += filterInt * 3.0 * cubeUV_minTileSize;\n\n		uv.y += 4.0 * ( exp2( CUBEUV_MAX_MIP ) - faceSize );\n\n		uv.x *= CUBEUV_TEXEL_WIDTH;\n		uv.y *= CUBEUV_TEXEL_HEIGHT;\n\n		#ifdef texture2DGradEXT\n\n			return texture2DGradEXT( envMap, uv, vec2( 0.0 ), vec2( 0.0 ) ).rgb; // disable anisotropic filtering\n\n		#else\n\n			return texture2D( envMap, uv ).rgb;\n\n		#endif\n\n	}\n\n	// These defines must match with PMREMGenerator\n\n	#define cubeUV_r0 1.0\n	#define cubeUV_m0 - 2.0\n	#define cubeUV_r1 0.8\n	#define cubeUV_m1 - 1.0\n	#define cubeUV_r4 0.4\n	#define cubeUV_m4 2.0\n	#define cubeUV_r5 0.305\n	#define cubeUV_m5 3.0\n	#define cubeUV_r6 0.21\n	#define cubeUV_m6 4.0\n\n	float roughnessToMip( float roughness ) {\n\n		float mip = 0.0;\n\n		if ( roughness >= cubeUV_r1 ) {\n\n			mip = ( cubeUV_r0 - roughness ) * ( cubeUV_m1 - cubeUV_m0 ) / ( cubeUV_r0 - cubeUV_r1 ) + cubeUV_m0;\n\n		} else if ( roughness >= cubeUV_r4 ) {\n\n			mip = ( cubeUV_r1 - roughness ) * ( cubeUV_m4 - cubeUV_m1 ) / ( cubeUV_r1 - cubeUV_r4 ) + cubeUV_m1;\n\n		} else if ( roughness >= cubeUV_r5 ) {\n\n			mip = ( cubeUV_r4 - roughness ) * ( cubeUV_m5 - cubeUV_m4 ) / ( cubeUV_r4 - cubeUV_r5 ) + cubeUV_m4;\n\n		} else if ( roughness >= cubeUV_r6 ) {\n\n			mip = ( cubeUV_r5 - roughness ) * ( cubeUV_m6 - cubeUV_m5 ) / ( cubeUV_r5 - cubeUV_r6 ) + cubeUV_m5;\n\n		} else {\n\n			mip = - 2.0 * log2( 1.16 * roughness ); // 1.16 = 1.79^0.25\n		}\n\n		return mip;\n\n	}\n\n	vec4 textureCubeUV( sampler2D envMap, vec3 sampleDir, float roughness ) {\n\n		float mip = clamp( roughnessToMip( roughness ), cubeUV_m0, CUBEUV_MAX_MIP );\n\n		float mipF = fract( mip );\n\n		float mipInt = floor( mip );\n\n		vec3 color0 = bilinearCubeUV( envMap, sampleDir, mipInt );\n\n		if ( mipF == 0.0 ) {\n\n			return vec4( color0, 1.0 );\n\n		} else {\n\n			vec3 color1 = bilinearCubeUV( envMap, sampleDir, mipInt + 1.0 );\n\n			return vec4( mix( color0, color1, mipF ), 1.0 );\n\n		}\n\n	}\n\n#endif\n",
+    "default_fragment": "void main() {\n	gl_FragColor = vec4( 1.0, 0.0, 0.0, 1.0 );\n}\n",
+    "default_vertex": "void main() {\n	gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n}\n",
+    "defaultnormal_vertex": "vec3 transformedNormal = objectNormal;\n#ifdef USE_TANGENT\n\n	vec3 transformedTangent = objectTangent;\n\n#endif\n\n#ifdef USE_BATCHING\n\n	// this is in lieu of a per-instance normal-matrix\n	// shear transforms in the instance matrix are not supported\n\n	mat3 bm = mat3( batchingMatrix );\n	transformedNormal /= vec3( dot( bm[ 0 ], bm[ 0 ] ), dot( bm[ 1 ], bm[ 1 ] ), dot( bm[ 2 ], bm[ 2 ] ) );\n	transformedNormal = bm * transformedNormal;\n\n	#ifdef USE_TANGENT\n\n		transformedTangent = bm * transformedTangent;\n\n	#endif\n\n#endif\n\n#ifdef USE_INSTANCING\n\n	// this is in lieu of a per-instance normal-matrix\n	// shear transforms in the instance matrix are not supported\n\n	mat3 im = mat3( instanceMatrix );\n	transformedNormal /= vec3( dot( im[ 0 ], im[ 0 ] ), dot( im[ 1 ], im[ 1 ] ), dot( im[ 2 ], im[ 2 ] ) );\n	transformedNormal = im * transformedNormal;\n\n	#ifdef USE_TANGENT\n\n		transformedTangent = im * transformedTangent;\n\n	#endif\n\n#endif\n\ntransformedNormal = normalMatrix * transformedNormal;\n\n#ifdef FLIP_SIDED\n\n	transformedNormal = - transformedNormal;\n\n#endif\n\n#ifdef USE_TANGENT\n\n	transformedTangent = ( modelViewMatrix * vec4( transformedTangent, 0.0 ) ).xyz;\n\n	#ifdef FLIP_SIDED\n\n		transformedTangent = - transformedTangent;\n\n	#endif\n\n#endif\n",
+    "displacementmap_pars_vertex": "#ifdef USE_DISPLACEMENTMAP\n\n	uniform sampler2D displacementMap;\n	uniform float displacementScale;\n	uniform float displacementBias;\n\n#endif\n",
+    "displacementmap_vertex": "#ifdef USE_DISPLACEMENTMAP\n\n	transformed += normalize( objectNormal ) * ( texture2D( displacementMap, vDisplacementMapUv ).x * displacementScale + displacementBias );\n\n#endif\n",
+    "dithering_fragment": "#ifdef DITHERING\n\n	gl_FragColor.rgb = dithering( gl_FragColor.rgb );\n\n#endif\n",
+    "dithering_pars_fragment": "#ifdef DITHERING\n\n	// based on https://www.shadertoy.com/view/MslGR8\n	vec3 dithering( vec3 color ) {\n		//Calculate grid position\n		float grid_position = rand( gl_FragCoord.xy );\n\n		//Shift the individual colors differently, thus making it even harder to see the dithering pattern\n		vec3 dither_shift_RGB = vec3( 0.25 / 255.0, -0.25 / 255.0, 0.25 / 255.0 );\n\n		//modify shift according to grid position.\n		dither_shift_RGB = mix( 2.0 * dither_shift_RGB, -2.0 * dither_shift_RGB, grid_position );\n\n		//shift the color by dither_shift\n		return color + dither_shift_RGB;\n	}\n\n#endif\n",
+    "emissivemap_fragment": "#ifdef USE_EMISSIVEMAP\n\n	vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );\n\n	#ifdef DECODE_VIDEO_TEXTURE_EMISSIVE\n\n		// use inline sRGB decode until browsers properly support SRGB8_ALPHA8 with video textures (#26516)\n\n		emissiveColor = sRGBTransferEOTF( emissiveColor );\n\n	#endif\n\n	totalEmissiveRadiance *= emissiveColor.rgb;\n\n#endif\n",
+    "emissivemap_pars_fragment": "#ifdef USE_EMISSIVEMAP\n\n	uniform sampler2D emissiveMap;\n\n#endif\n",
+    "envmap_common_pars_fragment": "#ifdef USE_ENVMAP\n\n	uniform float envMapIntensity;\n	uniform float flipEnvMap;\n	uniform mat3 envMapRotation;\n\n	#ifdef ENVMAP_TYPE_CUBE\n		uniform samplerCube envMap;\n	#else\n		uniform sampler2D envMap;\n	#endif\n\n#endif\n",
+    "envmap_fragment": "#ifdef USE_ENVMAP\n\n	#ifdef ENV_WORLDPOS\n\n		vec3 cameraToFrag;\n\n		if ( isOrthographic ) {\n\n			cameraToFrag = normalize( vec3( - viewMatrix[ 0 ][ 2 ], - viewMatrix[ 1 ][ 2 ], - viewMatrix[ 2 ][ 2 ] ) );\n\n		} else {\n\n			cameraToFrag = normalize( vWorldPosition - cameraPosition );\n\n		}\n\n		// Transforming Normal Vectors with the Inverse Transformation\n		vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );\n\n		#ifdef ENVMAP_MODE_REFLECTION\n\n			vec3 reflectVec = reflect( cameraToFrag, worldNormal );\n\n		#else\n\n			vec3 reflectVec = refract( cameraToFrag, worldNormal, refractionRatio );\n\n		#endif\n\n	#else\n\n		vec3 reflectVec = vReflect;\n\n	#endif\n\n	#ifdef ENVMAP_TYPE_CUBE\n\n		vec4 envColor = textureCube( envMap, envMapRotation * vec3( flipEnvMap * reflectVec.x, reflectVec.yz ) );\n\n	#else\n\n		vec4 envColor = vec4( 0.0 );\n\n	#endif\n\n	#ifdef ENVMAP_BLENDING_MULTIPLY\n\n		outgoingLight = mix( outgoingLight, outgoingLight * envColor.xyz, specularStrength * reflectivity );\n\n	#elif defined( ENVMAP_BLENDING_MIX )\n\n		outgoingLight = mix( outgoingLight, envColor.xyz, specularStrength * reflectivity );\n\n	#elif defined( ENVMAP_BLENDING_ADD )\n\n		outgoingLight += envColor.xyz * specularStrength * reflectivity;\n\n	#endif\n\n#endif\n",
+    "envmap_pars_fragment": "#ifdef USE_ENVMAP\n\n	uniform float reflectivity;\n\n	#if defined( USE_BUMPMAP ) || defined( USE_NORMALMAP ) || defined( PHONG ) || defined( LAMBERT )\n\n		#define ENV_WORLDPOS\n\n	#endif\n\n	#ifdef ENV_WORLDPOS\n\n		varying vec3 vWorldPosition;\n		uniform float refractionRatio;\n	#else\n		varying vec3 vReflect;\n	#endif\n\n#endif\n",
+    "envmap_pars_vertex": "#ifdef USE_ENVMAP\n\n	#if defined( USE_BUMPMAP ) || defined( USE_NORMALMAP ) || defined( PHONG ) || defined( LAMBERT )\n\n		#define ENV_WORLDPOS\n\n	#endif\n\n	#ifdef ENV_WORLDPOS\n\n		varying vec3 vWorldPosition;\n\n	#else\n\n		varying vec3 vReflect;\n		uniform float refractionRatio;\n\n	#endif\n\n#endif\n",
+    "envmap_physical_pars_fragment": "#ifdef USE_ENVMAP\n\n	vec3 getIBLIrradiance( const in vec3 normal ) {\n\n		#ifdef ENVMAP_TYPE_CUBE_UV\n\n			vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );\n\n			vec4 envMapColor = textureCubeUV( envMap, envMapRotation * worldNormal, 1.0 );\n\n			return PI * envMapColor.rgb * envMapIntensity;\n\n		#else\n\n			return vec3( 0.0 );\n\n		#endif\n\n	}\n\n	vec3 getIBLRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness ) {\n\n		#ifdef ENVMAP_TYPE_CUBE_UV\n\n			vec3 reflectVec = reflect( - viewDir, normal );\n\n			// Mixing the reflection with the normal is more accurate and keeps rough objects from gathering light from behind their tangent plane.\n			reflectVec = normalize( mix( reflectVec, normal, roughness * roughness) );\n\n			reflectVec = inverseTransformDirection( reflectVec, viewMatrix );\n\n			vec4 envMapColor = textureCubeUV( envMap, envMapRotation * reflectVec, roughness );\n\n			return envMapColor.rgb * envMapIntensity;\n\n		#else\n\n			return vec3( 0.0 );\n\n		#endif\n\n	}\n\n	#ifdef USE_ANISOTROPY\n\n		vec3 getIBLAnisotropyRadiance( const in vec3 viewDir, const in vec3 normal, const in float roughness, const in vec3 bitangent, const in float anisotropy ) {\n\n			#ifdef ENVMAP_TYPE_CUBE_UV\n\n			  // https://google.github.io/filament/Filament.md.html#lighting/imagebasedlights/anisotropy\n				vec3 bentNormal = cross( bitangent, viewDir );\n				bentNormal = normalize( cross( bentNormal, bitangent ) );\n				bentNormal = normalize( mix( bentNormal, normal, pow2( pow2( 1.0 - anisotropy * ( 1.0 - roughness ) ) ) ) );\n\n				return getIBLRadiance( viewDir, bentNormal, roughness );\n\n			#else\n\n				return vec3( 0.0 );\n\n			#endif\n\n		}\n\n	#endif\n\n#endif\n",
+    "envmap_vertex": "#ifdef USE_ENVMAP\n\n	#ifdef ENV_WORLDPOS\n\n		vWorldPosition = worldPosition.xyz;\n\n	#else\n\n		vec3 cameraToVertex;\n\n		if ( isOrthographic ) {\n\n			cameraToVertex = normalize( vec3( - viewMatrix[ 0 ][ 2 ], - viewMatrix[ 1 ][ 2 ], - viewMatrix[ 2 ][ 2 ] ) );\n\n		} else {\n\n			cameraToVertex = normalize( worldPosition.xyz - cameraPosition );\n\n		}\n\n		vec3 worldNormal = inverseTransformDirection( transformedNormal, viewMatrix );\n\n		#ifdef ENVMAP_MODE_REFLECTION\n\n			vReflect = reflect( cameraToVertex, worldNormal );\n\n		#else\n\n			vReflect = refract( cameraToVertex, worldNormal, refractionRatio );\n\n		#endif\n\n	#endif\n\n#endif\n",
+    "fog_fragment": "#ifdef USE_FOG\n\n	#ifdef FOG_EXP2\n\n		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );\n\n	#else\n\n		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );\n\n	#endif\n\n	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );\n\n#endif\n",
+    "fog_pars_fragment": "#ifdef USE_FOG\n\n	uniform vec3 fogColor;\n	varying float vFogDepth;\n\n	#ifdef FOG_EXP2\n\n		uniform float fogDensity;\n\n	#else\n\n		uniform float fogNear;\n		uniform float fogFar;\n\n	#endif\n\n#endif\n",
+    "fog_pars_vertex": "#ifdef USE_FOG\n\n	varying float vFogDepth;\n\n#endif\n",
+    "fog_vertex": "#ifdef USE_FOG\n\n	vFogDepth = - mvPosition.z;\n\n#endif\n",
+    "gradientmap_pars_fragment": "#ifdef USE_GRADIENTMAP\n\n	uniform sampler2D gradientMap;\n\n#endif\n\nvec3 getGradientIrradiance( vec3 normal, vec3 lightDirection ) {\n\n	// dotNL will be from -1.0 to 1.0\n	float dotNL = dot( normal, lightDirection );\n	vec2 coord = vec2( dotNL * 0.5 + 0.5, 0.0 );\n\n	#ifdef USE_GRADIENTMAP\n\n		return vec3( texture2D( gradientMap, coord ).r );\n\n	#else\n\n		vec2 fw = fwidth( coord ) * 0.5;\n		return mix( vec3( 0.7 ), vec3( 1.0 ), smoothstep( 0.7 - fw.x, 0.7 + fw.x, coord.x ) );\n\n	#endif\n\n}\n",
+    "iridescence_fragment": "#ifdef USE_IRIDESCENCE\n\n	// XYZ to linear-sRGB color space\n	const mat3 XYZ_TO_REC709 = mat3(\n		 3.2404542, -0.9692660,  0.0556434,\n		-1.5371385,  1.8760108, -0.2040259,\n		-0.4985314,  0.0415560,  1.0572252\n	);\n\n	// Assume air interface for top\n	// Note: We don't handle the case fresnel0 == 1\n	vec3 Fresnel0ToIor( vec3 fresnel0 ) {\n\n		vec3 sqrtF0 = sqrt( fresnel0 );\n		return ( vec3( 1.0 ) + sqrtF0 ) / ( vec3( 1.0 ) - sqrtF0 );\n\n	}\n\n	// Conversion FO/IOR\n	vec3 IorToFresnel0( vec3 transmittedIor, float incidentIor ) {\n\n		return pow2( ( transmittedIor - vec3( incidentIor ) ) / ( transmittedIor + vec3( incidentIor ) ) );\n\n	}\n\n	// ior is a value between 1.0 and 3.0. 1.0 is air interface\n	float IorToFresnel0( float transmittedIor, float incidentIor ) {\n\n		return pow2( ( transmittedIor - incidentIor ) / ( transmittedIor + incidentIor ));\n\n	}\n\n	// Fresnel equations for dielectric/dielectric interfaces.\n	// Ref: https://belcour.github.io/blog/research/2017/05/01/brdf-thin-film.html\n	// Evaluation XYZ sensitivity curves in Fourier space\n	vec3 evalSensitivity( float OPD, vec3 shift ) {\n\n		float phase = 2.0 * PI * OPD * 1.0e-9;\n		vec3 val = vec3( 5.4856e-13, 4.4201e-13, 5.2481e-13 );\n		vec3 pos = vec3( 1.6810e+06, 1.7953e+06, 2.2084e+06 );\n		vec3 var = vec3( 4.3278e+09, 9.3046e+09, 6.6121e+09 );\n\n		vec3 xyz = val * sqrt( 2.0 * PI * var ) * cos( pos * phase + shift ) * exp( - pow2( phase ) * var );\n		xyz.x += 9.7470e-14 * sqrt( 2.0 * PI * 4.5282e+09 ) * cos( 2.2399e+06 * phase + shift[ 0 ] ) * exp( - 4.5282e+09 * pow2( phase ) );\n		xyz /= 1.0685e-7;\n\n		vec3 rgb = XYZ_TO_REC709 * xyz;\n		return rgb;\n\n	}\n\n	vec3 evalIridescence( float outsideIOR, float eta2, float cosTheta1, float thinFilmThickness, vec3 baseF0 ) {\n\n		vec3 I;\n\n		// Force iridescenceIOR -> outsideIOR when thinFilmThickness -> 0.0\n		float iridescenceIOR = mix( outsideIOR, eta2, smoothstep( 0.0, 0.03, thinFilmThickness ) );\n		// Evaluate the cosTheta on the base layer (Snell law)\n		float sinTheta2Sq = pow2( outsideIOR / iridescenceIOR ) * ( 1.0 - pow2( cosTheta1 ) );\n\n		// Handle TIR:\n		float cosTheta2Sq = 1.0 - sinTheta2Sq;\n		if ( cosTheta2Sq < 0.0 ) {\n\n			return vec3( 1.0 );\n\n		}\n\n		float cosTheta2 = sqrt( cosTheta2Sq );\n\n		// First interface\n		float R0 = IorToFresnel0( iridescenceIOR, outsideIOR );\n		float R12 = F_Schlick( R0, 1.0, cosTheta1 );\n		float T121 = 1.0 - R12;\n		float phi12 = 0.0;\n		if ( iridescenceIOR < outsideIOR ) phi12 = PI;\n		float phi21 = PI - phi12;\n\n		// Second interface\n		vec3 baseIOR = Fresnel0ToIor( clamp( baseF0, 0.0, 0.9999 ) ); // guard against 1.0\n		vec3 R1 = IorToFresnel0( baseIOR, iridescenceIOR );\n		vec3 R23 = F_Schlick( R1, 1.0, cosTheta2 );\n		vec3 phi23 = vec3( 0.0 );\n		if ( baseIOR[ 0 ] < iridescenceIOR ) phi23[ 0 ] = PI;\n		if ( baseIOR[ 1 ] < iridescenceIOR ) phi23[ 1 ] = PI;\n		if ( baseIOR[ 2 ] < iridescenceIOR ) phi23[ 2 ] = PI;\n\n		// Phase shift\n		float OPD = 2.0 * iridescenceIOR * thinFilmThickness * cosTheta2;\n		vec3 phi = vec3( phi21 ) + phi23;\n\n		// Compound terms\n		vec3 R123 = clamp( R12 * R23, 1e-5, 0.9999 );\n		vec3 r123 = sqrt( R123 );\n		vec3 Rs = pow2( T121 ) * R23 / ( vec3( 1.0 ) - R123 );\n\n		// Reflectance term for m = 0 (DC term amplitude)\n		vec3 C0 = R12 + Rs;\n		I = C0;\n\n		// Reflectance term for m > 0 (pairs of diracs)\n		vec3 Cm = Rs - T121;\n		for ( int m = 1; m <= 2; ++ m ) {\n\n			Cm *= r123;\n			vec3 Sm = 2.0 * evalSensitivity( float( m ) * OPD, float( m ) * phi );\n			I += Cm * Sm;\n\n		}\n\n		// Since out of gamut colors might be produced, negative color values are clamped to 0.\n		return max( I, vec3( 0.0 ) );\n\n	}\n\n#endif\n",
+    "iridescence_pars_fragment": "#ifdef USE_IRIDESCENCEMAP\n\n	uniform sampler2D iridescenceMap;\n\n#endif\n\n#ifdef USE_IRIDESCENCE_THICKNESSMAP\n\n	uniform sampler2D iridescenceThicknessMap;\n\n#endif\n",
+    "lightmap_pars_fragment": "#ifdef USE_LIGHTMAP\n\n	uniform sampler2D lightMap;\n	uniform float lightMapIntensity;\n\n#endif\n",
+    "lights_fragment_begin": "/**\n * This is a template that can be used to light a material, it uses pluggable\n * RenderEquations (RE)for specific lighting scenarios.\n *\n * Instructions for use:\n * - Ensure that both RE_Direct, RE_IndirectDiffuse and RE_IndirectSpecular are defined\n * - Create a material parameter that is to be passed as the third parameter to your lighting functions.\n *\n * TODO:\n * - Add area light support.\n * - Add sphere light support.\n * - Add diffuse light probe (irradiance cubemap) support.\n */\n\nvec3 geometryPosition = - vViewPosition;\nvec3 geometryNormal = normal;\nvec3 geometryViewDir = ( isOrthographic ) ? vec3( 0, 0, 1 ) : normalize( vViewPosition );\n\nvec3 geometryClearcoatNormal = vec3( 0.0 );\n\n#ifdef USE_CLEARCOAT\n\n	geometryClearcoatNormal = clearcoatNormal;\n\n#endif\n\n#ifdef USE_IRIDESCENCE\n\n	float dotNVi = saturate( dot( normal, geometryViewDir ) );\n\n	if ( material.iridescenceThickness == 0.0 ) {\n\n		material.iridescence = 0.0;\n\n	} else {\n\n		material.iridescence = saturate( material.iridescence );\n\n	}\n\n	if ( material.iridescence > 0.0 ) {\n\n		material.iridescenceFresnel = evalIridescence( 1.0, material.iridescenceIOR, dotNVi, material.iridescenceThickness, material.specularColor );\n\n		// Iridescence F0 approximation\n		material.iridescenceF0 = Schlick_to_F0( material.iridescenceFresnel, 1.0, dotNVi );\n\n	}\n\n#endif\n\nIncidentLight directLight;\n\n#if ( NUM_POINT_LIGHTS > 0 ) && defined( RE_Direct )\n\n	PointLight pointLight;\n	#if defined( USE_SHADOWMAP ) && NUM_POINT_LIGHT_SHADOWS > 0\n	PointLightShadow pointLightShadow;\n	#endif\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_POINT_LIGHTS; i ++ ) {\n\n		pointLight = pointLights[ i ];\n\n		getPointLightInfo( pointLight, geometryPosition, directLight );\n\n		#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS )\n		pointLightShadow = pointLightShadows[ i ];\n		directLight.color *= ( directLight.visible && receiveShadow ) ? getPointShadow( pointShadowMap[ i ], pointLightShadow.shadowMapSize, pointLightShadow.shadowIntensity, pointLightShadow.shadowBias, pointLightShadow.shadowRadius, vPointShadowCoord[ i ], pointLightShadow.shadowCameraNear, pointLightShadow.shadowCameraFar ) : 1.0;\n		#endif\n\n		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n	}\n	#pragma unroll_loop_end\n\n#endif\n\n#if ( NUM_SPOT_LIGHTS > 0 ) && defined( RE_Direct )\n\n	SpotLight spotLight;\n	vec4 spotColor;\n	vec3 spotLightCoord;\n	bool inSpotLightMap;\n\n	#if defined( USE_SHADOWMAP ) && NUM_SPOT_LIGHT_SHADOWS > 0\n	SpotLightShadow spotLightShadow;\n	#endif\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_SPOT_LIGHTS; i ++ ) {\n\n		spotLight = spotLights[ i ];\n\n		getSpotLightInfo( spotLight, geometryPosition, directLight );\n\n		// spot lights are ordered [shadows with maps, shadows without maps, maps without shadows, none]\n		#if ( UNROLLED_LOOP_INDEX < NUM_SPOT_LIGHT_SHADOWS_WITH_MAPS )\n		#define SPOT_LIGHT_MAP_INDEX UNROLLED_LOOP_INDEX\n		#elif ( UNROLLED_LOOP_INDEX < NUM_SPOT_LIGHT_SHADOWS )\n		#define SPOT_LIGHT_MAP_INDEX NUM_SPOT_LIGHT_MAPS\n		#else\n		#define SPOT_LIGHT_MAP_INDEX ( UNROLLED_LOOP_INDEX - NUM_SPOT_LIGHT_SHADOWS + NUM_SPOT_LIGHT_SHADOWS_WITH_MAPS )\n		#endif\n\n		#if ( SPOT_LIGHT_MAP_INDEX < NUM_SPOT_LIGHT_MAPS )\n			spotLightCoord = vSpotLightCoord[ i ].xyz / vSpotLightCoord[ i ].w;\n			inSpotLightMap = all( lessThan( abs( spotLightCoord * 2. - 1. ), vec3( 1.0 ) ) );\n			spotColor = texture2D( spotLightMap[ SPOT_LIGHT_MAP_INDEX ], spotLightCoord.xy );\n			directLight.color = inSpotLightMap ? directLight.color * spotColor.rgb : directLight.color;\n		#endif\n\n		#undef SPOT_LIGHT_MAP_INDEX\n\n		#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_SPOT_LIGHT_SHADOWS )\n		spotLightShadow = spotLightShadows[ i ];\n		directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( spotShadowMap[ i ], spotLightShadow.shadowMapSize, spotLightShadow.shadowIntensity, spotLightShadow.shadowBias, spotLightShadow.shadowRadius, vSpotLightCoord[ i ] ) : 1.0;\n		#endif\n\n		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n	}\n	#pragma unroll_loop_end\n\n#endif\n\n#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )\n\n	DirectionalLight directionalLight;\n	#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0\n	DirectionalLightShadow directionalLightShadow;\n	#endif\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {\n\n		directionalLight = directionalLights[ i ];\n\n		getDirectionalLightInfo( directionalLight, directLight );\n\n		#if defined( USE_SHADOWMAP ) && ( UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS )\n		directionalLightShadow = directionalLightShadows[ i ];\n		directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;\n		#endif\n\n		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n	}\n	#pragma unroll_loop_end\n\n#endif\n\n#if ( NUM_RECT_AREA_LIGHTS > 0 ) && defined( RE_Direct_RectArea )\n\n	RectAreaLight rectAreaLight;\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_RECT_AREA_LIGHTS; i ++ ) {\n\n		rectAreaLight = rectAreaLights[ i ];\n		RE_Direct_RectArea( rectAreaLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n	}\n	#pragma unroll_loop_end\n\n#endif\n\n#if defined( RE_IndirectDiffuse )\n\n	vec3 iblIrradiance = vec3( 0.0 );\n\n	vec3 irradiance = getAmbientLightIrradiance( ambientLightColor );\n\n	#if defined( USE_LIGHT_PROBES )\n\n		irradiance += getLightProbeIrradiance( lightProbe, geometryNormal );\n\n	#endif\n\n	#if ( NUM_HEMI_LIGHTS > 0 )\n\n		#pragma unroll_loop_start\n		for ( int i = 0; i < NUM_HEMI_LIGHTS; i ++ ) {\n\n			irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );\n\n		}\n		#pragma unroll_loop_end\n\n	#endif\n\n#endif\n\n#if defined( RE_IndirectSpecular )\n\n	vec3 radiance = vec3( 0.0 );\n	vec3 clearcoatRadiance = vec3( 0.0 );\n\n#endif\n",
+    "lights_fragment_end": "#if defined( RE_IndirectDiffuse )\n\n	RE_IndirectDiffuse( irradiance, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n#endif\n\n#if defined( RE_IndirectSpecular )\n\n	RE_IndirectSpecular( radiance, iblIrradiance, clearcoatRadiance, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );\n\n#endif\n",
+    "lights_fragment_maps": "#if defined( RE_IndirectDiffuse )\n\n	#ifdef USE_LIGHTMAP\n\n		vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );\n		vec3 lightMapIrradiance = lightMapTexel.rgb * lightMapIntensity;\n\n		irradiance += lightMapIrradiance;\n\n	#endif\n\n	#if defined( USE_ENVMAP ) && defined( STANDARD ) && defined( ENVMAP_TYPE_CUBE_UV )\n\n		iblIrradiance += getIBLIrradiance( geometryNormal );\n\n	#endif\n\n#endif\n\n#if defined( USE_ENVMAP ) && defined( RE_IndirectSpecular )\n\n	#ifdef USE_ANISOTROPY\n\n		radiance += getIBLAnisotropyRadiance( geometryViewDir, geometryNormal, material.roughness, material.anisotropyB, material.anisotropy );\n\n	#else\n\n		radiance += getIBLRadiance( geometryViewDir, geometryNormal, material.roughness );\n\n	#endif\n\n	#ifdef USE_CLEARCOAT\n\n		clearcoatRadiance += getIBLRadiance( geometryViewDir, geometryClearcoatNormal, material.clearcoatRoughness );\n\n	#endif\n\n#endif\n",
+    "lights_lambert_fragment": "LambertMaterial material;\nmaterial.diffuseColor = diffuseColor.rgb;\nmaterial.specularStrength = specularStrength;\n",
+    "lights_lambert_pars_fragment": "varying vec3 vViewPosition;\n\nstruct LambertMaterial {\n\n	vec3 diffuseColor;\n	float specularStrength;\n\n};\n\nvoid RE_Direct_Lambert( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {\n\n	float dotNL = saturate( dot( geometryNormal, directLight.direction ) );\n	vec3 irradiance = dotNL * directLight.color;\n\n	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n}\n\nvoid RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {\n\n	reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n}\n\n#define RE_Direct				RE_Direct_Lambert\n#define RE_IndirectDiffuse		RE_IndirectDiffuse_Lambert\n",
+    "lights_pars_begin": "uniform bool receiveShadow;\nuniform vec3 ambientLightColor;\n\n#if defined( USE_LIGHT_PROBES )\n\n	uniform vec3 lightProbe[ 9 ];\n\n#endif\n\n// get the irradiance (radiance convolved with cosine lobe) at the point 'normal' on the unit sphere\n// source: https://graphics.stanford.edu/papers/envmap/envmap.pdf\nvec3 shGetIrradianceAt( in vec3 normal, in vec3 shCoefficients[ 9 ] ) {\n\n	// normal is assumed to have unit length\n\n	float x = normal.x, y = normal.y, z = normal.z;\n\n	// band 0\n	vec3 result = shCoefficients[ 0 ] * 0.886227;\n\n	// band 1\n	result += shCoefficients[ 1 ] * 2.0 * 0.511664 * y;\n	result += shCoefficients[ 2 ] * 2.0 * 0.511664 * z;\n	result += shCoefficients[ 3 ] * 2.0 * 0.511664 * x;\n\n	// band 2\n	result += shCoefficients[ 4 ] * 2.0 * 0.429043 * x * y;\n	result += shCoefficients[ 5 ] * 2.0 * 0.429043 * y * z;\n	result += shCoefficients[ 6 ] * ( 0.743125 * z * z - 0.247708 );\n	result += shCoefficients[ 7 ] * 2.0 * 0.429043 * x * z;\n	result += shCoefficients[ 8 ] * 0.429043 * ( x * x - y * y );\n\n	return result;\n\n}\n\nvec3 getLightProbeIrradiance( const in vec3 lightProbe[ 9 ], const in vec3 normal ) {\n\n	vec3 worldNormal = inverseTransformDirection( normal, viewMatrix );\n\n	vec3 irradiance = shGetIrradianceAt( worldNormal, lightProbe );\n\n	return irradiance;\n\n}\n\nvec3 getAmbientLightIrradiance( const in vec3 ambientLightColor ) {\n\n	vec3 irradiance = ambientLightColor;\n\n	return irradiance;\n\n}\n\nfloat getDistanceAttenuation( const in float lightDistance, const in float cutoffDistance, const in float decayExponent ) {\n\n	// based upon Frostbite 3 Moving to Physically-based Rendering\n	// page 32, equation 26: E[window1]\n	// https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf\n	float distanceFalloff = 1.0 / max( pow( lightDistance, decayExponent ), 0.01 );\n\n	if ( cutoffDistance > 0.0 ) {\n\n		distanceFalloff *= pow2( saturate( 1.0 - pow4( lightDistance / cutoffDistance ) ) );\n\n	}\n\n	return distanceFalloff;\n\n}\n\nfloat getSpotAttenuation( const in float coneCosine, const in float penumbraCosine, const in float angleCosine ) {\n\n	return smoothstep( coneCosine, penumbraCosine, angleCosine );\n\n}\n\n#if NUM_DIR_LIGHTS > 0\n\n	struct DirectionalLight {\n		vec3 direction;\n		vec3 color;\n	};\n\n	uniform DirectionalLight directionalLights[ NUM_DIR_LIGHTS ];\n\n	void getDirectionalLightInfo( const in DirectionalLight directionalLight, out IncidentLight light ) {\n\n		light.color = directionalLight.color;\n		light.direction = directionalLight.direction;\n		light.visible = true;\n\n	}\n\n#endif\n\n#if NUM_POINT_LIGHTS > 0\n\n	struct PointLight {\n		vec3 position;\n		vec3 color;\n		float distance;\n		float decay;\n	};\n\n	uniform PointLight pointLights[ NUM_POINT_LIGHTS ];\n\n	// light is an out parameter as having it as a return value caused compiler errors on some devices\n	void getPointLightInfo( const in PointLight pointLight, const in vec3 geometryPosition, out IncidentLight light ) {\n\n		vec3 lVector = pointLight.position - geometryPosition;\n\n		light.direction = normalize( lVector );\n\n		float lightDistance = length( lVector );\n\n		light.color = pointLight.color;\n		light.color *= getDistanceAttenuation( lightDistance, pointLight.distance, pointLight.decay );\n		light.visible = ( light.color != vec3( 0.0 ) );\n\n	}\n\n#endif\n\n#if NUM_SPOT_LIGHTS > 0\n\n	struct SpotLight {\n		vec3 position;\n		vec3 direction;\n		vec3 color;\n		float distance;\n		float decay;\n		float coneCos;\n		float penumbraCos;\n	};\n\n	uniform SpotLight spotLights[ NUM_SPOT_LIGHTS ];\n\n	// light is an out parameter as having it as a return value caused compiler errors on some devices\n	void getSpotLightInfo( const in SpotLight spotLight, const in vec3 geometryPosition, out IncidentLight light ) {\n\n		vec3 lVector = spotLight.position - geometryPosition;\n\n		light.direction = normalize( lVector );\n\n		float angleCos = dot( light.direction, spotLight.direction );\n\n		float spotAttenuation = getSpotAttenuation( spotLight.coneCos, spotLight.penumbraCos, angleCos );\n\n		if ( spotAttenuation > 0.0 ) {\n\n			float lightDistance = length( lVector );\n\n			light.color = spotLight.color * spotAttenuation;\n			light.color *= getDistanceAttenuation( lightDistance, spotLight.distance, spotLight.decay );\n			light.visible = ( light.color != vec3( 0.0 ) );\n\n		} else {\n\n			light.color = vec3( 0.0 );\n			light.visible = false;\n\n		}\n\n	}\n\n#endif\n\n#if NUM_RECT_AREA_LIGHTS > 0\n\n	struct RectAreaLight {\n		vec3 color;\n		vec3 position;\n		vec3 halfWidth;\n		vec3 halfHeight;\n	};\n\n	// Pre-computed values of LinearTransformedCosine approximation of BRDF\n	// BRDF approximation Texture is 64x64\n	uniform sampler2D ltc_1; // RGBA Float\n	uniform sampler2D ltc_2; // RGBA Float\n\n	uniform RectAreaLight rectAreaLights[ NUM_RECT_AREA_LIGHTS ];\n\n#endif\n\n#if NUM_HEMI_LIGHTS > 0\n\n	struct HemisphereLight {\n		vec3 direction;\n		vec3 skyColor;\n		vec3 groundColor;\n	};\n\n	uniform HemisphereLight hemisphereLights[ NUM_HEMI_LIGHTS ];\n\n	vec3 getHemisphereLightIrradiance( const in HemisphereLight hemiLight, const in vec3 normal ) {\n\n		float dotNL = dot( normal, hemiLight.direction );\n		float hemiDiffuseWeight = 0.5 * dotNL + 0.5;\n\n		vec3 irradiance = mix( hemiLight.groundColor, hemiLight.skyColor, hemiDiffuseWeight );\n\n		return irradiance;\n\n	}\n\n#endif\n",
+    "lights_phong_fragment": "BlinnPhongMaterial material;\nmaterial.diffuseColor = diffuseColor.rgb;\nmaterial.specularColor = specular;\nmaterial.specularShininess = shininess;\nmaterial.specularStrength = specularStrength;\n",
+    "lights_phong_pars_fragment": "varying vec3 vViewPosition;\n\nstruct BlinnPhongMaterial {\n\n	vec3 diffuseColor;\n	vec3 specularColor;\n	float specularShininess;\n	float specularStrength;\n\n};\n\nvoid RE_Direct_BlinnPhong( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in BlinnPhongMaterial material, inout ReflectedLight reflectedLight ) {\n\n	float dotNL = saturate( dot( geometryNormal, directLight.direction ) );\n	vec3 irradiance = dotNL * directLight.color;\n\n	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n	reflectedLight.directSpecular += irradiance * BRDF_BlinnPhong( directLight.direction, geometryViewDir, geometryNormal, material.specularColor, material.specularShininess ) * material.specularStrength;\n\n}\n\nvoid RE_IndirectDiffuse_BlinnPhong( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in BlinnPhongMaterial material, inout ReflectedLight reflectedLight ) {\n\n	reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n}\n\n#define RE_Direct				RE_Direct_BlinnPhong\n#define RE_IndirectDiffuse		RE_IndirectDiffuse_BlinnPhong\n",
+    "lights_physical_fragment": "PhysicalMaterial material;\nmaterial.diffuseColor = diffuseColor.rgb * ( 1.0 - metalnessFactor );\n\nvec3 dxy = max( abs( dFdx( nonPerturbedNormal ) ), abs( dFdy( nonPerturbedNormal ) ) );\nfloat geometryRoughness = max( max( dxy.x, dxy.y ), dxy.z );\n\nmaterial.roughness = max( roughnessFactor, 0.0525 );// 0.0525 corresponds to the base mip of a 256 cubemap.\nmaterial.roughness += geometryRoughness;\nmaterial.roughness = min( material.roughness, 1.0 );\n\n#ifdef IOR\n\n	material.ior = ior;\n\n	#ifdef USE_SPECULAR\n\n		float specularIntensityFactor = specularIntensity;\n		vec3 specularColorFactor = specularColor;\n\n		#ifdef USE_SPECULAR_COLORMAP\n\n			specularColorFactor *= texture2D( specularColorMap, vSpecularColorMapUv ).rgb;\n\n		#endif\n\n		#ifdef USE_SPECULAR_INTENSITYMAP\n\n			specularIntensityFactor *= texture2D( specularIntensityMap, vSpecularIntensityMapUv ).a;\n\n		#endif\n\n		material.specularF90 = mix( specularIntensityFactor, 1.0, metalnessFactor );\n\n	#else\n\n		float specularIntensityFactor = 1.0;\n		vec3 specularColorFactor = vec3( 1.0 );\n		material.specularF90 = 1.0;\n\n	#endif\n\n	material.specularColor = mix( min( pow2( ( material.ior - 1.0 ) / ( material.ior + 1.0 ) ) * specularColorFactor, vec3( 1.0 ) ) * specularIntensityFactor, diffuseColor.rgb, metalnessFactor );\n\n#else\n\n	material.specularColor = mix( vec3( 0.04 ), diffuseColor.rgb, metalnessFactor );\n	material.specularF90 = 1.0;\n\n#endif\n\n#ifdef USE_CLEARCOAT\n\n	material.clearcoat = clearcoat;\n	material.clearcoatRoughness = clearcoatRoughness;\n	material.clearcoatF0 = vec3( 0.04 );\n	material.clearcoatF90 = 1.0;\n\n	#ifdef USE_CLEARCOATMAP\n\n		material.clearcoat *= texture2D( clearcoatMap, vClearcoatMapUv ).x;\n\n	#endif\n\n	#ifdef USE_CLEARCOAT_ROUGHNESSMAP\n\n		material.clearcoatRoughness *= texture2D( clearcoatRoughnessMap, vClearcoatRoughnessMapUv ).y;\n\n	#endif\n\n	material.clearcoat = saturate( material.clearcoat ); // Burley clearcoat model\n	material.clearcoatRoughness = max( material.clearcoatRoughness, 0.0525 );\n	material.clearcoatRoughness += geometryRoughness;\n	material.clearcoatRoughness = min( material.clearcoatRoughness, 1.0 );\n\n#endif\n\n#ifdef USE_DISPERSION\n\n	material.dispersion = dispersion;\n\n#endif\n\n#ifdef USE_IRIDESCENCE\n\n	material.iridescence = iridescence;\n	material.iridescenceIOR = iridescenceIOR;\n\n	#ifdef USE_IRIDESCENCEMAP\n\n		material.iridescence *= texture2D( iridescenceMap, vIridescenceMapUv ).r;\n\n	#endif\n\n	#ifdef USE_IRIDESCENCE_THICKNESSMAP\n\n		material.iridescenceThickness = (iridescenceThicknessMaximum - iridescenceThicknessMinimum) * texture2D( iridescenceThicknessMap, vIridescenceThicknessMapUv ).g + iridescenceThicknessMinimum;\n\n	#else\n\n		material.iridescenceThickness = iridescenceThicknessMaximum;\n\n	#endif\n\n#endif\n\n#ifdef USE_SHEEN\n\n	material.sheenColor = sheenColor;\n\n	#ifdef USE_SHEEN_COLORMAP\n\n		material.sheenColor *= texture2D( sheenColorMap, vSheenColorMapUv ).rgb;\n\n	#endif\n\n	material.sheenRoughness = clamp( sheenRoughness, 0.07, 1.0 );\n\n	#ifdef USE_SHEEN_ROUGHNESSMAP\n\n		material.sheenRoughness *= texture2D( sheenRoughnessMap, vSheenRoughnessMapUv ).a;\n\n	#endif\n\n#endif\n\n#ifdef USE_ANISOTROPY\n\n	#ifdef USE_ANISOTROPYMAP\n\n		mat2 anisotropyMat = mat2( anisotropyVector.x, anisotropyVector.y, - anisotropyVector.y, anisotropyVector.x );\n		vec3 anisotropyPolar = texture2D( anisotropyMap, vAnisotropyMapUv ).rgb;\n		vec2 anisotropyV = anisotropyMat * normalize( 2.0 * anisotropyPolar.rg - vec2( 1.0 ) ) * anisotropyPolar.b;\n\n	#else\n\n		vec2 anisotropyV = anisotropyVector;\n\n	#endif\n\n	material.anisotropy = length( anisotropyV );\n\n	if( material.anisotropy == 0.0 ) {\n		anisotropyV = vec2( 1.0, 0.0 );\n	} else {\n		anisotropyV /= material.anisotropy;\n		material.anisotropy = saturate( material.anisotropy );\n	}\n\n	// Roughness along the anisotropy bitangent is the material roughness, while the tangent roughness increases with anisotropy.\n	material.alphaT = mix( pow2( material.roughness ), 1.0, pow2( material.anisotropy ) );\n\n	material.anisotropyT = tbn[ 0 ] * anisotropyV.x + tbn[ 1 ] * anisotropyV.y;\n	material.anisotropyB = tbn[ 1 ] * anisotropyV.x - tbn[ 0 ] * anisotropyV.y;\n\n#endif\n",
+    "lights_physical_pars_fragment": `struct PhysicalMaterial {
+
+	vec3 diffuseColor;
+	float roughness;
+	vec3 specularColor;
+	float specularF90;
+	float dispersion;
+
+	#ifdef USE_CLEARCOAT
+		float clearcoat;
+		float clearcoatRoughness;
+		vec3 clearcoatF0;
+		float clearcoatF90;
+	#endif
+
+	#ifdef USE_IRIDESCENCE
+		float iridescence;
+		float iridescenceIOR;
+		float iridescenceThickness;
+		vec3 iridescenceFresnel;
+		vec3 iridescenceF0;
+	#endif
+
+	#ifdef USE_SHEEN
+		vec3 sheenColor;
+		float sheenRoughness;
+	#endif
+
+	#ifdef IOR
+		float ior;
+	#endif
+
+	#ifdef USE_TRANSMISSION
+		float transmission;
+		float transmissionAlpha;
+		float thickness;
+		float attenuationDistance;
+		vec3 attenuationColor;
+	#endif
+
+	#ifdef USE_ANISOTROPY
+		float anisotropy;
+		float alphaT;
+		vec3 anisotropyT;
+		vec3 anisotropyB;
+	#endif
+
+};
+
+// temporary
+vec3 clearcoatSpecularDirect = vec3( 0.0 );
+vec3 clearcoatSpecularIndirect = vec3( 0.0 );
+vec3 sheenSpecularDirect = vec3( 0.0 );
+vec3 sheenSpecularIndirect = vec3(0.0 );
+
+vec3 Schlick_to_F0( const in vec3 f, const in float f90, const in float dotVH ) {
+    float x = clamp( 1.0 - dotVH, 0.0, 1.0 );
+    float x2 = x * x;
+    float x5 = clamp( x * x2 * x2, 0.0, 0.9999 );
+
+    return ( f - vec3( f90 ) * x5 ) / ( 1.0 - x5 );
+}
+
+// Moving Frostbite to Physically Based Rendering 3.0 - page 12, listing 2
+// https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf
+float V_GGX_SmithCorrelated( const in float alpha, const in float dotNL, const in float dotNV ) {
+
+	float a2 = pow2( alpha );
+
+	float gv = dotNL * sqrt( a2 + ( 1.0 - a2 ) * pow2( dotNV ) );
+	float gl = dotNV * sqrt( a2 + ( 1.0 - a2 ) * pow2( dotNL ) );
+
+	return 0.5 / max( gv + gl, EPSILON );
+
+}
+
+// Microfacet Models for Refraction through Rough Surfaces - equation (33)
+// http://graphicrants.blogspot.com/2013/08/specular-brdf-reference.html
+// alpha is "roughness squared" in Disney’s reparameterization
+float D_GGX( const in float alpha, const in float dotNH ) {
+
+	float a2 = pow2( alpha );
+
+	float denom = pow2( dotNH ) * ( a2 - 1.0 ) + 1.0; // avoid alpha = 0 with dotNH = 1
+
+	return RECIPROCAL_PI * a2 / pow2( denom );
+
+}
+
+// https://google.github.io/filament/Filament.md.html#materialsystem/anisotropicmodel/anisotropicspecularbrdf
+#ifdef USE_ANISOTROPY
+
+	float V_GGX_SmithCorrelated_Anisotropic( const in float alphaT, const in float alphaB, const in float dotTV, const in float dotBV, const in float dotTL, const in float dotBL, const in float dotNV, const in float dotNL ) {
+
+		float gv = dotNL * length( vec3( alphaT * dotTV, alphaB * dotBV, dotNV ) );
+		float gl = dotNV * length( vec3( alphaT * dotTL, alphaB * dotBL, dotNL ) );
+		float v = 0.5 / ( gv + gl );
+
+		return saturate(v);
+
+	}
+
+	float D_GGX_Anisotropic( const in float alphaT, const in float alphaB, const in float dotNH, const in float dotTH, const in float dotBH ) {
+
+		float a2 = alphaT * alphaB;
+		highp vec3 v = vec3( alphaB * dotTH, alphaT * dotBH, a2 * dotNH );
+		highp float v2 = dot( v, v );
+		float w2 = a2 / v2;
+
+		return RECIPROCAL_PI * a2 * pow2 ( w2 );
+
+	}
+
+#endif
+
+#ifdef USE_CLEARCOAT
+
+	// GGX Distribution, Schlick Fresnel, GGX_SmithCorrelated Visibility
+	vec3 BRDF_GGX_Clearcoat( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material) {
+
+		vec3 f0 = material.clearcoatF0;
+		float f90 = material.clearcoatF90;
+		float roughness = material.clearcoatRoughness;
+
+		float alpha = pow2( roughness ); // UE4's roughness
+
+		vec3 halfDir = normalize( lightDir + viewDir );
+
+		float dotNL = saturate( dot( normal, lightDir ) );
+		float dotNV = saturate( dot( normal, viewDir ) );
+		float dotNH = saturate( dot( normal, halfDir ) );
+		float dotVH = saturate( dot( viewDir, halfDir ) );
+
+		vec3 F = F_Schlick( f0, f90, dotVH );
+
+		float V = V_GGX_SmithCorrelated( alpha, dotNL, dotNV );
+
+		float D = D_GGX( alpha, dotNH );
+
+		return F * ( V * D );
+
+	}
+
+#endif
+
+vec3 BRDF_GGX( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in PhysicalMaterial material ) {
+
+	vec3 f0 = material.specularColor;
+	float f90 = material.specularF90;
+	float roughness = material.roughness;
+
+	float alpha = pow2( roughness ); // UE4's roughness
+
+	vec3 halfDir = normalize( lightDir + viewDir );
+
+	float dotNL = saturate( dot( normal, lightDir ) );
+	float dotNV = saturate( dot( normal, viewDir ) );
+	float dotNH = saturate( dot( normal, halfDir ) );
+	float dotVH = saturate( dot( viewDir, halfDir ) );
+
+	vec3 F = F_Schlick( f0, f90, dotVH );
+
+	#ifdef USE_IRIDESCENCE
+
+		F = mix( F, material.iridescenceFresnel, material.iridescence );
+
+	#endif
+
+	#ifdef USE_ANISOTROPY
+
+		float dotTL = dot( material.anisotropyT, lightDir );
+		float dotTV = dot( material.anisotropyT, viewDir );
+		float dotTH = dot( material.anisotropyT, halfDir );
+		float dotBL = dot( material.anisotropyB, lightDir );
+		float dotBV = dot( material.anisotropyB, viewDir );
+		float dotBH = dot( material.anisotropyB, halfDir );
+
+		float V = V_GGX_SmithCorrelated_Anisotropic( material.alphaT, alpha, dotTV, dotBV, dotTL, dotBL, dotNV, dotNL );
+
+		float D = D_GGX_Anisotropic( material.alphaT, alpha, dotNH, dotTH, dotBH );
+
+	#else
+
+		float V = V_GGX_SmithCorrelated( alpha, dotNL, dotNV );
+
+		float D = D_GGX( alpha, dotNH );
+
+	#endif
+
+	return F * ( V * D );
+
+}
+
+// Rect Area Light
+
+// Real-Time Polygonal-Light Shading with Linearly Transformed Cosines
+// by Eric Heitz, Jonathan Dupuy, Stephen Hill and David Neubelt
+// code: https://github.com/selfshadow/ltc_code/
+
+vec2 LTC_Uv( const in vec3 N, const in vec3 V, const in float roughness ) {
+
+	const float LUT_SIZE = 64.0;
+	const float LUT_SCALE = ( LUT_SIZE - 1.0 ) / LUT_SIZE;
+	const float LUT_BIAS = 0.5 / LUT_SIZE;
+
+	float dotNV = saturate( dot( N, V ) );
+
+	// texture parameterized by sqrt( GGX alpha ) and sqrt( 1 - cos( theta ) )
+	vec2 uv = vec2( roughness, sqrt( 1.0 - dotNV ) );
+
+	uv = uv * LUT_SCALE + LUT_BIAS;
+
+	return uv;
+
+}
+
+float LTC_ClippedSphereFormFactor( const in vec3 f ) {
+
+	// Real-Time Area Lighting: a Journey from Research to Production (p.102)
+	// An approximation of the form factor of a horizon-clipped rectangle.
+
+	float l = length( f );
+
+	return max( ( l * l + f.z ) / ( l + 1.0 ), 0.0 );
+
+}
+
+vec3 LTC_EdgeVectorFormFactor( const in vec3 v1, const in vec3 v2 ) {
+
+	float x = dot( v1, v2 );
+
+	float y = abs( x );
+
+	// rational polynomial approximation to theta / sin( theta ) / 2PI
+	float a = 0.8543985 + ( 0.4965155 + 0.0145206 * y ) * y;
+	float b = 3.4175940 + ( 4.1616724 + y ) * y;
+	float v = a / b;
+
+	float theta_sintheta = ( x > 0.0 ) ? v : 0.5 * inversesqrt( max( 1.0 - x * x, 1e-7 ) ) - v;
+
+	return cross( v1, v2 ) * theta_sintheta;
+
+}
+
+vec3 LTC_Evaluate( const in vec3 N, const in vec3 V, const in vec3 P, const in mat3 mInv, const in vec3 rectCoords[ 4 ] ) {
+
+	// bail if point is on back side of plane of light
+	// assumes ccw winding order of light vertices
+	vec3 v1 = rectCoords[ 1 ] - rectCoords[ 0 ];
+	vec3 v2 = rectCoords[ 3 ] - rectCoords[ 0 ];
+	vec3 lightNormal = cross( v1, v2 );
+
+	if( dot( lightNormal, P - rectCoords[ 0 ] ) < 0.0 ) return vec3( 0.0 );
+
+	// construct orthonormal basis around N
+	vec3 T1, T2;
+	T1 = normalize( V - N * dot( V, N ) );
+	T2 = - cross( N, T1 ); // negated from paper; possibly due to a different handedness of world coordinate system
+
+	// compute transform
+	mat3 mat = mInv * transposeMat3( mat3( T1, T2, N ) );
+
+	// transform rect
+	vec3 coords[ 4 ];
+	coords[ 0 ] = mat * ( rectCoords[ 0 ] - P );
+	coords[ 1 ] = mat * ( rectCoords[ 1 ] - P );
+	coords[ 2 ] = mat * ( rectCoords[ 2 ] - P );
+	coords[ 3 ] = mat * ( rectCoords[ 3 ] - P );
+
+	// project rect onto sphere
+	coords[ 0 ] = normalize( coords[ 0 ] );
+	coords[ 1 ] = normalize( coords[ 1 ] );
+	coords[ 2 ] = normalize( coords[ 2 ] );
+	coords[ 3 ] = normalize( coords[ 3 ] );
+
+	// calculate vector form factor
+	vec3 vectorFormFactor = vec3( 0.0 );
+	vectorFormFactor += LTC_EdgeVectorFormFactor( coords[ 0 ], coords[ 1 ] );
+	vectorFormFactor += LTC_EdgeVectorFormFactor( coords[ 1 ], coords[ 2 ] );
+	vectorFormFactor += LTC_EdgeVectorFormFactor( coords[ 2 ], coords[ 3 ] );
+	vectorFormFactor += LTC_EdgeVectorFormFactor( coords[ 3 ], coords[ 0 ] );
+
+	// adjust for horizon clipping
+	float result = LTC_ClippedSphereFormFactor( vectorFormFactor );
+
+/*
+	// alternate method of adjusting for horizon clipping (see reference)
+	// refactoring required
+	float len = length( vectorFormFactor );
+	float z = vectorFormFactor.z / len;
+
+	const float LUT_SIZE = 64.0;
+	const float LUT_SCALE = ( LUT_SIZE - 1.0 ) / LUT_SIZE;
+	const float LUT_BIAS = 0.5 / LUT_SIZE;
+
+	// tabulated horizon-clipped sphere, apparently...
+	vec2 uv = vec2( z * 0.5 + 0.5, len );
+	uv = uv * LUT_SCALE + LUT_BIAS;
+
+	float scale = texture2D( ltc_2, uv ).w;
+
+	float result = len * scale;
+*/
+
+	return vec3( result );
+
+}
+
+// End Rect Area Light
+
+#if defined( USE_SHEEN )
+
+// https://github.com/google/filament/blob/master/shaders/src/brdf.fs
+float D_Charlie( float roughness, float dotNH ) {
+
+	float alpha = pow2( roughness );
+
+	// Estevez and Kulla 2017, "Production Friendly Microfacet Sheen BRDF"
+	float invAlpha = 1.0 / alpha;
+	float cos2h = dotNH * dotNH;
+	float sin2h = max( 1.0 - cos2h, 0.0078125 ); // 2^(-14/2), so sin2h^2 > 0 in fp16
+
+	return ( 2.0 + invAlpha ) * pow( sin2h, invAlpha * 0.5 ) / ( 2.0 * PI );
+
+}
+
+// https://github.com/google/filament/blob/master/shaders/src/brdf.fs
+float V_Neubelt( float dotNV, float dotNL ) {
+
+	// Neubelt and Pettineo 2013, "Crafting a Next-gen Material Pipeline for The Order: 1886"
+	return saturate( 1.0 / ( 4.0 * ( dotNL + dotNV - dotNL * dotNV ) ) );
+
+}
+
+vec3 BRDF_Sheen( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, vec3 sheenColor, const in float sheenRoughness ) {
+
+	vec3 halfDir = normalize( lightDir + viewDir );
+
+	float dotNL = saturate( dot( normal, lightDir ) );
+	float dotNV = saturate( dot( normal, viewDir ) );
+	float dotNH = saturate( dot( normal, halfDir ) );
+
+	float D = D_Charlie( sheenRoughness, dotNH );
+	float V = V_Neubelt( dotNV, dotNL );
+
+	return sheenColor * ( D * V );
+
+}
+
+#endif
+
+// This is a curve-fit approximation to the "Charlie sheen" BRDF integrated over the hemisphere from
+// Estevez and Kulla 2017, "Production Friendly Microfacet Sheen BRDF". The analysis can be found
+// in the Sheen section of https://drive.google.com/file/d/1T0D1VSyR4AllqIJTQAraEIzjlb5h4FKH/view?usp=sharing
+float IBLSheenBRDF( const in vec3 normal, const in vec3 viewDir, const in float roughness ) {
+
+	float dotNV = saturate( dot( normal, viewDir ) );
+
+	float r2 = roughness * roughness;
+
+	float a = roughness < 0.25 ? -339.2 * r2 + 161.4 * roughness - 25.9 : -8.48 * r2 + 14.3 * roughness - 9.95;
+
+	float b = roughness < 0.25 ? 44.0 * r2 - 23.7 * roughness + 3.26 : 1.97 * r2 - 3.27 * roughness + 0.72;
+
+	float DG = exp( a * dotNV + b ) + ( roughness < 0.25 ? 0.0 : 0.1 * ( roughness - 0.25 ) );
+
+	return saturate( DG * RECIPROCAL_PI );
+
+}
+
+// Analytical approximation of the DFG LUT, one half of the
+// split-sum approximation used in indirect specular lighting.
+// via 'environmentBRDF' from "Physically Based Shading on Mobile"
+// https://www.unrealengine.com/blog/physically-based-shading-on-mobile
+vec2 DFGApprox( const in vec3 normal, const in vec3 viewDir, const in float roughness ) {
+
+	float dotNV = saturate( dot( normal, viewDir ) );
+
+	const vec4 c0 = vec4( - 1, - 0.0275, - 0.572, 0.022 );
+
+	const vec4 c1 = vec4( 1, 0.0425, 1.04, - 0.04 );
+
+	vec4 r = roughness * c0 + c1;
+
+	float a004 = min( r.x * r.x, exp2( - 9.28 * dotNV ) ) * r.x + r.y;
+
+	vec2 fab = vec2( - 1.04, 1.04 ) * a004 + r.zw;
+
+	return fab;
+
+}
+
+vec3 EnvironmentBRDF( const in vec3 normal, const in vec3 viewDir, const in vec3 specularColor, const in float specularF90, const in float roughness ) {
+
+	vec2 fab = DFGApprox( normal, viewDir, roughness );
+
+	return specularColor * fab.x + specularF90 * fab.y;
+
+}
+
+// Fdez-Agüera's "Multiple-Scattering Microfacet Model for Real-Time Image Based Lighting"
+// Approximates multiscattering in order to preserve energy.
+// http://www.jcgt.org/published/0008/01/03/
+#ifdef USE_IRIDESCENCE
+void computeMultiscatteringIridescence( const in vec3 normal, const in vec3 viewDir, const in vec3 specularColor, const in float specularF90, const in float iridescence, const in vec3 iridescenceF0, const in float roughness, inout vec3 singleScatter, inout vec3 multiScatter ) {
+#else
+void computeMultiscattering( const in vec3 normal, const in vec3 viewDir, const in vec3 specularColor, const in float specularF90, const in float roughness, inout vec3 singleScatter, inout vec3 multiScatter ) {
+#endif
+
+	vec2 fab = DFGApprox( normal, viewDir, roughness );
+
+	#ifdef USE_IRIDESCENCE
+
+		vec3 Fr = mix( specularColor, iridescenceF0, iridescence );
+
+	#else
+
+		vec3 Fr = specularColor;
+
+	#endif
+
+	vec3 FssEss = Fr * fab.x + specularF90 * fab.y;
+
+	float Ess = fab.x + fab.y;
+	float Ems = 1.0 - Ess;
+
+	vec3 Favg = Fr + ( 1.0 - Fr ) * 0.047619; // 1/21
+	vec3 Fms = FssEss * Favg / ( 1.0 - Ems * Favg );
+
+	singleScatter += FssEss;
+	multiScatter += Fms * Ems;
+
+}
+
+#if NUM_RECT_AREA_LIGHTS > 0
+
+	void RE_Direct_RectArea_Physical( const in RectAreaLight rectAreaLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+
+		vec3 normal = geometryNormal;
+		vec3 viewDir = geometryViewDir;
+		vec3 position = geometryPosition;
+		vec3 lightPos = rectAreaLight.position;
+		vec3 halfWidth = rectAreaLight.halfWidth;
+		vec3 halfHeight = rectAreaLight.halfHeight;
+		vec3 lightColor = rectAreaLight.color;
+		float roughness = material.roughness;
+
+		vec3 rectCoords[ 4 ];
+		rectCoords[ 0 ] = lightPos + halfWidth - halfHeight; // counterclockwise; light shines in local neg z direction
+		rectCoords[ 1 ] = lightPos - halfWidth - halfHeight;
+		rectCoords[ 2 ] = lightPos - halfWidth + halfHeight;
+		rectCoords[ 3 ] = lightPos + halfWidth + halfHeight;
+
+		vec2 uv = LTC_Uv( normal, viewDir, roughness );
+
+		vec4 t1 = texture2D( ltc_1, uv );
+		vec4 t2 = texture2D( ltc_2, uv );
+
+		mat3 mInv = mat3(
+			vec3( t1.x, 0, t1.y ),
+			vec3(    0, 1,    0 ),
+			vec3( t1.z, 0, t1.w )
+		);
+
+		// LTC Fresnel Approximation by Stephen Hill
+		// http://blog.selfshadow.com/publications/s2016-advances/s2016_ltc_fresnel.pdf
+		vec3 fresnel = ( material.specularColor * t2.x + ( vec3( 1.0 ) - material.specularColor ) * t2.y );
+
+		reflectedLight.directSpecular += lightColor * fresnel * LTC_Evaluate( normal, viewDir, position, mInv, rectCoords );
+
+		reflectedLight.directDiffuse += lightColor * material.diffuseColor * LTC_Evaluate( normal, viewDir, position, mat3( 1.0 ), rectCoords );
+
+	}
+
+#endif
+
+void RE_Direct_Physical( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+
+	float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
+
+	vec3 irradiance = dotNL * directLight.color;
+
+	#ifdef USE_CLEARCOAT
+
+		float dotNLcc = saturate( dot( geometryClearcoatNormal, directLight.direction ) );
+
+		vec3 ccIrradiance = dotNLcc * directLight.color;
+
+		clearcoatSpecularDirect += ccIrradiance * BRDF_GGX_Clearcoat( directLight.direction, geometryViewDir, geometryClearcoatNormal, material );
+
+	#endif
+
+	#ifdef USE_SHEEN
+
+		sheenSpecularDirect += irradiance * BRDF_Sheen( directLight.direction, geometryViewDir, geometryNormal, material.sheenColor, material.sheenRoughness );
+
+	#endif
+
+	reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );
+
+	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
+}
+
+void RE_IndirectDiffuse_Physical( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+
+	reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
+
+}
+
+void RE_IndirectSpecular_Physical( const in vec3 radiance, const in vec3 irradiance, const in vec3 clearcoatRadiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight) {
+
+	#ifdef USE_CLEARCOAT
+
+		clearcoatSpecularIndirect += clearcoatRadiance * EnvironmentBRDF( geometryClearcoatNormal, geometryViewDir, material.clearcoatF0, material.clearcoatF90, material.clearcoatRoughness );
+
+	#endif
+
+	#ifdef USE_SHEEN
+
+		sheenSpecularIndirect += irradiance * material.sheenColor * IBLSheenBRDF( geometryNormal, geometryViewDir, material.sheenRoughness );
+
+	#endif
+
+	// Both indirect specular and indirect diffuse light accumulate here
+
+	vec3 singleScattering = vec3( 0.0 );
+	vec3 multiScattering = vec3( 0.0 );
+	vec3 cosineWeightedIrradiance = irradiance * RECIPROCAL_PI;
+
+	#ifdef USE_IRIDESCENCE
+
+		computeMultiscatteringIridescence( geometryNormal, geometryViewDir, material.specularColor, material.specularF90, material.iridescence, material.iridescenceFresnel, material.roughness, singleScattering, multiScattering );
+
+	#else
+
+		computeMultiscattering( geometryNormal, geometryViewDir, material.specularColor, material.specularF90, material.roughness, singleScattering, multiScattering );
+
+	#endif
+
+	vec3 totalScattering = singleScattering + multiScattering;
+	vec3 diffuse = material.diffuseColor * ( 1.0 - max( max( totalScattering.r, totalScattering.g ), totalScattering.b ) );
+
+	reflectedLight.indirectSpecular += radiance * singleScattering;
+	reflectedLight.indirectSpecular += multiScattering * cosineWeightedIrradiance;
+
+	reflectedLight.indirectDiffuse += diffuse * cosineWeightedIrradiance;
+
+}
+
+#define RE_Direct				RE_Direct_Physical
+#define RE_Direct_RectArea		RE_Direct_RectArea_Physical
+#define RE_IndirectDiffuse		RE_IndirectDiffuse_Physical
+#define RE_IndirectSpecular		RE_IndirectSpecular_Physical
+
+// ref: https://seblagarde.files.wordpress.com/2015/07/course_notes_moving_frostbite_to_pbr_v32.pdf
+float computeSpecularOcclusion( const in float dotNV, const in float ambientOcclusion, const in float roughness ) {
+
+	return saturate( pow( dotNV + ambientOcclusion, exp2( - 16.0 * roughness - 1.0 ) ) - 1.0 + ambientOcclusion );
+
+}
+`,
+    "lights_toon_fragment": "ToonMaterial material;\nmaterial.diffuseColor = diffuseColor.rgb;\n",
+    "lights_toon_pars_fragment": "varying vec3 vViewPosition;\n\nstruct ToonMaterial {\n\n	vec3 diffuseColor;\n\n};\n\nvoid RE_Direct_Toon( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight ) {\n\n	vec3 irradiance = getGradientIrradiance( geometryNormal, directLight.direction ) * directLight.color;\n\n	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n}\n\nvoid RE_IndirectDiffuse_Toon( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight ) {\n\n	reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );\n\n}\n\n#define RE_Direct				RE_Direct_Toon\n#define RE_IndirectDiffuse		RE_IndirectDiffuse_Toon\n",
+    "logdepthbuf_fragment": "#if defined( USE_LOGARITHMIC_DEPTH_BUFFER )\n\n	// Doing a strict comparison with == 1.0 can cause noise artifacts\n	// on some platforms. See issue #17623.\n	gl_FragDepth = vIsPerspective == 0.0 ? gl_FragCoord.z : log2( vFragDepth ) * logDepthBufFC * 0.5;\n\n#endif\n",
+    "logdepthbuf_pars_fragment": "#if defined( USE_LOGARITHMIC_DEPTH_BUFFER )\n\n	uniform float logDepthBufFC;\n	varying float vFragDepth;\n	varying float vIsPerspective;\n\n#endif\n",
+    "logdepthbuf_pars_vertex": "#ifdef USE_LOGARITHMIC_DEPTH_BUFFER\n\n	varying float vFragDepth;\n	varying float vIsPerspective;\n\n#endif\n",
+    "logdepthbuf_vertex": "#ifdef USE_LOGARITHMIC_DEPTH_BUFFER\n\n	vFragDepth = 1.0 + gl_Position.w;\n	vIsPerspective = float( isPerspectiveMatrix( projectionMatrix ) );\n\n#endif\n",
+    "map_fragment": "#ifdef USE_MAP\n\n	vec4 sampledDiffuseColor = texture2D( map, vMapUv );\n\n	#ifdef DECODE_VIDEO_TEXTURE\n\n		// use inline sRGB decode until browsers properly support SRGB8_ALPHA8 with video textures (#26516)\n\n		sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );\n\n	#endif\n\n	diffuseColor *= sampledDiffuseColor;\n\n#endif\n",
+    "map_pars_fragment": "#ifdef USE_MAP\n\n	uniform sampler2D map;\n\n#endif\n",
+    "map_particle_fragment": "#if defined( USE_MAP ) || defined( USE_ALPHAMAP )\n\n	#if defined( USE_POINTS_UV )\n\n		vec2 uv = vUv;\n\n	#else\n\n		vec2 uv = ( uvTransform * vec3( gl_PointCoord.x, 1.0 - gl_PointCoord.y, 1 ) ).xy;\n\n	#endif\n\n#endif\n\n#ifdef USE_MAP\n\n	diffuseColor *= texture2D( map, uv );\n\n#endif\n\n#ifdef USE_ALPHAMAP\n\n	diffuseColor.a *= texture2D( alphaMap, uv ).g;\n\n#endif\n",
+    "map_particle_pars_fragment": "#if defined( USE_POINTS_UV )\n\n	varying vec2 vUv;\n\n#else\n\n	#if defined( USE_MAP ) || defined( USE_ALPHAMAP )\n\n		uniform mat3 uvTransform;\n\n	#endif\n\n#endif\n\n#ifdef USE_MAP\n\n	uniform sampler2D map;\n\n#endif\n\n#ifdef USE_ALPHAMAP\n\n	uniform sampler2D alphaMap;\n\n#endif\n",
+    "metalnessmap_fragment": "float metalnessFactor = metalness;\n\n#ifdef USE_METALNESSMAP\n\n	vec4 texelMetalness = texture2D( metalnessMap, vMetalnessMapUv );\n\n	// reads channel B, compatible with a combined OcclusionRoughnessMetallic (RGB) texture\n	metalnessFactor *= texelMetalness.b;\n\n#endif\n",
+    "metalnessmap_pars_fragment": "#ifdef USE_METALNESSMAP\n\n	uniform sampler2D metalnessMap;\n\n#endif\n",
+    "morphcolor_vertex": "#if defined( USE_MORPHCOLORS )\n\n	// morphTargetBaseInfluence is set based on BufferGeometry.morphTargetsRelative value:\n	// When morphTargetsRelative is false, this is set to 1 - sum(influences); this results in normal = sum((target - base) * influence)\n	// When morphTargetsRelative is true, this is set to 1; as a result, all morph targets are simply added to the base after weighting\n	vColor *= morphTargetBaseInfluence;\n\n	for ( int i = 0; i < MORPHTARGETS_COUNT; i ++ ) {\n\n		#if defined( USE_COLOR_ALPHA )\n\n			if ( morphTargetInfluences[ i ] != 0.0 ) vColor += getMorph( gl_VertexID, i, 2 ) * morphTargetInfluences[ i ];\n\n		#elif defined( USE_COLOR )\n\n			if ( morphTargetInfluences[ i ] != 0.0 ) vColor += getMorph( gl_VertexID, i, 2 ).rgb * morphTargetInfluences[ i ];\n\n		#endif\n\n	}\n\n#endif\n",
+    "morphinstance_vertex": "#ifdef USE_INSTANCING_MORPH\n\n	float morphTargetInfluences[ MORPHTARGETS_COUNT ];\n\n	float morphTargetBaseInfluence = texelFetch( morphTexture, ivec2( 0, gl_InstanceID ), 0 ).r;\n\n	for ( int i = 0; i < MORPHTARGETS_COUNT; i ++ ) {\n\n		morphTargetInfluences[i] =  texelFetch( morphTexture, ivec2( i + 1, gl_InstanceID ), 0 ).r;\n\n	}\n#endif\n",
+    "morphnormal_vertex": "#ifdef USE_MORPHNORMALS\n\n	// morphTargetBaseInfluence is set based on BufferGeometry.morphTargetsRelative value:\n	// When morphTargetsRelative is false, this is set to 1 - sum(influences); this results in normal = sum((target - base) * influence)\n	// When morphTargetsRelative is true, this is set to 1; as a result, all morph targets are simply added to the base after weighting\n	objectNormal *= morphTargetBaseInfluence;\n\n	for ( int i = 0; i < MORPHTARGETS_COUNT; i ++ ) {\n\n		if ( morphTargetInfluences[ i ] != 0.0 ) objectNormal += getMorph( gl_VertexID, i, 1 ).xyz * morphTargetInfluences[ i ];\n\n	}\n\n#endif\n",
+    "morphtarget_pars_vertex": "#ifdef USE_MORPHTARGETS\n\n	#ifndef USE_INSTANCING_MORPH\n\n		uniform float morphTargetBaseInfluence;\n		uniform float morphTargetInfluences[ MORPHTARGETS_COUNT ];\n\n	#endif\n\n	uniform sampler2DArray morphTargetsTexture;\n	uniform ivec2 morphTargetsTextureSize;\n\n	vec4 getMorph( const in int vertexIndex, const in int morphTargetIndex, const in int offset ) {\n\n		int texelIndex = vertexIndex * MORPHTARGETS_TEXTURE_STRIDE + offset;\n		int y = texelIndex / morphTargetsTextureSize.x;\n		int x = texelIndex - y * morphTargetsTextureSize.x;\n\n		ivec3 morphUV = ivec3( x, y, morphTargetIndex );\n		return texelFetch( morphTargetsTexture, morphUV, 0 );\n\n	}\n\n#endif\n",
+    "morphtarget_vertex": "#ifdef USE_MORPHTARGETS\n\n	// morphTargetBaseInfluence is set based on BufferGeometry.morphTargetsRelative value:\n	// When morphTargetsRelative is false, this is set to 1 - sum(influences); this results in position = sum((target - base) * influence)\n	// When morphTargetsRelative is true, this is set to 1; as a result, all morph targets are simply added to the base after weighting\n	transformed *= morphTargetBaseInfluence;\n\n	for ( int i = 0; i < MORPHTARGETS_COUNT; i ++ ) {\n\n		if ( morphTargetInfluences[ i ] != 0.0 ) transformed += getMorph( gl_VertexID, i, 0 ).xyz * morphTargetInfluences[ i ];\n\n	}\n\n#endif\n",
+    "normal_fragment_begin": "float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;\n\n#ifdef FLAT_SHADED\n\n	vec3 fdx = dFdx( vViewPosition );\n	vec3 fdy = dFdy( vViewPosition );\n	vec3 normal = normalize( cross( fdx, fdy ) );\n\n#else\n\n	vec3 normal = normalize( vNormal );\n\n	#ifdef DOUBLE_SIDED\n\n		normal *= faceDirection;\n\n	#endif\n\n#endif\n\n#if defined( USE_NORMALMAP_TANGENTSPACE ) || defined( USE_CLEARCOAT_NORMALMAP ) || defined( USE_ANISOTROPY )\n\n	#ifdef USE_TANGENT\n\n		mat3 tbn = mat3( normalize( vTangent ), normalize( vBitangent ), normal );\n\n	#else\n\n		mat3 tbn = getTangentFrame( - vViewPosition, normal,\n		#if defined( USE_NORMALMAP )\n			vNormalMapUv\n		#elif defined( USE_CLEARCOAT_NORMALMAP )\n			vClearcoatNormalMapUv\n		#else\n			vUv\n		#endif\n		);\n\n	#endif\n\n	#if defined( DOUBLE_SIDED ) && ! defined( FLAT_SHADED )\n\n		tbn[0] *= faceDirection;\n		tbn[1] *= faceDirection;\n\n	#endif\n\n#endif\n\n#ifdef USE_CLEARCOAT_NORMALMAP\n\n	#ifdef USE_TANGENT\n\n		mat3 tbn2 = mat3( normalize( vTangent ), normalize( vBitangent ), normal );\n\n	#else\n\n		mat3 tbn2 = getTangentFrame( - vViewPosition, normal, vClearcoatNormalMapUv );\n\n	#endif\n\n	#if defined( DOUBLE_SIDED ) && ! defined( FLAT_SHADED )\n\n		tbn2[0] *= faceDirection;\n		tbn2[1] *= faceDirection;\n\n	#endif\n\n#endif\n\n// non perturbed normal for clearcoat among others\n\nvec3 nonPerturbedNormal = normal;\n",
+    "normal_fragment_maps": "#ifdef USE_NORMALMAP_OBJECTSPACE\n\n	normal = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0; // overrides both flatShading and attribute normals\n\n	#ifdef FLIP_SIDED\n\n		normal = - normal;\n\n	#endif\n\n	#ifdef DOUBLE_SIDED\n\n		normal = normal * faceDirection;\n\n	#endif\n\n	normal = normalize( normalMatrix * normal );\n\n#elif defined( USE_NORMALMAP_TANGENTSPACE )\n\n	vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;\n	mapN.xy *= normalScale;\n\n	normal = normalize( tbn * mapN );\n\n#elif defined( USE_BUMPMAP )\n\n	normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );\n\n#endif\n",
+    "normal_pars_fragment": "#ifndef FLAT_SHADED\n\n	varying vec3 vNormal;\n\n	#ifdef USE_TANGENT\n\n		varying vec3 vTangent;\n		varying vec3 vBitangent;\n\n	#endif\n\n#endif\n",
+    "normal_pars_vertex": "#ifndef FLAT_SHADED\n\n	varying vec3 vNormal;\n\n	#ifdef USE_TANGENT\n\n		varying vec3 vTangent;\n		varying vec3 vBitangent;\n\n	#endif\n\n#endif\n",
+    "normal_vertex": "#ifndef FLAT_SHADED // normal is computed with derivatives when FLAT_SHADED\n\n	vNormal = normalize( transformedNormal );\n\n	#ifdef USE_TANGENT\n\n		vTangent = normalize( transformedTangent );\n		vBitangent = normalize( cross( vNormal, vTangent ) * tangent.w );\n\n	#endif\n\n#endif\n",
+    "normalmap_pars_fragment": "#ifdef USE_NORMALMAP\n\n	uniform sampler2D normalMap;\n	uniform vec2 normalScale;\n\n#endif\n\n#ifdef USE_NORMALMAP_OBJECTSPACE\n\n	uniform mat3 normalMatrix;\n\n#endif\n\n#if ! defined ( USE_TANGENT ) && ( defined ( USE_NORMALMAP_TANGENTSPACE ) || defined ( USE_CLEARCOAT_NORMALMAP ) || defined( USE_ANISOTROPY ) )\n\n	// Normal Mapping Without Precomputed Tangents\n	// http://www.thetenthplanet.de/archives/1180\n\n	mat3 getTangentFrame( vec3 eye_pos, vec3 surf_norm, vec2 uv ) {\n\n		vec3 q0 = dFdx( eye_pos.xyz );\n		vec3 q1 = dFdy( eye_pos.xyz );\n		vec2 st0 = dFdx( uv.st );\n		vec2 st1 = dFdy( uv.st );\n\n		vec3 N = surf_norm; // normalized\n\n		vec3 q1perp = cross( q1, N );\n		vec3 q0perp = cross( N, q0 );\n\n		vec3 T = q1perp * st0.x + q0perp * st1.x;\n		vec3 B = q1perp * st0.y + q0perp * st1.y;\n\n		float det = max( dot( T, T ), dot( B, B ) );\n		float scale = ( det == 0.0 ) ? 0.0 : inversesqrt( det );\n\n		return mat3( T * scale, B * scale, N );\n\n	}\n\n#endif\n",
+    "opaque_fragment": "#ifdef OPAQUE\ndiffuseColor.a = 1.0;\n#endif\n\n#ifdef USE_TRANSMISSION\ndiffuseColor.a *= material.transmissionAlpha;\n#endif\n\ngl_FragColor = vec4( outgoingLight, diffuseColor.a );\n",
+    "packing": "vec3 packNormalToRGB( const in vec3 normal ) {\n	return normalize( normal ) * 0.5 + 0.5;\n}\n\nvec3 unpackRGBToNormal( const in vec3 rgb ) {\n	return 2.0 * rgb.xyz - 1.0;\n}\n\nconst float PackUpscale = 256. / 255.; // fraction -> 0..1 (including 1)\nconst float UnpackDownscale = 255. / 256.; // 0..1 -> fraction (excluding 1)\nconst float ShiftRight8 = 1. / 256.;\nconst float Inv255 = 1. / 255.;\n\nconst vec4 PackFactors = vec4( 1.0, 256.0, 256.0 * 256.0, 256.0 * 256.0 * 256.0 );\n\nconst vec2 UnpackFactors2 = vec2( UnpackDownscale, 1.0 / PackFactors.g );\nconst vec3 UnpackFactors3 = vec3( UnpackDownscale / PackFactors.rg, 1.0 / PackFactors.b );\nconst vec4 UnpackFactors4 = vec4( UnpackDownscale / PackFactors.rgb, 1.0 / PackFactors.a );\n\nvec4 packDepthToRGBA( const in float v ) {\n	if( v <= 0.0 )\n		return vec4( 0., 0., 0., 0. );\n	if( v >= 1.0 )\n		return vec4( 1., 1., 1., 1. );\n	float vuf;\n	float af = modf( v * PackFactors.a, vuf );\n	float bf = modf( vuf * ShiftRight8, vuf );\n	float gf = modf( vuf * ShiftRight8, vuf );\n	return vec4( vuf * Inv255, gf * PackUpscale, bf * PackUpscale, af );\n}\n\nvec3 packDepthToRGB( const in float v ) {\n	if( v <= 0.0 )\n		return vec3( 0., 0., 0. );\n	if( v >= 1.0 )\n		return vec3( 1., 1., 1. );\n	float vuf;\n	float bf = modf( v * PackFactors.b, vuf );\n	float gf = modf( vuf * ShiftRight8, vuf );\n	// the 0.9999 tweak is unimportant, very tiny empirical improvement\n	// return vec3( vuf * Inv255, gf * PackUpscale, bf * 0.9999 );\n	return vec3( vuf * Inv255, gf * PackUpscale, bf );\n}\n\nvec2 packDepthToRG( const in float v ) {\n	if( v <= 0.0 )\n		return vec2( 0., 0. );\n	if( v >= 1.0 )\n		return vec2( 1., 1. );\n	float vuf;\n	float gf = modf( v * 256., vuf );\n	return vec2( vuf * Inv255, gf );\n}\n\nfloat unpackRGBAToDepth( const in vec4 v ) {\n	return dot( v, UnpackFactors4 );\n}\n\nfloat unpackRGBToDepth( const in vec3 v ) {\n	return dot( v, UnpackFactors3 );\n}\n\nfloat unpackRGToDepth( const in vec2 v ) {\n	return v.r * UnpackFactors2.r + v.g * UnpackFactors2.g;\n}\n\nvec4 pack2HalfToRGBA( const in vec2 v ) {\n	vec4 r = vec4( v.x, fract( v.x * 255.0 ), v.y, fract( v.y * 255.0 ) );\n	return vec4( r.x - r.y / 255.0, r.y, r.z - r.w / 255.0, r.w );\n}\n\nvec2 unpackRGBATo2Half( const in vec4 v ) {\n	return vec2( v.x + ( v.y / 255.0 ), v.z + ( v.w / 255.0 ) );\n}\n\n// NOTE: viewZ, the z-coordinate in camera space, is negative for points in front of the camera\n\nfloat viewZToOrthographicDepth( const in float viewZ, const in float near, const in float far ) {\n	// -near maps to 0; -far maps to 1\n	return ( viewZ + near ) / ( near - far );\n}\n\nfloat orthographicDepthToViewZ( const in float depth, const in float near, const in float far ) {\n	// maps orthographic depth in [ 0, 1 ] to viewZ\n	return depth * ( near - far ) - near;\n}\n\n// NOTE: https://twitter.com/gonnavis/status/1377183786949959682\n\nfloat viewZToPerspectiveDepth( const in float viewZ, const in float near, const in float far ) {\n	// -near maps to 0; -far maps to 1\n	return ( ( near + viewZ ) * far ) / ( ( far - near ) * viewZ );\n}\n\nfloat perspectiveDepthToViewZ( const in float depth, const in float near, const in float far ) {\n	// maps perspective depth in [ 0, 1 ] to viewZ\n	return ( near * far ) / ( ( far - near ) * depth - far );\n}\n",
+    "premultiplied_alpha_fragment": "#ifdef PREMULTIPLIED_ALPHA\n\n	// Get normal blending with premultipled, use with CustomBlending, OneFactor, OneMinusSrcAlphaFactor, AddEquation.\n	gl_FragColor.rgb *= gl_FragColor.a;\n\n#endif\n",
+    "project_vertex": "vec4 mvPosition = vec4( transformed, 1.0 );\n\n#ifdef USE_BATCHING\n\n	mvPosition = batchingMatrix * mvPosition;\n\n#endif\n\n#ifdef USE_INSTANCING\n\n	mvPosition = instanceMatrix * mvPosition;\n\n#endif\n\nmvPosition = modelViewMatrix * mvPosition;\n\ngl_Position = projectionMatrix * mvPosition;\n",
+    "roughnessmap_fragment": "float roughnessFactor = roughness;\n\n#ifdef USE_ROUGHNESSMAP\n\n	vec4 texelRoughness = texture2D( roughnessMap, vRoughnessMapUv );\n\n	// reads channel G, compatible with a combined OcclusionRoughnessMetallic (RGB) texture\n	roughnessFactor *= texelRoughness.g;\n\n#endif\n",
+    "roughnessmap_pars_fragment": "#ifdef USE_ROUGHNESSMAP\n\n	uniform sampler2D roughnessMap;\n\n#endif\n",
+    "shadowmap_pars_fragment": "#if NUM_SPOT_LIGHT_COORDS > 0\n\n	varying vec4 vSpotLightCoord[ NUM_SPOT_LIGHT_COORDS ];\n\n#endif\n\n#if NUM_SPOT_LIGHT_MAPS > 0\n\n	uniform sampler2D spotLightMap[ NUM_SPOT_LIGHT_MAPS ];\n\n#endif\n\n#ifdef USE_SHADOWMAP\n\n	#if NUM_DIR_LIGHT_SHADOWS > 0\n\n		uniform sampler2D directionalShadowMap[ NUM_DIR_LIGHT_SHADOWS ];\n		varying vec4 vDirectionalShadowCoord[ NUM_DIR_LIGHT_SHADOWS ];\n\n		struct DirectionalLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n		};\n\n		uniform DirectionalLightShadow directionalLightShadows[ NUM_DIR_LIGHT_SHADOWS ];\n\n	#endif\n\n	#if NUM_SPOT_LIGHT_SHADOWS > 0\n\n		uniform sampler2D spotShadowMap[ NUM_SPOT_LIGHT_SHADOWS ];\n\n		struct SpotLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n		};\n\n		uniform SpotLightShadow spotLightShadows[ NUM_SPOT_LIGHT_SHADOWS ];\n\n	#endif\n\n	#if NUM_POINT_LIGHT_SHADOWS > 0\n\n		uniform sampler2D pointShadowMap[ NUM_POINT_LIGHT_SHADOWS ];\n		varying vec4 vPointShadowCoord[ NUM_POINT_LIGHT_SHADOWS ];\n\n		struct PointLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n			float shadowCameraNear;\n			float shadowCameraFar;\n		};\n\n		uniform PointLightShadow pointLightShadows[ NUM_POINT_LIGHT_SHADOWS ];\n\n	#endif\n\n	float texture2DCompare( sampler2D depths, vec2 uv, float compare ) {\n\n		float depth = unpackRGBAToDepth( texture2D( depths, uv ) );\n\n		#ifdef USE_REVERSED_DEPTH_BUFFER\n\n			return step( depth, compare );\n\n		#else\n\n			return step( compare, depth );\n\n		#endif\n\n	}\n\n	vec2 texture2DDistribution( sampler2D shadow, vec2 uv ) {\n\n		return unpackRGBATo2Half( texture2D( shadow, uv ) );\n\n	}\n\n	float VSMShadow( sampler2D shadow, vec2 uv, float compare ) {\n\n		float occlusion = 1.0;\n\n		vec2 distribution = texture2DDistribution( shadow, uv );\n\n		#ifdef USE_REVERSED_DEPTH_BUFFER\n\n			float hard_shadow = step( distribution.x, compare );\n\n		#else\n\n			float hard_shadow = step( compare, distribution.x );\n\n		#endif\n\n		if ( hard_shadow != 1.0 ) {\n\n			float distance = compare - distribution.x;\n			float variance = max( 0.00000, distribution.y * distribution.y );\n			float softness_probability = variance / (variance + distance * distance ); // Chebeyshevs inequality\n			softness_probability = clamp( ( softness_probability - 0.3 ) / ( 0.95 - 0.3 ), 0.0, 1.0 ); // 0.3 reduces light bleed\n			occlusion = clamp( max( hard_shadow, softness_probability ), 0.0, 1.0 );\n\n		}\n		return occlusion;\n\n	}\n\n	float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {\n\n		float shadow = 1.0;\n\n		shadowCoord.xyz /= shadowCoord.w;\n		shadowCoord.z += shadowBias;\n\n		bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;\n		bool frustumTest = inFrustum && shadowCoord.z <= 1.0;\n\n		if ( frustumTest ) {\n\n		#if defined( SHADOWMAP_TYPE_PCF )\n\n			vec2 texelSize = vec2( 1.0 ) / shadowMapSize;\n\n			float dx0 = - texelSize.x * shadowRadius;\n			float dy0 = - texelSize.y * shadowRadius;\n			float dx1 = + texelSize.x * shadowRadius;\n			float dy1 = + texelSize.y * shadowRadius;\n			float dx2 = dx0 / 2.0;\n			float dy2 = dy0 / 2.0;\n			float dx3 = dx1 / 2.0;\n			float dy3 = dy1 / 2.0;\n\n			shadow = (\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx0, dy0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, dy0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx1, dy0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx2, dy2 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, dy2 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx3, dy2 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx0, 0.0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx2, 0.0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy, shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx3, 0.0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx1, 0.0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx2, dy3 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, dy3 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx3, dy3 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx0, dy1 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( 0.0, dy1 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, shadowCoord.xy + vec2( dx1, dy1 ), shadowCoord.z )\n			) * ( 1.0 / 17.0 );\n\n		#elif defined( SHADOWMAP_TYPE_PCF_SOFT )\n\n			vec2 texelSize = vec2( 1.0 ) / shadowMapSize;\n			float dx = texelSize.x;\n			float dy = texelSize.y;\n\n			vec2 uv = shadowCoord.xy;\n			vec2 f = fract( uv * shadowMapSize + 0.5 );\n			uv -= f * texelSize;\n\n			shadow = (\n				texture2DCompare( shadowMap, uv, shadowCoord.z ) +\n				texture2DCompare( shadowMap, uv + vec2( dx, 0.0 ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, uv + vec2( 0.0, dy ), shadowCoord.z ) +\n				texture2DCompare( shadowMap, uv + texelSize, shadowCoord.z ) +\n				mix( texture2DCompare( shadowMap, uv + vec2( -dx, 0.0 ), shadowCoord.z ),\n					 texture2DCompare( shadowMap, uv + vec2( 2.0 * dx, 0.0 ), shadowCoord.z ),\n					 f.x ) +\n				mix( texture2DCompare( shadowMap, uv + vec2( -dx, dy ), shadowCoord.z ),\n					 texture2DCompare( shadowMap, uv + vec2( 2.0 * dx, dy ), shadowCoord.z ),\n					 f.x ) +\n				mix( texture2DCompare( shadowMap, uv + vec2( 0.0, -dy ), shadowCoord.z ),\n					 texture2DCompare( shadowMap, uv + vec2( 0.0, 2.0 * dy ), shadowCoord.z ),\n					 f.y ) +\n				mix( texture2DCompare( shadowMap, uv + vec2( dx, -dy ), shadowCoord.z ),\n					 texture2DCompare( shadowMap, uv + vec2( dx, 2.0 * dy ), shadowCoord.z ),\n					 f.y ) +\n				mix( mix( texture2DCompare( shadowMap, uv + vec2( -dx, -dy ), shadowCoord.z ),\n						  texture2DCompare( shadowMap, uv + vec2( 2.0 * dx, -dy ), shadowCoord.z ),\n						  f.x ),\n					 mix( texture2DCompare( shadowMap, uv + vec2( -dx, 2.0 * dy ), shadowCoord.z ),\n						  texture2DCompare( shadowMap, uv + vec2( 2.0 * dx, 2.0 * dy ), shadowCoord.z ),\n						  f.x ),\n					 f.y )\n			) * ( 1.0 / 9.0 );\n\n		#elif defined( SHADOWMAP_TYPE_VSM )\n\n			shadow = VSMShadow( shadowMap, shadowCoord.xy, shadowCoord.z );\n\n		#else // no percentage-closer filtering:\n\n			shadow = texture2DCompare( shadowMap, shadowCoord.xy, shadowCoord.z );\n\n		#endif\n\n		}\n\n		return mix( 1.0, shadow, shadowIntensity );\n\n	}\n\n	// cubeToUV() maps a 3D direction vector suitable for cube texture mapping to a 2D\n	// vector suitable for 2D texture mapping. This code uses the following layout for the\n	// 2D texture:\n	//\n	// xzXZ\n	//  y Y\n	//\n	// Y - Positive y direction\n	// y - Negative y direction\n	// X - Positive x direction\n	// x - Negative x direction\n	// Z - Positive z direction\n	// z - Negative z direction\n	//\n	// Source and test bed:\n	// https://gist.github.com/tschw/da10c43c467ce8afd0c4\n\n	vec2 cubeToUV( vec3 v, float texelSizeY ) {\n\n		// Number of texels to avoid at the edge of each square\n\n		vec3 absV = abs( v );\n\n		// Intersect unit cube\n\n		float scaleToCube = 1.0 / max( absV.x, max( absV.y, absV.z ) );\n		absV *= scaleToCube;\n\n		// Apply scale to avoid seams\n\n		// two texels less per square (one texel will do for NEAREST)\n		v *= scaleToCube * ( 1.0 - 2.0 * texelSizeY );\n\n		// Unwrap\n\n		// space: -1 ... 1 range for each square\n		//\n		// #X##		dim    := ( 4 , 2 )\n		//  # #		center := ( 1 , 1 )\n\n		vec2 planar = v.xy;\n\n		float almostATexel = 1.5 * texelSizeY;\n		float almostOne = 1.0 - almostATexel;\n\n		if ( absV.z >= almostOne ) {\n\n			if ( v.z > 0.0 )\n				planar.x = 4.0 - v.x;\n\n		} else if ( absV.x >= almostOne ) {\n\n			float signX = sign( v.x );\n			planar.x = v.z * signX + 2.0 * signX;\n\n		} else if ( absV.y >= almostOne ) {\n\n			float signY = sign( v.y );\n			planar.x = v.x + 2.0 * signY + 2.0;\n			planar.y = v.z * signY - 2.0;\n\n		}\n\n		// Transform to UV space\n\n		// scale := 0.5 / dim\n		// translate := ( center + 0.5 ) / dim\n		return vec2( 0.125, 0.25 ) * planar + vec2( 0.375, 0.75 );\n\n	}\n\n	float getPointShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord, float shadowCameraNear, float shadowCameraFar ) {\n\n		float shadow = 1.0;\n\n		// for point lights, the uniform @vShadowCoord is re-purposed to hold\n		// the vector from the light to the world-space position of the fragment.\n		vec3 lightToPosition = shadowCoord.xyz;\n\n		float lightToPositionLength = length( lightToPosition );\n\n		if ( lightToPositionLength - shadowCameraFar <= 0.0 && lightToPositionLength - shadowCameraNear >= 0.0 ) {\n\n			// dp = normalized distance from light to fragment position\n			float dp = ( lightToPositionLength - shadowCameraNear ) / ( shadowCameraFar - shadowCameraNear ); // need to clamp?\n			dp += shadowBias;\n\n			// bd3D = base direction 3D\n			vec3 bd3D = normalize( lightToPosition );\n\n			vec2 texelSize = vec2( 1.0 ) / ( shadowMapSize * vec2( 4.0, 2.0 ) );\n\n			#if defined( SHADOWMAP_TYPE_PCF ) || defined( SHADOWMAP_TYPE_PCF_SOFT ) || defined( SHADOWMAP_TYPE_VSM )\n\n				vec2 offset = vec2( - 1, 1 ) * shadowRadius * texelSize.y;\n\n				shadow = (\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.xyy, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.yyy, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.xyx, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.yyx, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.xxy, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.yxy, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.xxx, texelSize.y ), dp ) +\n					texture2DCompare( shadowMap, cubeToUV( bd3D + offset.yxx, texelSize.y ), dp )\n				) * ( 1.0 / 9.0 );\n\n			#else // no percentage-closer filtering\n\n				shadow = texture2DCompare( shadowMap, cubeToUV( bd3D, texelSize.y ), dp );\n\n			#endif\n\n		}\n\n		return mix( 1.0, shadow, shadowIntensity );\n\n	}\n\n#endif\n",
+    "shadowmap_pars_vertex": "#if NUM_SPOT_LIGHT_COORDS > 0\n\n	uniform mat4 spotLightMatrix[ NUM_SPOT_LIGHT_COORDS ];\n	varying vec4 vSpotLightCoord[ NUM_SPOT_LIGHT_COORDS ];\n\n#endif\n\n#ifdef USE_SHADOWMAP\n\n	#if NUM_DIR_LIGHT_SHADOWS > 0\n\n		uniform mat4 directionalShadowMatrix[ NUM_DIR_LIGHT_SHADOWS ];\n		varying vec4 vDirectionalShadowCoord[ NUM_DIR_LIGHT_SHADOWS ];\n\n		struct DirectionalLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n		};\n\n		uniform DirectionalLightShadow directionalLightShadows[ NUM_DIR_LIGHT_SHADOWS ];\n\n	#endif\n\n	#if NUM_SPOT_LIGHT_SHADOWS > 0\n\n		struct SpotLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n		};\n\n		uniform SpotLightShadow spotLightShadows[ NUM_SPOT_LIGHT_SHADOWS ];\n\n	#endif\n\n	#if NUM_POINT_LIGHT_SHADOWS > 0\n\n		uniform mat4 pointShadowMatrix[ NUM_POINT_LIGHT_SHADOWS ];\n		varying vec4 vPointShadowCoord[ NUM_POINT_LIGHT_SHADOWS ];\n\n		struct PointLightShadow {\n			float shadowIntensity;\n			float shadowBias;\n			float shadowNormalBias;\n			float shadowRadius;\n			vec2 shadowMapSize;\n			float shadowCameraNear;\n			float shadowCameraFar;\n		};\n\n		uniform PointLightShadow pointLightShadows[ NUM_POINT_LIGHT_SHADOWS ];\n\n	#endif\n\n	/*\n	#if NUM_RECT_AREA_LIGHTS > 0\n\n		// TODO (abelnation): uniforms for area light shadows\n\n	#endif\n	*/\n\n#endif\n",
+    "shadowmap_vertex": "#if ( defined( USE_SHADOWMAP ) && ( NUM_DIR_LIGHT_SHADOWS > 0 || NUM_POINT_LIGHT_SHADOWS > 0 ) ) || ( NUM_SPOT_LIGHT_COORDS > 0 )\n\n	// Offsetting the position used for querying occlusion along the world normal can be used to reduce shadow acne.\n	vec3 shadowWorldNormal = inverseTransformDirection( transformedNormal, viewMatrix );\n	vec4 shadowWorldPosition;\n\n#endif\n\n#if defined( USE_SHADOWMAP )\n\n	#if NUM_DIR_LIGHT_SHADOWS > 0\n\n		#pragma unroll_loop_start\n		for ( int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i ++ ) {\n\n			shadowWorldPosition = worldPosition + vec4( shadowWorldNormal * directionalLightShadows[ i ].shadowNormalBias, 0 );\n			vDirectionalShadowCoord[ i ] = directionalShadowMatrix[ i ] * shadowWorldPosition;\n\n		}\n		#pragma unroll_loop_end\n\n	#endif\n\n	#if NUM_POINT_LIGHT_SHADOWS > 0\n\n		#pragma unroll_loop_start\n		for ( int i = 0; i < NUM_POINT_LIGHT_SHADOWS; i ++ ) {\n\n			shadowWorldPosition = worldPosition + vec4( shadowWorldNormal * pointLightShadows[ i ].shadowNormalBias, 0 );\n			vPointShadowCoord[ i ] = pointShadowMatrix[ i ] * shadowWorldPosition;\n\n		}\n		#pragma unroll_loop_end\n\n	#endif\n\n	/*\n	#if NUM_RECT_AREA_LIGHTS > 0\n\n		// TODO (abelnation): update vAreaShadowCoord with area light info\n\n	#endif\n	*/\n\n#endif\n\n// spot lights can be evaluated without active shadow mapping (when SpotLight.map is used)\n\n#if NUM_SPOT_LIGHT_COORDS > 0\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_SPOT_LIGHT_COORDS; i ++ ) {\n\n		shadowWorldPosition = worldPosition;\n		#if ( defined( USE_SHADOWMAP ) && UNROLLED_LOOP_INDEX < NUM_SPOT_LIGHT_SHADOWS )\n			shadowWorldPosition.xyz += shadowWorldNormal * spotLightShadows[ i ].shadowNormalBias;\n		#endif\n		vSpotLightCoord[ i ] = spotLightMatrix[ i ] * shadowWorldPosition;\n\n	}\n	#pragma unroll_loop_end\n\n#endif\n",
+    "shadowmask_pars_fragment": "float getShadowMask() {\n\n	float shadow = 1.0;\n\n	#ifdef USE_SHADOWMAP\n\n	#if NUM_DIR_LIGHT_SHADOWS > 0\n\n	DirectionalLightShadow directionalLight;\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i ++ ) {\n\n		directionalLight = directionalLightShadows[ i ];\n		shadow *= receiveShadow ? getShadow( directionalShadowMap[ i ], directionalLight.shadowMapSize, directionalLight.shadowIntensity, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;\n\n	}\n	#pragma unroll_loop_end\n\n	#endif\n\n	#if NUM_SPOT_LIGHT_SHADOWS > 0\n\n	SpotLightShadow spotLight;\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_SPOT_LIGHT_SHADOWS; i ++ ) {\n\n		spotLight = spotLightShadows[ i ];\n		shadow *= receiveShadow ? getShadow( spotShadowMap[ i ], spotLight.shadowMapSize, spotLight.shadowIntensity, spotLight.shadowBias, spotLight.shadowRadius, vSpotLightCoord[ i ] ) : 1.0;\n\n	}\n	#pragma unroll_loop_end\n\n	#endif\n\n	#if NUM_POINT_LIGHT_SHADOWS > 0\n\n	PointLightShadow pointLight;\n\n	#pragma unroll_loop_start\n	for ( int i = 0; i < NUM_POINT_LIGHT_SHADOWS; i ++ ) {\n\n		pointLight = pointLightShadows[ i ];\n		shadow *= receiveShadow ? getPointShadow( pointShadowMap[ i ], pointLight.shadowMapSize, pointLight.shadowIntensity, pointLight.shadowBias, pointLight.shadowRadius, vPointShadowCoord[ i ], pointLight.shadowCameraNear, pointLight.shadowCameraFar ) : 1.0;\n\n	}\n	#pragma unroll_loop_end\n\n	#endif\n\n	/*\n	#if NUM_RECT_AREA_LIGHTS > 0\n\n		// TODO (abelnation): update shadow for Area light\n\n	#endif\n	*/\n\n	#endif\n\n	return shadow;\n\n}\n",
+    "skinbase_vertex": "#ifdef USE_SKINNING\n\n	mat4 boneMatX = getBoneMatrix( skinIndex.x );\n	mat4 boneMatY = getBoneMatrix( skinIndex.y );\n	mat4 boneMatZ = getBoneMatrix( skinIndex.z );\n	mat4 boneMatW = getBoneMatrix( skinIndex.w );\n\n#endif\n",
+    "skinning_pars_vertex": "#ifdef USE_SKINNING\n\n	uniform mat4 bindMatrix;\n	uniform mat4 bindMatrixInverse;\n\n	uniform highp sampler2D boneTexture;\n\n	mat4 getBoneMatrix( const in float i ) {\n\n		int size = textureSize( boneTexture, 0 ).x;\n		int j = int( i ) * 4;\n		int x = j % size;\n		int y = j / size;\n		vec4 v1 = texelFetch( boneTexture, ivec2( x, y ), 0 );\n		vec4 v2 = texelFetch( boneTexture, ivec2( x + 1, y ), 0 );\n		vec4 v3 = texelFetch( boneTexture, ivec2( x + 2, y ), 0 );\n		vec4 v4 = texelFetch( boneTexture, ivec2( x + 3, y ), 0 );\n\n		return mat4( v1, v2, v3, v4 );\n\n	}\n\n#endif\n",
+    "skinning_vertex": "#ifdef USE_SKINNING\n\n	vec4 skinVertex = bindMatrix * vec4( transformed, 1.0 );\n\n	vec4 skinned = vec4( 0.0 );\n	skinned += boneMatX * skinVertex * skinWeight.x;\n	skinned += boneMatY * skinVertex * skinWeight.y;\n	skinned += boneMatZ * skinVertex * skinWeight.z;\n	skinned += boneMatW * skinVertex * skinWeight.w;\n\n	transformed = ( bindMatrixInverse * skinned ).xyz;\n\n#endif\n",
+    "skinnormal_vertex": "#ifdef USE_SKINNING\n\n	mat4 skinMatrix = mat4( 0.0 );\n	skinMatrix += skinWeight.x * boneMatX;\n	skinMatrix += skinWeight.y * boneMatY;\n	skinMatrix += skinWeight.z * boneMatZ;\n	skinMatrix += skinWeight.w * boneMatW;\n	skinMatrix = bindMatrixInverse * skinMatrix * bindMatrix;\n\n	objectNormal = vec4( skinMatrix * vec4( objectNormal, 0.0 ) ).xyz;\n\n	#ifdef USE_TANGENT\n\n		objectTangent = vec4( skinMatrix * vec4( objectTangent, 0.0 ) ).xyz;\n\n	#endif\n\n#endif\n",
+    "specularmap_fragment": "float specularStrength;\n\n#ifdef USE_SPECULARMAP\n\n	vec4 texelSpecular = texture2D( specularMap, vSpecularMapUv );\n	specularStrength = texelSpecular.r;\n\n#else\n\n	specularStrength = 1.0;\n\n#endif\n",
+    "specularmap_pars_fragment": "#ifdef USE_SPECULARMAP\n\n	uniform sampler2D specularMap;\n\n#endif\n",
+    "tonemapping_fragment": "#if defined( TONE_MAPPING )\n\n	gl_FragColor.rgb = toneMapping( gl_FragColor.rgb );\n\n#endif\n",
+    "tonemapping_pars_fragment": "#ifndef saturate\n// <common> may have defined saturate() already\n#define saturate( a ) clamp( a, 0.0, 1.0 )\n#endif\n\nuniform float toneMappingExposure;\n\n// exposure only\nvec3 LinearToneMapping( vec3 color ) {\n\n	return saturate( toneMappingExposure * color );\n\n}\n\n// source: https://www.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf\nvec3 ReinhardToneMapping( vec3 color ) {\n\n	color *= toneMappingExposure;\n	return saturate( color / ( vec3( 1.0 ) + color ) );\n\n}\n\n// source: http://filmicworlds.com/blog/filmic-tonemapping-operators/\nvec3 CineonToneMapping( vec3 color ) {\n\n	// filmic operator by Jim Hejl and Richard Burgess-Dawson\n	color *= toneMappingExposure;\n	color = max( vec3( 0.0 ), color - 0.004 );\n	return pow( ( color * ( 6.2 * color + 0.5 ) ) / ( color * ( 6.2 * color + 1.7 ) + 0.06 ), vec3( 2.2 ) );\n\n}\n\n// source: https://github.com/selfshadow/ltc_code/blob/master/webgl/shaders/ltc/ltc_blit.fs\nvec3 RRTAndODTFit( vec3 v ) {\n\n	vec3 a = v * ( v + 0.0245786 ) - 0.000090537;\n	vec3 b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;\n	return a / b;\n\n}\n\n// this implementation of ACES is modified to accommodate a brighter viewing environment.\n// the scale factor of 1/0.6 is subjective. see discussion in #19621.\n\nvec3 ACESFilmicToneMapping( vec3 color ) {\n\n	// sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT\n	const mat3 ACESInputMat = mat3(\n		vec3( 0.59719, 0.07600, 0.02840 ), // transposed from source\n		vec3( 0.35458, 0.90834, 0.13383 ),\n		vec3( 0.04823, 0.01566, 0.83777 )\n	);\n\n	// ODT_SAT => XYZ => D60_2_D65 => sRGB\n	const mat3 ACESOutputMat = mat3(\n		vec3(  1.60475, -0.10208, -0.00327 ), // transposed from source\n		vec3( -0.53108,  1.10813, -0.07276 ),\n		vec3( -0.07367, -0.00605,  1.07602 )\n	);\n\n	color *= toneMappingExposure / 0.6;\n\n	color = ACESInputMat * color;\n\n	// Apply RRT and ODT\n	color = RRTAndODTFit( color );\n\n	color = ACESOutputMat * color;\n\n	// Clamp to [0, 1]\n	return saturate( color );\n\n}\n\n// Matrices for rec 2020 <> rec 709 color space conversion\n// matrix provided in row-major order so it has been transposed\n// https://www.itu.int/pub/R-REP-BT.2407-2017\nconst mat3 LINEAR_REC2020_TO_LINEAR_SRGB = mat3(\n	vec3( 1.6605, - 0.1246, - 0.0182 ),\n	vec3( - 0.5876, 1.1329, - 0.1006 ),\n	vec3( - 0.0728, - 0.0083, 1.1187 )\n);\n\nconst mat3 LINEAR_SRGB_TO_LINEAR_REC2020 = mat3(\n	vec3( 0.6274, 0.0691, 0.0164 ),\n	vec3( 0.3293, 0.9195, 0.0880 ),\n	vec3( 0.0433, 0.0113, 0.8956 )\n);\n\n// https://iolite-engine.com/blog_posts/minimal_agx_implementation\n// Mean error^2: 3.6705141e-06\nvec3 agxDefaultContrastApprox( vec3 x ) {\n\n	vec3 x2 = x * x;\n	vec3 x4 = x2 * x2;\n\n	return + 15.5 * x4 * x2\n		- 40.14 * x4 * x\n		+ 31.96 * x4\n		- 6.868 * x2 * x\n		+ 0.4298 * x2\n		+ 0.1191 * x\n		- 0.00232;\n\n}\n\n// AgX Tone Mapping implementation based on Filament, which in turn is based\n// on Blender's implementation using rec 2020 primaries\n// https://github.com/google/filament/pull/7236\n// Inputs and outputs are encoded as Linear-sRGB.\n\nvec3 AgXToneMapping( vec3 color ) {\n\n	// AgX constants\n	const mat3 AgXInsetMatrix = mat3(\n		vec3( 0.856627153315983, 0.137318972929847, 0.11189821299995 ),\n		vec3( 0.0951212405381588, 0.761241990602591, 0.0767994186031903 ),\n		vec3( 0.0482516061458583, 0.101439036467562, 0.811302368396859 )\n	);\n\n	// explicit AgXOutsetMatrix generated from Filaments AgXOutsetMatrixInv\n	const mat3 AgXOutsetMatrix = mat3(\n		vec3( 1.1271005818144368, - 0.1413297634984383, - 0.14132976349843826 ),\n		vec3( - 0.11060664309660323, 1.157823702216272, - 0.11060664309660294 ),\n		vec3( - 0.016493938717834573, - 0.016493938717834257, 1.2519364065950405 )\n	);\n\n	// LOG2_MIN      = -10.0\n	// LOG2_MAX      =  +6.5\n	// MIDDLE_GRAY   =  0.18\n	const float AgxMinEv = - 12.47393;  // log2( pow( 2, LOG2_MIN ) * MIDDLE_GRAY )\n	const float AgxMaxEv = 4.026069;    // log2( pow( 2, LOG2_MAX ) * MIDDLE_GRAY )\n\n	color *= toneMappingExposure;\n\n	color = LINEAR_SRGB_TO_LINEAR_REC2020 * color;\n\n	color = AgXInsetMatrix * color;\n\n	// Log2 encoding\n	color = max( color, 1e-10 ); // avoid 0 or negative numbers for log2\n	color = log2( color );\n	color = ( color - AgxMinEv ) / ( AgxMaxEv - AgxMinEv );\n\n	color = clamp( color, 0.0, 1.0 );\n\n	// Apply sigmoid\n	color = agxDefaultContrastApprox( color );\n\n	// Apply AgX look\n	// v = agxLook(v, look);\n\n	color = AgXOutsetMatrix * color;\n\n	// Linearize\n	color = pow( max( vec3( 0.0 ), color ), vec3( 2.2 ) );\n\n	color = LINEAR_REC2020_TO_LINEAR_SRGB * color;\n\n	// Gamut mapping. Simple clamp for now.\n	color = clamp( color, 0.0, 1.0 );\n\n	return color;\n\n}\n\n// https://modelviewer.dev/examples/tone-mapping\n\nvec3 NeutralToneMapping( vec3 color ) {\n\n	const float StartCompression = 0.8 - 0.04;\n	const float Desaturation = 0.15;\n\n	color *= toneMappingExposure;\n\n	float x = min( color.r, min( color.g, color.b ) );\n\n	float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;\n\n	color -= offset;\n\n	float peak = max( color.r, max( color.g, color.b ) );\n\n	if ( peak < StartCompression ) return color;\n\n	float d = 1. - StartCompression;\n\n	float newPeak = 1. - d * d / ( peak + d - StartCompression );\n\n	color *= newPeak / peak;\n\n	float g = 1. - 1. / ( Desaturation * ( peak - newPeak ) + 1. );\n\n	return mix( color, vec3( newPeak ), g );\n\n}\n\nvec3 CustomToneMapping( vec3 color ) { return color; }\n",
+    "transmission_fragment": "#ifdef USE_TRANSMISSION\n\n	material.transmission = transmission;\n	material.transmissionAlpha = 1.0;\n	material.thickness = thickness;\n	material.attenuationDistance = attenuationDistance;\n	material.attenuationColor = attenuationColor;\n\n	#ifdef USE_TRANSMISSIONMAP\n\n		material.transmission *= texture2D( transmissionMap, vTransmissionMapUv ).r;\n\n	#endif\n\n	#ifdef USE_THICKNESSMAP\n\n		material.thickness *= texture2D( thicknessMap, vThicknessMapUv ).g;\n\n	#endif\n\n	vec3 pos = vWorldPosition;\n	vec3 v = normalize( cameraPosition - pos );\n	vec3 n = inverseTransformDirection( normal, viewMatrix );\n\n	vec4 transmitted = getIBLVolumeRefraction(\n		n, v, material.roughness, material.diffuseColor, material.specularColor, material.specularF90,\n		pos, modelMatrix, viewMatrix, projectionMatrix, material.dispersion, material.ior, material.thickness,\n		material.attenuationColor, material.attenuationDistance );\n\n	material.transmissionAlpha = mix( material.transmissionAlpha, transmitted.a, material.transmission );\n\n	totalDiffuse = mix( totalDiffuse, transmitted.rgb, material.transmission );\n\n#endif\n",
+    "transmission_pars_fragment": "#ifdef USE_TRANSMISSION\n\n	// Transmission code is based on glTF-Sampler-Viewer\n	// https://github.com/KhronosGroup/glTF-Sample-Viewer\n\n	uniform float transmission;\n	uniform float thickness;\n	uniform float attenuationDistance;\n	uniform vec3 attenuationColor;\n\n	#ifdef USE_TRANSMISSIONMAP\n\n		uniform sampler2D transmissionMap;\n\n	#endif\n\n	#ifdef USE_THICKNESSMAP\n\n		uniform sampler2D thicknessMap;\n\n	#endif\n\n	uniform vec2 transmissionSamplerSize;\n	uniform sampler2D transmissionSamplerMap;\n\n	uniform mat4 modelMatrix;\n	uniform mat4 projectionMatrix;\n\n	varying vec3 vWorldPosition;\n\n	// Mipped Bicubic Texture Filtering by N8\n	// https://www.shadertoy.com/view/Dl2SDW\n\n	float w0( float a ) {\n\n		return ( 1.0 / 6.0 ) * ( a * ( a * ( - a + 3.0 ) - 3.0 ) + 1.0 );\n\n	}\n\n	float w1( float a ) {\n\n		return ( 1.0 / 6.0 ) * ( a *  a * ( 3.0 * a - 6.0 ) + 4.0 );\n\n	}\n\n	float w2( float a ){\n\n		return ( 1.0 / 6.0 ) * ( a * ( a * ( - 3.0 * a + 3.0 ) + 3.0 ) + 1.0 );\n\n	}\n\n	float w3( float a ) {\n\n		return ( 1.0 / 6.0 ) * ( a * a * a );\n\n	}\n\n	// g0 and g1 are the two amplitude functions\n	float g0( float a ) {\n\n		return w0( a ) + w1( a );\n\n	}\n\n	float g1( float a ) {\n\n		return w2( a ) + w3( a );\n\n	}\n\n	// h0 and h1 are the two offset functions\n	float h0( float a ) {\n\n		return - 1.0 + w1( a ) / ( w0( a ) + w1( a ) );\n\n	}\n\n	float h1( float a ) {\n\n		return 1.0 + w3( a ) / ( w2( a ) + w3( a ) );\n\n	}\n\n	vec4 bicubic( sampler2D tex, vec2 uv, vec4 texelSize, float lod ) {\n\n		uv = uv * texelSize.zw + 0.5;\n\n		vec2 iuv = floor( uv );\n		vec2 fuv = fract( uv );\n\n		float g0x = g0( fuv.x );\n		float g1x = g1( fuv.x );\n		float h0x = h0( fuv.x );\n		float h1x = h1( fuv.x );\n		float h0y = h0( fuv.y );\n		float h1y = h1( fuv.y );\n\n		vec2 p0 = ( vec2( iuv.x + h0x, iuv.y + h0y ) - 0.5 ) * texelSize.xy;\n		vec2 p1 = ( vec2( iuv.x + h1x, iuv.y + h0y ) - 0.5 ) * texelSize.xy;\n		vec2 p2 = ( vec2( iuv.x + h0x, iuv.y + h1y ) - 0.5 ) * texelSize.xy;\n		vec2 p3 = ( vec2( iuv.x + h1x, iuv.y + h1y ) - 0.5 ) * texelSize.xy;\n\n		return g0( fuv.y ) * ( g0x * textureLod( tex, p0, lod ) + g1x * textureLod( tex, p1, lod ) ) +\n			g1( fuv.y ) * ( g0x * textureLod( tex, p2, lod ) + g1x * textureLod( tex, p3, lod ) );\n\n	}\n\n	vec4 textureBicubic( sampler2D sampler, vec2 uv, float lod ) {\n\n		vec2 fLodSize = vec2( textureSize( sampler, int( lod ) ) );\n		vec2 cLodSize = vec2( textureSize( sampler, int( lod + 1.0 ) ) );\n		vec2 fLodSizeInv = 1.0 / fLodSize;\n		vec2 cLodSizeInv = 1.0 / cLodSize;\n		vec4 fSample = bicubic( sampler, uv, vec4( fLodSizeInv, fLodSize ), floor( lod ) );\n		vec4 cSample = bicubic( sampler, uv, vec4( cLodSizeInv, cLodSize ), ceil( lod ) );\n		return mix( fSample, cSample, fract( lod ) );\n\n	}\n\n	vec3 getVolumeTransmissionRay( const in vec3 n, const in vec3 v, const in float thickness, const in float ior, const in mat4 modelMatrix ) {\n\n		// Direction of refracted light.\n		vec3 refractionVector = refract( - v, normalize( n ), 1.0 / ior );\n\n		// Compute rotation-independent scaling of the model matrix.\n		vec3 modelScale;\n		modelScale.x = length( vec3( modelMatrix[ 0 ].xyz ) );\n		modelScale.y = length( vec3( modelMatrix[ 1 ].xyz ) );\n		modelScale.z = length( vec3( modelMatrix[ 2 ].xyz ) );\n\n		// The thickness is specified in local space.\n		return normalize( refractionVector ) * thickness * modelScale;\n\n	}\n\n	float applyIorToRoughness( const in float roughness, const in float ior ) {\n\n		// Scale roughness with IOR so that an IOR of 1.0 results in no microfacet refraction and\n		// an IOR of 1.5 results in the default amount of microfacet refraction.\n		return roughness * clamp( ior * 2.0 - 2.0, 0.0, 1.0 );\n\n	}\n\n	vec4 getTransmissionSample( const in vec2 fragCoord, const in float roughness, const in float ior ) {\n\n		float lod = log2( transmissionSamplerSize.x ) * applyIorToRoughness( roughness, ior );\n		return textureBicubic( transmissionSamplerMap, fragCoord.xy, lod );\n\n	}\n\n	vec3 volumeAttenuation( const in float transmissionDistance, const in vec3 attenuationColor, const in float attenuationDistance ) {\n\n		if ( isinf( attenuationDistance ) ) {\n\n			// Attenuation distance is +∞, i.e. the transmitted color is not attenuated at all.\n			return vec3( 1.0 );\n\n		} else {\n\n			// Compute light attenuation using Beer's law.\n			vec3 attenuationCoefficient = -log( attenuationColor ) / attenuationDistance;\n			vec3 transmittance = exp( - attenuationCoefficient * transmissionDistance ); // Beer's law\n			return transmittance;\n\n		}\n\n	}\n\n	vec4 getIBLVolumeRefraction( const in vec3 n, const in vec3 v, const in float roughness, const in vec3 diffuseColor,\n		const in vec3 specularColor, const in float specularF90, const in vec3 position, const in mat4 modelMatrix,\n		const in mat4 viewMatrix, const in mat4 projMatrix, const in float dispersion, const in float ior, const in float thickness,\n		const in vec3 attenuationColor, const in float attenuationDistance ) {\n\n		vec4 transmittedLight;\n		vec3 transmittance;\n\n		#ifdef USE_DISPERSION\n\n			float halfSpread = ( ior - 1.0 ) * 0.025 * dispersion;\n			vec3 iors = vec3( ior - halfSpread, ior, ior + halfSpread );\n\n			for ( int i = 0; i < 3; i ++ ) {\n\n				vec3 transmissionRay = getVolumeTransmissionRay( n, v, thickness, iors[ i ], modelMatrix );\n				vec3 refractedRayExit = position + transmissionRay;\n\n				// Project refracted vector on the framebuffer, while mapping to normalized device coordinates.\n				vec4 ndcPos = projMatrix * viewMatrix * vec4( refractedRayExit, 1.0 );\n				vec2 refractionCoords = ndcPos.xy / ndcPos.w;\n				refractionCoords += 1.0;\n				refractionCoords /= 2.0;\n\n				// Sample framebuffer to get pixel the refracted ray hits.\n				vec4 transmissionSample = getTransmissionSample( refractionCoords, roughness, iors[ i ] );\n				transmittedLight[ i ] = transmissionSample[ i ];\n				transmittedLight.a += transmissionSample.a;\n\n				transmittance[ i ] = diffuseColor[ i ] * volumeAttenuation( length( transmissionRay ), attenuationColor, attenuationDistance )[ i ];\n\n			}\n\n			transmittedLight.a /= 3.0;\n\n		#else\n\n			vec3 transmissionRay = getVolumeTransmissionRay( n, v, thickness, ior, modelMatrix );\n			vec3 refractedRayExit = position + transmissionRay;\n\n			// Project refracted vector on the framebuffer, while mapping to normalized device coordinates.\n			vec4 ndcPos = projMatrix * viewMatrix * vec4( refractedRayExit, 1.0 );\n			vec2 refractionCoords = ndcPos.xy / ndcPos.w;\n			refractionCoords += 1.0;\n			refractionCoords /= 2.0;\n\n			// Sample framebuffer to get pixel the refracted ray hits.\n			transmittedLight = getTransmissionSample( refractionCoords, roughness, ior );\n			transmittance = diffuseColor * volumeAttenuation( length( transmissionRay ), attenuationColor, attenuationDistance );\n\n		#endif\n\n		vec3 attenuatedColor = transmittance * transmittedLight.rgb;\n\n		// Get the specular component.\n		vec3 F = EnvironmentBRDF( n, v, specularColor, specularF90, roughness );\n\n		// As less light is transmitted, the opacity should be increased. This simple approximation does a decent job\n		// of modulating a CSS background, and has no effect when the buffer is opaque, due to a solid object or clear color.\n		float transmittanceFactor = ( transmittance.r + transmittance.g + transmittance.b ) / 3.0;\n\n		return vec4( ( 1.0 - F ) * attenuatedColor, 1.0 - ( 1.0 - transmittedLight.a ) * transmittanceFactor );\n\n	}\n#endif\n",
+    "uv_pars_fragment": "#if defined( USE_UV ) || defined( USE_ANISOTROPY )\n\n	varying vec2 vUv;\n\n#endif\n#ifdef USE_MAP\n\n	varying vec2 vMapUv;\n\n#endif\n#ifdef USE_ALPHAMAP\n\n	varying vec2 vAlphaMapUv;\n\n#endif\n#ifdef USE_LIGHTMAP\n\n	varying vec2 vLightMapUv;\n\n#endif\n#ifdef USE_AOMAP\n\n	varying vec2 vAoMapUv;\n\n#endif\n#ifdef USE_BUMPMAP\n\n	varying vec2 vBumpMapUv;\n\n#endif\n#ifdef USE_NORMALMAP\n\n	varying vec2 vNormalMapUv;\n\n#endif\n#ifdef USE_EMISSIVEMAP\n\n	varying vec2 vEmissiveMapUv;\n\n#endif\n#ifdef USE_METALNESSMAP\n\n	varying vec2 vMetalnessMapUv;\n\n#endif\n#ifdef USE_ROUGHNESSMAP\n\n	varying vec2 vRoughnessMapUv;\n\n#endif\n#ifdef USE_ANISOTROPYMAP\n\n	varying vec2 vAnisotropyMapUv;\n\n#endif\n#ifdef USE_CLEARCOATMAP\n\n	varying vec2 vClearcoatMapUv;\n\n#endif\n#ifdef USE_CLEARCOAT_NORMALMAP\n\n	varying vec2 vClearcoatNormalMapUv;\n\n#endif\n#ifdef USE_CLEARCOAT_ROUGHNESSMAP\n\n	varying vec2 vClearcoatRoughnessMapUv;\n\n#endif\n#ifdef USE_IRIDESCENCEMAP\n\n	varying vec2 vIridescenceMapUv;\n\n#endif\n#ifdef USE_IRIDESCENCE_THICKNESSMAP\n\n	varying vec2 vIridescenceThicknessMapUv;\n\n#endif\n#ifdef USE_SHEEN_COLORMAP\n\n	varying vec2 vSheenColorMapUv;\n\n#endif\n#ifdef USE_SHEEN_ROUGHNESSMAP\n\n	varying vec2 vSheenRoughnessMapUv;\n\n#endif\n#ifdef USE_SPECULARMAP\n\n	varying vec2 vSpecularMapUv;\n\n#endif\n#ifdef USE_SPECULAR_COLORMAP\n\n	varying vec2 vSpecularColorMapUv;\n\n#endif\n#ifdef USE_SPECULAR_INTENSITYMAP\n\n	varying vec2 vSpecularIntensityMapUv;\n\n#endif\n#ifdef USE_TRANSMISSIONMAP\n\n	uniform mat3 transmissionMapTransform;\n	varying vec2 vTransmissionMapUv;\n\n#endif\n#ifdef USE_THICKNESSMAP\n\n	uniform mat3 thicknessMapTransform;\n	varying vec2 vThicknessMapUv;\n\n#endif\n",
+    "uv_pars_vertex": "#if defined( USE_UV ) || defined( USE_ANISOTROPY )\n\n	varying vec2 vUv;\n\n#endif\n#ifdef USE_MAP\n\n	uniform mat3 mapTransform;\n	varying vec2 vMapUv;\n\n#endif\n#ifdef USE_ALPHAMAP\n\n	uniform mat3 alphaMapTransform;\n	varying vec2 vAlphaMapUv;\n\n#endif\n#ifdef USE_LIGHTMAP\n\n	uniform mat3 lightMapTransform;\n	varying vec2 vLightMapUv;\n\n#endif\n#ifdef USE_AOMAP\n\n	uniform mat3 aoMapTransform;\n	varying vec2 vAoMapUv;\n\n#endif\n#ifdef USE_BUMPMAP\n\n	uniform mat3 bumpMapTransform;\n	varying vec2 vBumpMapUv;\n\n#endif\n#ifdef USE_NORMALMAP\n\n	uniform mat3 normalMapTransform;\n	varying vec2 vNormalMapUv;\n\n#endif\n#ifdef USE_DISPLACEMENTMAP\n\n	uniform mat3 displacementMapTransform;\n	varying vec2 vDisplacementMapUv;\n\n#endif\n#ifdef USE_EMISSIVEMAP\n\n	uniform mat3 emissiveMapTransform;\n	varying vec2 vEmissiveMapUv;\n\n#endif\n#ifdef USE_METALNESSMAP\n\n	uniform mat3 metalnessMapTransform;\n	varying vec2 vMetalnessMapUv;\n\n#endif\n#ifdef USE_ROUGHNESSMAP\n\n	uniform mat3 roughnessMapTransform;\n	varying vec2 vRoughnessMapUv;\n\n#endif\n#ifdef USE_ANISOTROPYMAP\n\n	uniform mat3 anisotropyMapTransform;\n	varying vec2 vAnisotropyMapUv;\n\n#endif\n#ifdef USE_CLEARCOATMAP\n\n	uniform mat3 clearcoatMapTransform;\n	varying vec2 vClearcoatMapUv;\n\n#endif\n#ifdef USE_CLEARCOAT_NORMALMAP\n\n	uniform mat3 clearcoatNormalMapTransform;\n	varying vec2 vClearcoatNormalMapUv;\n\n#endif\n#ifdef USE_CLEARCOAT_ROUGHNESSMAP\n\n	uniform mat3 clearcoatRoughnessMapTransform;\n	varying vec2 vClearcoatRoughnessMapUv;\n\n#endif\n#ifdef USE_SHEEN_COLORMAP\n\n	uniform mat3 sheenColorMapTransform;\n	varying vec2 vSheenColorMapUv;\n\n#endif\n#ifdef USE_SHEEN_ROUGHNESSMAP\n\n	uniform mat3 sheenRoughnessMapTransform;\n	varying vec2 vSheenRoughnessMapUv;\n\n#endif\n#ifdef USE_IRIDESCENCEMAP\n\n	uniform mat3 iridescenceMapTransform;\n	varying vec2 vIridescenceMapUv;\n\n#endif\n#ifdef USE_IRIDESCENCE_THICKNESSMAP\n\n	uniform mat3 iridescenceThicknessMapTransform;\n	varying vec2 vIridescenceThicknessMapUv;\n\n#endif\n#ifdef USE_SPECULARMAP\n\n	uniform mat3 specularMapTransform;\n	varying vec2 vSpecularMapUv;\n\n#endif\n#ifdef USE_SPECULAR_COLORMAP\n\n	uniform mat3 specularColorMapTransform;\n	varying vec2 vSpecularColorMapUv;\n\n#endif\n#ifdef USE_SPECULAR_INTENSITYMAP\n\n	uniform mat3 specularIntensityMapTransform;\n	varying vec2 vSpecularIntensityMapUv;\n\n#endif\n#ifdef USE_TRANSMISSIONMAP\n\n	uniform mat3 transmissionMapTransform;\n	varying vec2 vTransmissionMapUv;\n\n#endif\n#ifdef USE_THICKNESSMAP\n\n	uniform mat3 thicknessMapTransform;\n	varying vec2 vThicknessMapUv;\n\n#endif\n",
+    "uv_vertex": "#if defined( USE_UV ) || defined( USE_ANISOTROPY )\n\n	vUv = vec3( uv, 1 ).xy;\n\n#endif\n#ifdef USE_MAP\n\n	vMapUv = ( mapTransform * vec3( MAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_ALPHAMAP\n\n	vAlphaMapUv = ( alphaMapTransform * vec3( ALPHAMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_LIGHTMAP\n\n	vLightMapUv = ( lightMapTransform * vec3( LIGHTMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_AOMAP\n\n	vAoMapUv = ( aoMapTransform * vec3( AOMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_BUMPMAP\n\n	vBumpMapUv = ( bumpMapTransform * vec3( BUMPMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_NORMALMAP\n\n	vNormalMapUv = ( normalMapTransform * vec3( NORMALMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_DISPLACEMENTMAP\n\n	vDisplacementMapUv = ( displacementMapTransform * vec3( DISPLACEMENTMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_EMISSIVEMAP\n\n	vEmissiveMapUv = ( emissiveMapTransform * vec3( EMISSIVEMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_METALNESSMAP\n\n	vMetalnessMapUv = ( metalnessMapTransform * vec3( METALNESSMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_ROUGHNESSMAP\n\n	vRoughnessMapUv = ( roughnessMapTransform * vec3( ROUGHNESSMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_ANISOTROPYMAP\n\n	vAnisotropyMapUv = ( anisotropyMapTransform * vec3( ANISOTROPYMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_CLEARCOATMAP\n\n	vClearcoatMapUv = ( clearcoatMapTransform * vec3( CLEARCOATMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_CLEARCOAT_NORMALMAP\n\n	vClearcoatNormalMapUv = ( clearcoatNormalMapTransform * vec3( CLEARCOAT_NORMALMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_CLEARCOAT_ROUGHNESSMAP\n\n	vClearcoatRoughnessMapUv = ( clearcoatRoughnessMapTransform * vec3( CLEARCOAT_ROUGHNESSMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_IRIDESCENCEMAP\n\n	vIridescenceMapUv = ( iridescenceMapTransform * vec3( IRIDESCENCEMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_IRIDESCENCE_THICKNESSMAP\n\n	vIridescenceThicknessMapUv = ( iridescenceThicknessMapTransform * vec3( IRIDESCENCE_THICKNESSMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_SHEEN_COLORMAP\n\n	vSheenColorMapUv = ( sheenColorMapTransform * vec3( SHEEN_COLORMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_SHEEN_ROUGHNESSMAP\n\n	vSheenRoughnessMapUv = ( sheenRoughnessMapTransform * vec3( SHEEN_ROUGHNESSMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_SPECULARMAP\n\n	vSpecularMapUv = ( specularMapTransform * vec3( SPECULARMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_SPECULAR_COLORMAP\n\n	vSpecularColorMapUv = ( specularColorMapTransform * vec3( SPECULAR_COLORMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_SPECULAR_INTENSITYMAP\n\n	vSpecularIntensityMapUv = ( specularIntensityMapTransform * vec3( SPECULAR_INTENSITYMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_TRANSMISSIONMAP\n\n	vTransmissionMapUv = ( transmissionMapTransform * vec3( TRANSMISSIONMAP_UV, 1 ) ).xy;\n\n#endif\n#ifdef USE_THICKNESSMAP\n\n	vThicknessMapUv = ( thicknessMapTransform * vec3( THICKNESSMAP_UV, 1 ) ).xy;\n\n#endif\n",
+    "worldpos_vertex": "#if defined( USE_ENVMAP ) || defined( DISTANCE ) || defined ( USE_SHADOWMAP ) || defined ( USE_TRANSMISSION ) || NUM_SPOT_LIGHT_COORDS > 0\n\n	vec4 worldPosition = vec4( transformed, 1.0 );\n\n	#ifdef USE_BATCHING\n\n		worldPosition = batchingMatrix * worldPosition;\n\n	#endif\n\n	#ifdef USE_INSTANCING\n\n		worldPosition = instanceMatrix * worldPosition;\n\n	#endif\n\n	worldPosition = modelMatrix * worldPosition;\n\n#endif\n"
+  };
+  var THREE_PHYSICAL = {
+    "vertex": "#define STANDARD\n\nvarying vec3 vViewPosition;\n\n#ifdef USE_TRANSMISSION\n\n	varying vec3 vWorldPosition;\n\n#endif\n\n#include <common>\n#include <batching_pars_vertex>\n#include <uv_pars_vertex>\n#include <displacementmap_pars_vertex>\n#include <color_pars_vertex>\n#include <fog_pars_vertex>\n#include <normal_pars_vertex>\n#include <morphtarget_pars_vertex>\n#include <skinning_pars_vertex>\n#include <shadowmap_pars_vertex>\n#include <logdepthbuf_pars_vertex>\n#include <clipping_planes_pars_vertex>\n\nvoid main() {\n\n	#include <uv_vertex>\n	#include <color_vertex>\n	#include <morphinstance_vertex>\n	#include <morphcolor_vertex>\n	#include <batching_vertex>\n\n	#include <beginnormal_vertex>\n	#include <morphnormal_vertex>\n	#include <skinbase_vertex>\n	#include <skinnormal_vertex>\n	#include <defaultnormal_vertex>\n	#include <normal_vertex>\n\n	#include <begin_vertex>\n	#include <morphtarget_vertex>\n	#include <skinning_vertex>\n	#include <displacementmap_vertex>\n	#include <project_vertex>\n	#include <logdepthbuf_vertex>\n	#include <clipping_planes_vertex>\n\n	vViewPosition = - mvPosition.xyz;\n\n	#include <worldpos_vertex>\n	#include <shadowmap_vertex>\n	#include <fog_vertex>\n\n#ifdef USE_TRANSMISSION\n\n	vWorldPosition = worldPosition.xyz;\n\n#endif\n}\n",
+    "fragment": "#define STANDARD\n\n#ifdef PHYSICAL\n	#define IOR\n	#define USE_SPECULAR\n#endif\n\nuniform vec3 diffuse;\nuniform vec3 emissive;\nuniform float roughness;\nuniform float metalness;\nuniform float opacity;\n\n#ifdef IOR\n	uniform float ior;\n#endif\n\n#ifdef USE_SPECULAR\n	uniform float specularIntensity;\n	uniform vec3 specularColor;\n\n	#ifdef USE_SPECULAR_COLORMAP\n		uniform sampler2D specularColorMap;\n	#endif\n\n	#ifdef USE_SPECULAR_INTENSITYMAP\n		uniform sampler2D specularIntensityMap;\n	#endif\n#endif\n\n#ifdef USE_CLEARCOAT\n	uniform float clearcoat;\n	uniform float clearcoatRoughness;\n#endif\n\n#ifdef USE_DISPERSION\n	uniform float dispersion;\n#endif\n\n#ifdef USE_IRIDESCENCE\n	uniform float iridescence;\n	uniform float iridescenceIOR;\n	uniform float iridescenceThicknessMinimum;\n	uniform float iridescenceThicknessMaximum;\n#endif\n\n#ifdef USE_SHEEN\n	uniform vec3 sheenColor;\n	uniform float sheenRoughness;\n\n	#ifdef USE_SHEEN_COLORMAP\n		uniform sampler2D sheenColorMap;\n	#endif\n\n	#ifdef USE_SHEEN_ROUGHNESSMAP\n		uniform sampler2D sheenRoughnessMap;\n	#endif\n#endif\n\n#ifdef USE_ANISOTROPY\n	uniform vec2 anisotropyVector;\n\n	#ifdef USE_ANISOTROPYMAP\n		uniform sampler2D anisotropyMap;\n	#endif\n#endif\n\nvarying vec3 vViewPosition;\n\n#include <common>\n#include <packing>\n#include <dithering_pars_fragment>\n#include <color_pars_fragment>\n#include <uv_pars_fragment>\n#include <map_pars_fragment>\n#include <alphamap_pars_fragment>\n#include <alphatest_pars_fragment>\n#include <alphahash_pars_fragment>\n#include <aomap_pars_fragment>\n#include <lightmap_pars_fragment>\n#include <emissivemap_pars_fragment>\n#include <iridescence_fragment>\n#include <cube_uv_reflection_fragment>\n#include <envmap_common_pars_fragment>\n#include <envmap_physical_pars_fragment>\n#include <fog_pars_fragment>\n#include <lights_pars_begin>\n#include <normal_pars_fragment>\n#include <lights_physical_pars_fragment>\n#include <transmission_pars_fragment>\n#include <shadowmap_pars_fragment>\n#include <bumpmap_pars_fragment>\n#include <normalmap_pars_fragment>\n#include <clearcoat_pars_fragment>\n#include <iridescence_pars_fragment>\n#include <roughnessmap_pars_fragment>\n#include <metalnessmap_pars_fragment>\n#include <logdepthbuf_pars_fragment>\n#include <clipping_planes_pars_fragment>\n\nvoid main() {\n\n	vec4 diffuseColor = vec4( diffuse, opacity );\n	#include <clipping_planes_fragment>\n\n	ReflectedLight reflectedLight = ReflectedLight( vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ) );\n	vec3 totalEmissiveRadiance = emissive;\n\n	#include <logdepthbuf_fragment>\n	#include <map_fragment>\n	#include <color_fragment>\n	#include <alphamap_fragment>\n	#include <alphatest_fragment>\n	#include <alphahash_fragment>\n	#include <roughnessmap_fragment>\n	#include <metalnessmap_fragment>\n	#include <normal_fragment_begin>\n	#include <normal_fragment_maps>\n	#include <clearcoat_normal_fragment_begin>\n	#include <clearcoat_normal_fragment_maps>\n	#include <emissivemap_fragment>\n\n	// accumulation\n	#include <lights_physical_fragment>\n	#include <lights_fragment_begin>\n	#include <lights_fragment_maps>\n	#include <lights_fragment_end>\n\n	// modulation\n	#include <aomap_fragment>\n\n	vec3 totalDiffuse = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;\n	vec3 totalSpecular = reflectedLight.directSpecular + reflectedLight.indirectSpecular;\n\n	#include <transmission_fragment>\n\n	vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;\n\n	#ifdef USE_SHEEN\n\n		// Sheen energy compensation approximation calculation can be found at the end of\n		// https://drive.google.com/file/d/1T0D1VSyR4AllqIJTQAraEIzjlb5h4FKH/view?usp=sharing\n		float sheenEnergyComp = 1.0 - 0.157 * max3( material.sheenColor );\n\n		outgoingLight = outgoingLight * sheenEnergyComp + sheenSpecularDirect + sheenSpecularIndirect;\n\n	#endif\n\n	#ifdef USE_CLEARCOAT\n\n		float dotNVcc = saturate( dot( geometryClearcoatNormal, geometryViewDir ) );\n\n		vec3 Fcc = F_Schlick( material.clearcoatF0, material.clearcoatF90, dotNVcc );\n\n		outgoingLight = outgoingLight * ( 1.0 - material.clearcoat * Fcc ) + ( clearcoatSpecularDirect + clearcoatSpecularIndirect ) * material.clearcoat;\n\n	#endif\n\n	#include <opaque_fragment>\n	#include <tonemapping_fragment>\n	#include <colorspace_fragment>\n	#include <fog_fragment>\n	#include <premultiplied_alpha_fragment>\n	#include <dithering_fragment>\n\n}\n"
+  };
+
+  // runtime/src/three.ts
+  var threeChunks = THREE_CHUNKS;
+  var LIGHT_NUMS = [
+    "NUM_DIR_LIGHTS",
+    "NUM_SPOT_LIGHTS",
+    "NUM_SPOT_LIGHT_MAPS",
+    "NUM_SPOT_LIGHT_COORDS",
+    "NUM_RECT_AREA_LIGHTS",
+    "NUM_POINT_LIGHTS",
+    "NUM_HEMI_LIGHTS",
+    "NUM_DIR_LIGHT_SHADOWS",
+    "NUM_SPOT_LIGHT_SHADOWS",
+    "NUM_SPOT_LIGHT_SHADOWS_WITH_MAPS",
+    "NUM_POINT_LIGHT_SHADOWS",
+    "NUM_CLIPPING_PLANES",
+    "UNION_CLIPPING_PLANES"
+  ].map((n2) => `#define ${n2} 0`).join("\n");
+  var COMMON_PREFIX = `#define HIGH_PRECISION
+${LIGHT_NUMS}
+// glslang 的 Vulkan 宽松规则里 average 是保留名，three 的 common 定义了同名函数
+#define average pot3_average
+#define texture2D texture
+#define cameraPosition (pot_CameraPos.xyz)
+#define isOrthographic (pot_Proj[3][3] > 0.5)
+#define viewMatrix pot_View
+`;
+  var VERTEX_PREFIX = `${COMMON_PREFIX}#define attribute in
+#define varying out
+#define modelMatrix pot_Model
+#define projectionMatrix pot_Proj
+#define modelViewMatrix (pot_View * pot_Model)
+#define normalMatrix (mat3(pot_View) * pot_NormalMatrix)
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec3 normal;
+layout(location = 2) in vec2 uv;
+#if defined(USE_COLOR_ALPHA)
+layout(location = 3) in vec4 color;
+#elif defined(USE_COLOR)
+layout(location = 3) in vec3 color;
+#endif
+#ifdef USE_TANGENT
+layout(location = 4) in vec4 tangent;
+#endif
+out vec3 pot3_vWorldPos;
+vec3 pot3_SrgbToLinear(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+`;
+  var FRAGMENT_PREFIX = `${COMMON_PREFIX}#define varying in
+layout(location = 0) out highp vec4 pc_fragColor;
+#define gl_FragColor pc_fragColor
+#define gl_FragDepthEXT gl_FragDepth
+#define textureCube texture
+#define texture2DProj textureProj
+#define texture2DLodEXT textureLod
+#define texture2DProjLodEXT textureProjLod
+#define textureCubeLodEXT textureLod
+#define texture2DGradEXT textureGrad
+#define texture2DProjGradEXT textureProjGrad
+#define textureCubeGradEXT textureGrad
+uniform float envMapIntensity;
+in vec3 pot3_vWorldPos;
+${THREE_CHUNKS.colorspace_pars_fragment}
+vec4 linearToOutputTexel(vec4 value) { return value; }
+float luminance(const in vec3 rgb) {
+  const vec3 weights = vec3(0.2126729, 0.7151522, 0.0721750);
+  return dot(weights, rgb);
+}
+#include <pot/lit>
+`;
+  function threePrefix(stage) {
+    return stage === "vertex" ? VERTEX_PREFIX : FRAGMENT_PREFIX;
+  }
+  var THREE_OVERRIDES = {
+    worldpos_vertex: `vec4 worldPosition = vec4( transformed, 1.0 );
+worldPosition = modelMatrix * worldPosition;
+pot3_vWorldPos = worldPosition.xyz;
+`,
+    // pot 的网格顶点色按 sRGB 存储，three 期望线性
+    color_vertex: `#if defined( USE_COLOR_ALPHA )
+	vColor = vec4( pot3_SrgbToLinear( color.rgb ), color.a );
+#elif defined( USE_COLOR )
+	vColor = pot3_SrgbToLinear( color.rgb );
+#endif
+`,
+    fog_pars_vertex: "",
+    fog_vertex: "",
+    fog_pars_fragment: "",
+    fog_fragment: `#ifdef USE_FOG
+	gl_FragColor.rgb = pot_ApplyFog( gl_FragColor.rgb, pot3_vWorldPos );
+#endif
+`,
+    lights_fragment_begin: `vec3 geometryPosition = - vViewPosition;
+vec3 geometryNormal = normal;
+vec3 geometryViewDir = ( isOrthographic ) ? vec3( 0, 0, 1 ) : normalize( vViewPosition );
+vec3 geometryClearcoatNormal = vec3( 0.0 );
+#ifdef USE_CLEARCOAT
+	geometryClearcoatNormal = clearcoatNormal;
+#endif
+
+IncidentLight directLight;
+
+#if defined( RE_Direct )
+	// 太阳（pot_SunDir 为世界空间、指向光源；three 光色 = pot 光色 × π）
+	directLight.direction = normalize( ( viewMatrix * vec4( pot_SunDir.xyz, 0.0 ) ).xyz );
+	directLight.color = pot_SunColor.rgb * PI;
+	#ifndef POT3_NO_SHADOW
+	directLight.color *= pot_Shadow( pot3_vWorldPos );
+	#endif
+	directLight.visible = true;
+	RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+
+	// 附加光（点光、聚光，URP 衰减）
+	int pot3LightCount = int( pot_LightCount.x + 0.5 );
+	for ( int i = 0; i < 16; i ++ ) {
+		if ( i >= pot3LightCount ) break;
+		vec3 dl = pot_LightPos[ i ].xyz - pot3_vWorldPos;
+		float d2 = max( dot( dl, dl ), 1e-4 );
+		vec3 l = dl * inversesqrt( d2 );
+		float f = d2 * pot_LightPos[ i ].w;
+		float sm = clamp( 1.0 - f * f, 0.0, 1.0 );
+		float sp = clamp( dot( pot_LightSpot[ i ].xyz, l ) * pot_LightAtten[ i ].x + pot_LightAtten[ i ].y, 0.0, 1.0 );
+		float att = sm * sm / d2 * sp * sp;
+		if ( att <= 0.0 ) continue;
+		directLight.direction = normalize( ( viewMatrix * vec4( l, 0.0 ) ).xyz );
+		directLight.color = pot_LightColor[ i ].rgb * ( PI * att );
+		RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+	}
+#endif
+
+#if defined( RE_IndirectDiffuse )
+	// 环境光按 scene.environment 的方式进入 iblIrradiance（π × 环境辐亮度）
+	vec3 iblIrradiance = PI * pot_Hemisphere( inverseTransformDirection( geometryNormal, viewMatrix ) );
+	vec3 irradiance = getAmbientLightIrradiance( ambientLightColor );
+#endif
+
+#if defined( RE_IndirectSpecular )
+	vec3 radiance = vec3( 0.0 );
+	vec3 clearcoatRadiance = vec3( 0.0 );
+#endif
+`,
+    lights_fragment_maps: `#if defined( RE_IndirectSpecular )
+	{
+		vec3 pot3R = reflect( - geometryViewDir, geometryNormal );
+		pot3R = normalize( mix( pot3R, geometryNormal, material.roughness * material.roughness ) );
+		radiance += pot_EnvReflection( inverseTransformDirection( pot3R, viewMatrix ), material.roughness ) * envMapIntensity;
+		#ifdef USE_CLEARCOAT
+		vec3 pot3C = reflect( - geometryViewDir, geometryClearcoatNormal );
+		clearcoatRadiance += pot_EnvReflection( inverseTransformDirection( pot3C, viewMatrix ), material.clearcoatRoughness ) * envMapIntensity;
+		#endif
+	}
+#endif
+`
+  };
+  function threeInclude(name) {
+    return THREE_OVERRIDES[name] ?? THREE_CHUNKS[name];
+  }
+  function linearRgb(c) {
+    const s2l = (v) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    if (typeof c === "number") return [s2l((c >> 16 & 255) / 255), s2l((c >> 8 & 255) / 255), s2l((c & 255) / 255)];
+    if (typeof c === "string") {
+      const [r, g, b] = parseColor(c);
+      return [s2l(r), s2l(g), s2l(b)];
+    }
+    return [c[0], c[1], c[2]];
+  }
+  var MAPS = [
+    ["map", "MAP"],
+    ["normalMap", "NORMALMAP"],
+    ["roughnessMap", "ROUGHNESSMAP"],
+    ["metalnessMap", "METALNESSMAP"],
+    ["aoMap", "AOMAP"],
+    ["emissiveMap", "EMISSIVEMAP"],
+    ["alphaMap", "ALPHAMAP"]
+  ];
+  function buildStandard(o) {
+    const defines = {};
+    const uniforms = {
+      diffuse: { value: linearRgb(o.color ?? 16777215) },
+      opacity: { value: o.opacity ?? 1 },
+      roughness: { value: o.roughness ?? 1 },
+      metalness: { value: o.metalness ?? 0 },
+      emissive: { value: linearRgb(o.emissive ?? 0).map((v) => v * (o.emissiveIntensity ?? 1)) },
+      envMapIntensity: { value: o.envMapIntensity ?? 1 }
+    };
+    const [rx, ry] = o.repeat ?? [1, 1];
+    const [ox, oy] = o.offset ?? [0, 0];
+    const transform = [rx, 0, 0, 0, ry, 0, ox, oy, 1];
+    for (const [key, macro] of MAPS) {
+      const tex = o[key];
+      if (!tex) continue;
+      defines[`USE_${macro}`] = true;
+      defines[`${macro}_UV`] = "uv";
+      uniforms[key] = { value: tex };
+      uniforms[`${key}Transform`] = { value: transform };
+    }
+    if (o.normalMap) {
+      defines.USE_NORMALMAP_TANGENTSPACE = true;
+      const s = o.normalScale ?? 1;
+      uniforms.normalScale = { value: typeof s === "number" ? [s, s] : s };
+    }
+    if (o.aoMap) uniforms.aoMapIntensity = { value: o.aoMapIntensity ?? 1 };
+    if (o.vertexColors) defines[o.vertexColors === "alpha" ? "USE_COLOR_ALPHA" : "USE_COLOR"] = true;
+    if (o.alphaTest) {
+      defines.USE_ALPHATEST = true;
+      uniforms.alphaTest = { value: o.alphaTest };
+    }
+    if (!o.transparent) defines.OPAQUE = true;
+    if (o.fog !== false) defines.USE_FOG = true;
+    if (o.flatShading) defines.FLAT_SHADED = true;
+    if (o.side === "double") defines.DOUBLE_SIDED = true;
+    if (o.side === "back") defines.FLIP_SIDED = true;
+    if (o.receiveShadow === false) defines.POT3_NO_SHADOW = true;
+    Object.assign(defines, o.defines);
+    for (const [k, v] of Object.entries(o.uniforms ?? {})) {
+      uniforms[k] = v !== null && typeof v === "object" && "value" in v && !(v instanceof Texture) ? v : { value: v };
+    }
+    const shader = { vertexShader: THREE_PHYSICAL.vertex, fragmentShader: THREE_PHYSICAL.fragment, uniforms, defines };
+    o.onBeforeCompile?.(shader);
+    const state = {
+      cull: o.side === "double" ? "none" : o.side === "back" ? "front" : "back",
+      blend: o.transparent ? "alpha" : "none",
+      queue: o.transparent ? "transparent" : "opaque",
+      depthWrite: o.depthWrite ?? true,
+      depthTest: o.depthTest ?? true,
+      shadows: o.castShadow ?? true
+    };
+    return { shader, state };
+  }
+  function resolveUniforms(uniforms) {
+    const out = {};
+    for (const [k, u] of Object.entries(uniforms)) {
+      const v = u?.value;
+      if (v === void 0) continue;
+      if (v !== null && typeof v === "object" && !(v instanceof Texture) && !ArrayLikeCheck(v)) {
+        if ("r" in v) out[k] = [v.r, v.g, v.b];
+        else if ("x" in v) out[k] = "w" in v ? [v.x, v.y, v.z, v.w] : "z" in v ? [v.x, v.y, v.z] : [v.x, v.y];
+        else if ("elements" in v) out[k] = v.elements;
+        continue;
+      }
+      out[k] = v;
+    }
+    return out;
+  }
+  function ArrayLikeCheck(v) {
+    return Array.isArray(v) || ArrayBuffer.isView(v);
+  }
+
   // runtime/src/gfx.ts
   var PostChain = class {
     constructor(_apply, _dispose) {
@@ -4380,6 +5307,31 @@ var pot = (() => {
     }
     destroy() {
       return this._dispose?.();
+    }
+  };
+  var StandardMaterial = class {
+    constructor(shader, uniforms, state) {
+      __publicField(this, "shader", shader);
+      __publicField(this, "uniforms", uniforms);
+      __publicField(this, "state", state);
+    }
+    get ok() {
+      return this.shader.ok;
+    }
+    /** 取 uniform 当前值生成绑定；extra 覆盖默认状态（如 frustumCull、queue） */
+    binding(extra = {}) {
+      return { ...this.state, ...extra, uniforms: { ...resolveUniforms(this.uniforms), ...extra.uniforms } };
+    }
+    /** 当前 uniform 值（用于 entity.uniforms 刷新共享 uniform，如 uRain） */
+    values(...names) {
+      const all = resolveUniforms(this.uniforms);
+      if (!names.length) return all;
+      const out = {};
+      for (const n2 of names) if (n2 in all) out[n2] = all[n2];
+      return out;
+    }
+    destroy() {
+      return this.shader.destroy();
     }
   };
   var BUILTIN_UNIFORMS = `uniform mat4 pot_Model;
@@ -4722,14 +5674,21 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const i = path.lastIndexOf("/");
     return i < 0 ? "" : path.slice(0, i + 1);
   }
-  function preprocess(stage, entry, read) {
+  function preprocess(stage, entry, read, options = {}) {
     const files = ["(预置)"];
     const once = /* @__PURE__ */ new Set();
+    const three = options.dialect === "three";
     const out = [HEADER.trimEnd()];
     out.push(`#define ${stage === "vertex" ? "POT_VERTEX" : "POT_FRAGMENT"} 1`);
+    for (const [k, v] of Object.entries(options.defines ?? {})) {
+      if (!/^[A-Za-z_]\w*$/.test(k)) throw new Error(`defines：非法的宏名 ${k}`);
+      if (v === false) continue;
+      out.push(v === true ? `#define ${k}` : `#define ${k} ${v}`);
+    }
     out.push(BUILTIN_UNIFORMS.trimEnd());
-    if (stage === "vertex") out.push(VERTEX_INPUTS.trimEnd());
-    else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;");
+    if (stage === "vertex") {
+      if (!three) out.push(VERTEX_INPUTS.trimEnd());
+    } else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;");
     const expand = (name, text, depth, stack) => {
       if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(" → ")}`);
       const index = files.length;
@@ -4749,17 +5708,24 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
         let target;
         let body;
+        let repeatable = false;
         if (m[1]) {
           target = `<${m[1]}>`;
-          const lib = LIBRARY[m[1]];
-          if (lib === void 0) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join("、")}）`);
-          body = lib;
+          const chunk = three && !m[1].startsWith("pot/") ? threeInclude(m[1]) : void 0;
+          if (chunk !== void 0) {
+            body = chunk;
+            repeatable = true;
+          } else {
+            const lib = LIBRARY[m[1]];
+            if (lib === void 0) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join("、")}${three ? "，以及 three 的 ShaderChunk" : ""}）`);
+            body = lib;
+          }
         } else {
-          target = normalize2(dirname(name.startsWith("<") ? "" : name) + m[2]);
+          target = normalize2(dirname(name.startsWith("<") || name.startsWith("(") ? "" : name) + m[2]);
           if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(" → ")}`);
           body = read(target);
         }
-        if (once.has(target) && m[1]) {
+        if (!repeatable && once.has(target) && m[1]) {
           out.push("");
           continue;
         }
@@ -4768,6 +5734,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         out.push(`#line ${i + 2} ${index}`);
       }
     };
+    if (three) expand("(three 前缀)", threePrefix(stage), 0, []);
     if (entry.path !== void 0) {
       const path = normalize2(entry.path);
       expand(path, read(path), 0, [path]);
@@ -4814,13 +5781,16 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const vertexEntry = { path: options.vertex, source: options.vertexSource, library: options.fullscreen ? "pot/fullscreen.vert" : void 0 };
       const fragmentEntry = { path: options.fragment, source: options.fragmentSource };
       if (fragmentEntry.path === void 0 && fragmentEntry.source === void 0) throw new Error("gfx.shader：需要 fragment 或 fragmentSource");
-      const name = options.name ?? `${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : `<${vertexEntry.library ?? "pot/standard.vert"}>`)}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}`;
+      if (options.dialect === "three" && options.vertex === void 0 && options.vertexSource === void 0) throw new Error("gfx.shader：three 方言需要 vertex 或 vertexSource");
+      const defs = options.defines && Object.keys(options.defines).length ? `|${hash2(JSON.stringify(options.defines))}` : "";
+      const name = options.name ?? `${options.dialect ? `${options.dialect}:` : ""}${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : `<${vertexEntry.library ?? "pot/standard.vert"}>`)}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}${defs}`;
       let error = "";
       let vs;
       let fs;
       try {
-        vs = preprocess("vertex", vertexEntry, read);
-        fs = preprocess("fragment", fragmentEntry, read);
+        const pre = { dialect: options.dialect, defines: options.defines };
+        vs = preprocess("vertex", vertexEntry, read, pre);
+        fs = preprocess("fragment", fragmentEntry, read, pre);
       } catch (e) {
         error = String(e?.message ?? e);
       }
@@ -4836,6 +5806,21 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return () => this._release(name, clock);
       }, `gfx.shader(${name})`);
       return new Shader(name, error, dispose);
+    }
+    /**
+     * MeshStandardMaterial 兼容材质：three r180 的 meshphysical 着色器原文（STANDARD），支持 onBeforeCompile 补丁。
+     * 光照、阴影、环境、雾来自 pot 场景。返回的 binding() 可直接用于 entity.shader(m.shader, m.binding())。
+     *
+     *   const m = ctx.gfx.standard({ color: [0.016, 0.016, 0.0165], roughness: 0.5, metalness: 0.7, vertexColors: true,
+     *     onBeforeCompile(s) { s.uniforms.uKind = { value: 1 }; s.fragmentShader = s.fragmentShader.replace(...) } })
+     */
+    standard(options = {}) {
+      const { shader, state } = buildStandard(options);
+      const vs = shader.vertexShader;
+      const fs = shader.fragmentShader;
+      const name = `three:${options.name ?? "standard"}:${hash2(`${vs}\0${fs}\0${JSON.stringify(shader.defines)}`)}`;
+      const program = this.shader({ name, dialect: "three", vertexSource: vs, fragmentSource: fs, defines: shader.defines });
+      return new StandardMaterial(program, shader.uniforms, state);
     }
     /**
      * 用全屏程序（shader({ fullscreen: true })）一次画到新建的贴图，返回每个目标一张 Texture（随调用方插件卸载销毁）。

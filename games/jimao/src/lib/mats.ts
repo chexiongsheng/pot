@@ -1,15 +1,25 @@
 /**
  * 材质库：机械移植原版 Gg/c3/l1（程序化 PBR 贴图组 + 命名材质）。
  * 原版在 three.js 里用全屏 RawShaderMaterial 把 e3+Tn[fn]+t3 画到 3 目标 MRT，再 copy/法线 pass 得到 albedo/orm/normal，
- * 由 onBeforeCompile 补丁按 SL_TINT 合成颜色。这里同样在 GPU 上烘焙（ctx.gfx.bake），
- * 并把 SL_TINT 合成与 orm→PotLit 遮罩换算挪到一个游戏侧合成 pass，结果直接交给内置 PotLit 材质。
+ * 由 onBeforeCompile 补丁 h3 合成颜色、宏观变化、雨天湿润/条纹/水珠、远距离镂空。
  *
- * 未移植（Runner 能力缺口，见 docs）：SL_FX 宏观亮度/粗糙度变化、雨天条纹与水珠、SL_ACUT 远距离抖动镂空。
+ * 两条路径：
+ * - std：ctx.gfx.standard（three 方言）+ 原版 h3 补丁原文，效果与原版一致。Mat.std 存在时用 mats.apply(entity, mat) 挂上。
+ * - material：内置 PotLit 回退（SL_TINT 合成挪到游戏侧合成 pass），用于阴影投射、不支持运行时着色器的平台，以及 uv:'world'。
  */
-import type { Context, MaterialOptions, Texture } from '@pot/core'
+import { threeChunks, type Context, type Defines, type Entity, type MaterialOptions, type ShaderBinding, type StandardMaterial, type Texture, type ThreeShaderObject, type ThreeUniform } from '@pot/core'
 import { COPY, HEADER, MAIN, NORMAL, SURF } from './sl-shaders'
+import { dA, gA, mA, pA, vA, xA, yA } from './sl-patch'
 
-void COPY // 原版的 copy pass 在合成 pass 里一并完成（同分辨率点采样，结果等价）
+/** 原版 bA */
+const bA = threeChunks.aomap_fragment.replace('texture2D( aoMap, vAoMapUv ).r', 'slORM.r')
+/** 原版 h3（onBeforeCompile 补丁，原文） */
+function h3(i: ThreeShaderObject, e: Record<string, ThreeUniform>) {
+  Object.assign(i.uniforms, e), i.vertexShader = i.vertexShader.replace('#include <common>', `#include <common>
+` + dA).replace('#include <project_vertex>', `#include <project_vertex>
+` + pA), i.fragmentShader = i.fragmentShader.replace('#include <common>', `#include <common>
+` + mA).replace('#include <map_fragment>', gA).replace('#include <roughnessmap_fragment>', vA).replace('#include <metalnessmap_fragment>', xA).replace('#include <normal_fragment_maps>', yA).replace('#include <aomap_fragment>', bA)
+}
 
 interface SetDef { fn: string; size: number; tile: number | [number, number]; bump: number; hero?: boolean; p?: number[]; seed?: number }
 
@@ -135,6 +145,8 @@ export interface MatGetOptions {
   doubleSide?: boolean
   /** 室内：几乎不受雨淋（原版 uSlX.x = 0.12） */
   interior?: boolean
+  /** 顶点色（原版 vertexColors；影响 std 程序） */
+  vertexColors?: boolean
 }
 
 export interface Mat {
@@ -143,6 +155,8 @@ export interface Mat {
   material: MaterialOptions
   /** 原版 tile（米） */
   tile: [number, number]
+  /** 原版材质（three 方言 + h3 补丁）；不可用时为空 */
+  std?: StandardMaterial
 }
 
 const hexNum = (c: number | string) => (typeof c === 'number' ? c : parseInt(c.replace('#', '').slice(0, 6), 16))
@@ -208,6 +222,65 @@ export function createMats(ctx: Context, quality: { tex?: number } = {}) {
     return c
   }
 
+  /** 原版 copy pass：albedo 平方后存 sRGB（读出即线性 rgb²），orm 原样；都带 mipmap */
+  const stdSets = new Map<string, { albedo: Texture; orm: Texture }>()
+  const stdSet = (key: string) => {
+    let t = stdSets.get(key)
+    if (t) return t
+    const set = bakeSet(key)
+    const copy = program('copy', COPY)
+    const [albedo] = gfx.bake(copy, { width: set.size, targets: [{ format: 'srgb', wrap: 'repeat', filter: 'trilinear' }], uniforms: { tA: set.raw[0], uSq: 1 } })
+    const [orm] = gfx.bake(copy, { width: set.size, targets: [{ format: 'rgba8', wrap: 'repeat', filter: 'trilinear' }], uniforms: { tA: set.raw[1], uSq: 0 } })
+    t = { albedo, orm }
+    stdSets.set(key, t)
+    return t
+  }
+  /** 原版 uniforms.wet（全局湿度，所有材质共享） */
+  const uniforms = { wet: { value: 1 } as ThreeUniform }
+  const stdCache = new Map<string, StandardMaterial | null>()
+  let stdOff = !gfx.supported
+  /** 原版 Gg 里 new MeshStandardMaterial + h3 的部分 */
+  function standard(key: string, def: MatDef, color: number, o: MatGetOptions): StandardMaterial | undefined {
+    if (stdOff || o.uv === 'world') return undefined
+    const hit = stdCache.get(key)
+    if (hit !== undefined) return hit ?? undefined
+    const C = bakeSet(def.set)
+    const tex = stdSet(def.set)
+    const G = o.uv === 'object'
+    const j = !def.transparent && !def.alphaCut
+    const N: Record<string, ThreeUniform> = {
+      uSlWet: uniforms.wet,
+      uSlWetP: { value: def.wet },
+      uSlMacro: { value: def.macro },
+      uSlUv: { value: [1, 1, G ? (o.scale ?? 1) / C.tile[0] : C.size] },
+      uSlX: { value: [o.interior ? 0.12 : 1, 0] },
+    }
+    const defines: Defines = { SL_TINT: def.tint }
+    if (G) defines.SL_TRIPLANAR = true
+    if (j) defines.SL_FX = true
+    if (def.alphaCut && !G) defines.SL_ACUT = true
+    const m = gfx.standard({
+      name: `sl2|${def.tint}${G ? 't' : ''}${j ? 'f' : ''}${def.alphaCut ? 'a' : ''}`,
+      map: tex.albedo, normalMap: C.normal, roughnessMap: tex.orm, metalnessMap: tex.orm, aoMap: tex.orm,
+      repeat: [1 / C.tile[0], 1 / C.tile[1]],
+      color, roughness: def.rough, metalness: def.metal, vertexColors: !!o.vertexColors, normalScale: def.nrm,
+      side: o.doubleSide || def.side === 2 ? 'double' : 'front',
+      transparent: !!def.transparent, depthWrite: def.transparent ? false : undefined, envMapIntensity: def.transparent ? 1.4 : 1,
+      alphaTest: def.alphaCut ? 0.5 : undefined,
+      defines,
+      onBeforeCompile: (s) => h3(s, N),
+    })
+    if (!m.ok) {
+      // 编译失败（日志里有详细错误）：整体退回 PotLit，避免半数材质走新路径
+      ctx.logger('mats').warn('原版材质着色器不可用，退回内置材质')
+      stdOff = true
+      stdCache.set(key, null)
+      return undefined
+    }
+    stdCache.set(key, m)
+    return m
+  }
+
   const warned = new Set<string>()
   /** 原版 mats.get */
   function get(name: string, o: MatGetOptions = {}): Mat {
@@ -238,11 +311,20 @@ export function createMats(ctx: Context, quality: { tex?: number } = {}) {
       wet: (def.wet[2] > 0 ? 1 : 0) * (o.interior ? 0.12 : 1),
     }
     if (def.alphaCut) material.cutoff = 0.5
-    return { color: '#ffffff', material, tile: set.tile }
+    const key = `${name}|${o.vertexColors ? 'v' : ''}${o.uv === 'object' ? `t${k}` : ''}${o.doubleSide ? 'd' : ''}${o.interior ? 'i' : ''}c${color}`
+    return { color: '#ffffff', material, tile: set.tile, std: standard(key, def, color, o) }
+  }
+
+  /** 把原版材质挂到实体上（没有 std 时保持 spawn 的内置材质） */
+  function apply(e: Entity, m: Mat, extra?: ShaderBinding) {
+    if (m.std) e.shader(m.std.shader, m.std.binding(extra))
+    return e
   }
 
   return {
     get,
+    apply,
+    uniforms,
     names: Object.keys(MATS),
     /** 预先烘焙（原版 prewarm） */
     prewarm(names: string[] = Object.keys(MATS)) {

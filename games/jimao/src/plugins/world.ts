@@ -5,7 +5,7 @@ import { createApron } from '../lib/apron'
 import { createSea } from '../lib/sea'
 import { createRain } from '../lib/rain'
 import { rng } from '../lib/math'
-import { createMats, MATS, type Mats } from '../lib/mats'
+import { createMats, MATS, type Mat, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
 import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '../lib/origlevel'
 import { registerSfx, sfx } from '../lib/sfx'
@@ -205,13 +205,13 @@ export async function apply(ctx: Context) {
   await step('生成雨幕', 0.26)
   const rainFx = apron ? createRain(ctx, { mask: apron.mask, level: orig.data }) : undefined
   /** 材质令牌 → Runner 材质：GPU 烘焙的原版材质；没有运行时着色器时退回纯色 */
-  const resolveToken = (t: MatToken): { color: string; material: MaterialOptions } => {
+  const resolveToken = (t: MatToken): { color: string; material: MaterialOptions; mat?: Mat } => {
     if (t.kind === 'emissive') return emissiveMaterial(t)
     // 远景闪灯：原版 MeshBasicMaterial + HDR 顶点色（闪烁着色器暂缺，常亮）
     if (t.kind === 'lamps') return { color: '#ffffff', material: { mode: 'unlit', vertexColors: true, shadows: false } }
     if (mats) {
-      const r = mats.get(t.name, { interior: !!t.opts.interior })
-      return { color: r.color, material: { ...r.material, vertexColors: t.vertexColors } }
+      const r = mats.get(t.name, { interior: !!t.opts.interior, vertexColors: t.vertexColors })
+      return { color: r.color, material: { ...r.material, vertexColors: t.vertexColors }, mat: r }
     }
     const def = MATS[t.name]
     const hex = `#${(def?.color ?? 0x808080).toString(16).padStart(6, '0')}`
@@ -229,10 +229,11 @@ export async function apply(ctx: Context) {
     scene.mesh(name, () => toMesh(s.geometry), meshKey)
     const r = resolveToken(s.material)
     const solid = !s.material.transparent && s.material.kind === 'std'
-    scene.spawn({
+    const ent = scene.spawn({
       shape: `mesh:${name}`, name: `level:${s.material.name}`, color: r.color,
       material: { ...r.material, shadows: s.cast }, collider: solid, layer: solid ? LEVEL_LAYER : undefined,
     })
+    if (r.mat) mats!.apply(ent, r.mat, { shadows: s.cast })
   }
   const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
   for (let k = 0; k < orig.dynamics.length; k++) {
@@ -247,6 +248,7 @@ export async function apply(ctx: Context) {
       shape: `mesh:${name}`, name: `level-dyn:${d.material.name}`, position: tr.position, rotation: tr.rotation, scale: tr.scale,
       color: r.color, material: { ...r.material, shadows: d.mesh.castShadow }, collider: false,
     })
+    if (r.mat) mats!.apply(ent, r.mat, { shadows: d.mesh.castShadow })
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
   }
   await step('布置灯光', 0.67)

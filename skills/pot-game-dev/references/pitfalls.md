@@ -91,6 +91,8 @@
 - 目前只支持 Windows D3D11；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
 - 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。后处理链（`gfx.post`）的 pass 拿不到主光阴影图，体积光暂时做不了。
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
+- 移植 three 材质优先用 `gfx.standard` 原文加 `onBeforeCompile`（见 api.md），比手改成 `pot_Lit` 更接近原版。限制：蒙皮实体不能用运行时着色器；没有自定义顶点属性；只画在主相机上（不进平面反射）；阴影仍由普通渲染器的回退材质投射，回退材质要保留 alphaTest 才能让镂空物体的阴影一致。
+- 改了 `js/runtime` 后要 `npm --prefix js run build` 并重建 Runner，Runner 内打包的是 `Resources/pot/core.cjs`；只热重载游戏会出现 `ctx.gfx.standard is not a function` 或 `threeChunks` 为 undefined。
 - 移植 three.js 的 `onBeforeCompile` 补丁：改 `directSpecular` 用 `s.specular`/`s.specularMax`；在 `opaque_fragment` 前改 `outgoingLight` 用 `pot_LitColor` 后自己 `pot_ApplyFog`；`s.ao` 同时影响环境漫反射和环境反射、不影响直射，与 three 的 `radiance *= k; iblIrradiance *= k` 不同，后者应折算为 `albedo *= k; specular *= k`。
 - 移植时 three 的 `vGWorld`/`cameraPosition` 用 `(x, y, -z)` 换算，法线 `(nx, ny, nz)` 换回 Unity 是 `(nx, ny, -nz)`；自定义网格按 z 取反并反转三角形绕序。
 - 没有实例化：原版 `InstancedBufferGeometry` + 每实例属性（雨、溅射、粒子）要把实例展开成普通网格，每个实例重复写它的顶点，实例数据塞进 `normals`（3 个浮点，原样传递）和 `uvs`（2 个浮点）；不要用 `colors`，会被当作 sRGB 转线性。

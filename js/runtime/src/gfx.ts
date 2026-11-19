@@ -13,7 +13,13 @@
 import { Context, Service } from 'cordis'
 import type { Host } from './host'
 import { applyUniforms, Texture } from './scene'
-import type { UniformValue } from './scene'
+import type { ShaderBinding, UniformValue } from './scene'
+import { buildStandard, resolveUniforms, threeInclude, threePrefix } from './three'
+import type { Defines, StandardMaterialOptions, ThreeUniform } from './three'
+
+export type { Defines, StandardMaterialOptions, ThreeShaderObject, ThreeUniform } from './three'
+/** three.js 的 ShaderChunk（原文，只读）；onBeforeCompile 补丁里 ShaderChunk.xxx.replace(...) 的等价物 */
+export { threeChunks } from './three'
 
 declare module 'cordis' {
   interface Context {
@@ -33,6 +39,14 @@ export interface ShaderOptions {
   name?: string
   /** 全屏程序（给 gfx.bake 用）：省略 vertex 时用 <pot/fullscreen.vert>，片元着色器读 in vec2 vUv */
   fullscreen?: boolean
+  /**
+   * 着色器方言。'three'：源码按 three.js（r180）ShaderMaterial 写法解释，可 #include three 的全部 ShaderChunk，
+   * 内置 modelMatrix / viewMatrix / projectionMatrix / position / normal / uv 等；光照与雾接到 pot 场景。
+   * 此时必须同时给出顶点与片元着色器
+   */
+  dialect?: 'three'
+  /** 预置的宏（true → #define K；false 省略；其他 → #define K 值） */
+  defines?: Defines
 }
 
 export interface BakeTarget {
@@ -123,6 +137,29 @@ export class Shader {
   }
   destroy() {
     return this._dispose?.()
+  }
+}
+
+/** gfx.standard 的结果：程序 + three 形式的 uniform（{ value }，可在外部共享和修改）+ 绘制状态 */
+export class StandardMaterial {
+  constructor(readonly shader: Shader, readonly uniforms: Record<string, ThreeUniform>, readonly state: ShaderBinding) {}
+  get ok() {
+    return this.shader.ok
+  }
+  /** 取 uniform 当前值生成绑定；extra 覆盖默认状态（如 frustumCull、queue） */
+  binding(extra: ShaderBinding = {}): ShaderBinding {
+    return { ...this.state, ...extra, uniforms: { ...resolveUniforms(this.uniforms), ...extra.uniforms } }
+  }
+  /** 当前 uniform 值（用于 entity.uniforms 刷新共享 uniform，如 uRain） */
+  values(...names: string[]): Record<string, UniformValue> {
+    const all = resolveUniforms(this.uniforms)
+    if (!names.length) return all
+    const out: Record<string, UniformValue> = {}
+    for (const n of names) if (n in all) out[n] = all[n]
+    return out
+  }
+  destroy() {
+    return this.shader.destroy()
   }
 }
 
@@ -484,14 +521,21 @@ function dirname(path: string) {
  * 展开 #include，并用 #line 把行号映射回原文件。
  * read(path) 读取 data/ 下的文件（会登记依赖，文件变化时触发热重载）。
  */
-export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string; library?: string }, read: (path: string) => string): Source {
+export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string; library?: string }, read: (path: string) => string, options: { dialect?: 'three'; defines?: Defines } = {}): Source {
   const files: string[] = ['(预置)']
   const once = new Set<string>()
+  const three = options.dialect === 'three'
   const out: string[] = [HEADER.trimEnd()]
   out.push(`#define ${stage === 'vertex' ? 'POT_VERTEX' : 'POT_FRAGMENT'} 1`)
+  for (const [k, v] of Object.entries(options.defines ?? {})) {
+    if (!/^[A-Za-z_]\w*$/.test(k)) throw new Error(`defines：非法的宏名 ${k}`)
+    if (v === false) continue
+    out.push(v === true ? `#define ${k}` : `#define ${k} ${v}`)
+  }
   out.push(BUILTIN_UNIFORMS.trimEnd())
-  if (stage === 'vertex') out.push(VERTEX_INPUTS.trimEnd())
-  else out.push('uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;')
+  if (stage === 'vertex') {
+    if (!three) out.push(VERTEX_INPUTS.trimEnd())
+  } else out.push('uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;')
 
   const expand = (name: string, text: string, depth: number, stack: string[]) => {
     if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(' → ')}`)
@@ -512,17 +556,25 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
       }
       let target: string
       let body: string
+      // three 的 chunk 可以重复包含（如提前 return 前的 tonemapping_fragment），不去重
+      let repeatable = false
       if (m[1]) {
         target = `<${m[1]}>`
-        const lib = LIBRARY[m[1]]
-        if (lib === undefined) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join('、')}）`)
-        body = lib
+        const chunk = three && !m[1].startsWith('pot/') ? threeInclude(m[1]) : undefined
+        if (chunk !== undefined) {
+          body = chunk
+          repeatable = true
+        } else {
+          const lib = LIBRARY[m[1]]
+          if (lib === undefined) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join('、')}${three ? '，以及 three 的 ShaderChunk' : ''}）`)
+          body = lib
+        }
       } else {
-        target = normalize(dirname(name.startsWith('<') ? '' : name) + m[2])
+        target = normalize(dirname(name.startsWith('<') || name.startsWith('(') ? '' : name) + m[2])
         if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(' → ')}`)
         body = read(target)
       }
-      if (once.has(target) && m[1]) {
+      if (!repeatable && once.has(target) && m[1]) {
         out.push('')
         continue
       }
@@ -532,6 +584,7 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
     }
   }
 
+  if (three) expand('(three 前缀)', threePrefix(stage), 0, [])
   if (entry.path !== undefined) {
     const path = normalize(entry.path)
     expand(path, read(path), 0, [path])
@@ -585,14 +638,17 @@ export class GfxService extends Service {
     const vertexEntry = { path: options.vertex, source: options.vertexSource, library: options.fullscreen ? 'pot/fullscreen.vert' : undefined }
     const fragmentEntry = { path: options.fragment, source: options.fragmentSource }
     if (fragmentEntry.path === undefined && fragmentEntry.source === undefined) throw new Error('gfx.shader：需要 fragment 或 fragmentSource')
+    if (options.dialect === 'three' && options.vertex === undefined && options.vertexSource === undefined) throw new Error('gfx.shader：three 方言需要 vertex 或 vertexSource')
+    const defs = options.defines && Object.keys(options.defines).length ? `|${hash(JSON.stringify(options.defines))}` : ''
     const name = options.name
-      ?? `${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : `<${vertexEntry.library ?? 'pot/standard.vert'}>`)}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}`
+      ?? `${options.dialect ? `${options.dialect}:` : ''}${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : `<${vertexEntry.library ?? 'pot/standard.vert'}>`)}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}${defs}`
     let error = ''
     let vs: Source | undefined
     let fs: Source | undefined
     try {
-      vs = preprocess('vertex', vertexEntry, read)
-      fs = preprocess('fragment', fragmentEntry, read)
+      const pre = { dialect: options.dialect, defines: options.defines }
+      vs = preprocess('vertex', vertexEntry, read, pre)
+      fs = preprocess('fragment', fragmentEntry, read, pre)
     } catch (e: any) {
       error = String(e?.message ?? e)
     }
@@ -608,6 +664,22 @@ export class GfxService extends Service {
       return () => this._release(name, clock)
     }, `gfx.shader(${name})`)
     return new Shader(name, error, dispose)
+  }
+
+  /**
+   * MeshStandardMaterial 兼容材质：three r180 的 meshphysical 着色器原文（STANDARD），支持 onBeforeCompile 补丁。
+   * 光照、阴影、环境、雾来自 pot 场景。返回的 binding() 可直接用于 entity.shader(m.shader, m.binding())。
+   *
+   *   const m = ctx.gfx.standard({ color: [0.016, 0.016, 0.0165], roughness: 0.5, metalness: 0.7, vertexColors: true,
+   *     onBeforeCompile(s) { s.uniforms.uKind = { value: 1 }; s.fragmentShader = s.fragmentShader.replace(...) } })
+   */
+  standard(options: StandardMaterialOptions = {}): StandardMaterial {
+    const { shader, state } = buildStandard(options)
+    const vs = shader.vertexShader
+    const fs = shader.fragmentShader
+    const name = `three:${options.name ?? 'standard'}:${hash(`${vs}\0${fs}\0${JSON.stringify(shader.defines)}`)}`
+    const program = this.shader({ name, dialect: 'three', vertexSource: vs, fragmentSource: fs, defines: shader.defines })
+    return new StandardMaterial(program, shader.uniforms, state)
   }
 
   /**
