@@ -19,7 +19,13 @@ namespace Pot
     [Preserve]
     public static class PotGfx
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL 没有动态库：插件源码（Plugins/WebGL/pot_gfx）由 emscripten 静态链接，渲染插件要自己注册
+        const string Dll = "__Internal";
+        [DllImport(Dll)] static extern void PotGfx_RegisterPlugin();
+#else
         const string Dll = "pot_gfx";
+#endif
 
         [DllImport(Dll)] static extern IntPtr PotGfx_Backend();
         [DllImport(Dll)] static extern int PotGfx_Create(byte[] vs, byte[] fs);
@@ -79,6 +85,9 @@ namespace Pot
             {
                 try
                 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                    PotGfx_RegisterPlugin();
+#endif
                     backendName = Str(PotGfx_Backend());
                     available = true;
                     try { PotGfx_SetCacheDir(Utf8(CacheDir)); }
@@ -91,7 +100,7 @@ namespace Pot
                 }
             }
             if (available == false) return "Runner 未包含 pot_gfx 原生插件";
-            if (string.IsNullOrEmpty(backendName)) return "当前图形 API（" + SystemInfo.graphicsDeviceType + "）不支持运行时着色器，目前支持 D3D11";
+            if (string.IsNullOrEmpty(backendName)) return "当前图形 API（" + SystemInfo.graphicsDeviceType + "）不支持运行时着色器，目前支持 D3D11、WebGL2（GLES3）";
             return null;
         }
 
@@ -566,6 +575,9 @@ namespace Pot
 
         static int SamplerBits(Texture t)
         {
+            // 深度贴图在 GLES3/WebGL2 上不能线性过滤（会被视为不完整、读出 0），一律钳位 + 点采样
+            var rt = t as RenderTexture;
+            if (rt != null && (rt.graphicsFormat == GraphicsFormat.None || GraphicsFormatUtility.IsDepthFormat(rt.graphicsFormat))) return 1;
             var bits = 0;
             if (t.wrapMode == TextureWrapMode.Clamp) bits |= 1;
             bits |= (t.filterMode == FilterMode.Point ? 0 : t.filterMode == FilterMode.Bilinear ? 1 : 2) << 1;
@@ -681,11 +693,11 @@ namespace Pot
             return Finish(count);
         }
 
-        static int Finish(int count)
+        static int Finish(int count, int start = 0)
         {
             if (count == 0) return 0;
             var len = (int)frame.Position;
-            frame.Position = 0;
+            frame.Position = start;
             writer.Write(count);
             frame.Position = len;
             return len;
@@ -1056,6 +1068,7 @@ namespace Pot
             bakes.TryGetValue(chain.cfg.shared, out shared);
             var quad = BakeQuad();
             var env = PotRender.EnvTexture;
+            var glLike = SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3 || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore;
 
             for (var i = 0; i < chain.cfg.passes.Length; i++)
             {
@@ -1087,14 +1100,24 @@ namespace Pot
                 }
                 SetVec("pot_ScreenSize", ow, oh, 1f / ow, 1f / oh);
                 frame.SetLength(0);
+                // GL 上 SetRenderTarget 惰性生效，插件事件时 FBO 仍是相机目标：把输出贴图交给后端自行绑定（事件 1）
+                var evt = 0;
+                if (outRt != null && glLike)
+                {
+                    writer.Write(outRt.GetNativeTexturePtr().ToInt64());
+                    writer.Write(ow);
+                    writer.Write(oh);
+                    evt = 1;
+                }
+                var start = (int)frame.Position;
                 writer.Write(0);
                 var ok = WriteDraw(b, p, quad, 2 | ((pc.blend & 3) << F_BlendShift) | F_NoDepthTest, env, shadowMap, shared, postInputs);
-                var len = Finish(ok ? 1 : 0);
+                var len = Finish(ok ? 1 : 0, start);
                 if (len <= 0) continue;
                 var slot = PotGfx_Submit(frame.GetBuffer(), len);
                 if (outRt != null) cmd.SetRenderTarget(outRt);
                 else cmd.SetRenderTarget(color.nameID, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store);
-                cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
+                cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), evt, (IntPtr)slot);
                 if (outT != null && outT.cfg.history != 0) outT.cur = 1 - outT.cur;
             }
             lc[0] = savedLights;

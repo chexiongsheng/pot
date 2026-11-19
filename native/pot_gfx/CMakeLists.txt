@@ -41,12 +41,18 @@ add_subdirectory(${POT_ROOT}/third_party/SPIRV-Cross ${CMAKE_BINARY_DIR}/spirv-c
 add_library(pot_gfx SHARED
     src/compiler.cpp
     src/compiler.h
+    src/reflect.cpp
     src/plugin.cpp
     src/backend.h
     src/backend_d3d11.cpp
     src/cache.cpp
     src/cache.h
 )
+# GLES3 后端（WebGL2 / Android）：WebGL 版不走 CMake，由 sync-webgl.js 拷进 com.pot.core/Plugins/WebGL 由 Unity 的 emscripten 编译
+if(ANDROID)
+    target_sources(pot_gfx PRIVATE src/backend_gles3.cpp)
+    target_link_libraries(pot_gfx PRIVATE GLESv3)
+endif()
 target_include_directories(pot_gfx PRIVATE ${UNITY_PLUGIN_API} ${POT_ROOT}/third_party/glslang ${POT_ROOT}/third_party/SPIRV-Cross)
 target_link_libraries(pot_gfx PRIVATE glslang glslang-default-resource-limits SPIRV spirv-cross-core spirv-cross-glsl spirv-cross-hlsl)
 if(WIN32)
@@ -57,7 +63,7 @@ if(MSVC)
     target_compile_options(pot_gfx PRIVATE /utf-8 /W3)
 endif()
 
-add_executable(pot_shaderc src/shaderc.cpp src/compiler.cpp)
+add_executable(pot_shaderc src/shaderc.cpp src/compiler.cpp src/reflect.cpp)
 target_include_directories(pot_shaderc PRIVATE ${POT_ROOT}/third_party/glslang ${POT_ROOT}/third_party/SPIRV-Cross)
 target_link_libraries(pot_shaderc PRIVATE glslang glslang-default-resource-limits SPIRV spirv-cross-core spirv-cross-glsl spirv-cross-hlsl)
 if(WIN32)

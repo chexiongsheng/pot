@@ -179,7 +179,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 关闭视锥剔除 `frustumCull: false` | 雨 | 顶点着色器重算位置的效果（雨、粒子）不再时有时无 |
 | ✅ | 自定义后处理链 `gfx.post` | 后处理 | 全屏 pass 链、按比例或固定尺寸目标、`history` 双缓冲、内置 `scene` / `depth` |
 | ✅ | three 方言 `gfx.standard` / `dialect: 'three'` | 枪模、场景材质 | three r180 的 meshphysical 原文与 ShaderChunk 直接编译，支持 `onBeforeCompile` 补丁（`threeChunks`）；光照、阴影、雾、环境改读 pot 内置。枪模 Bf 与场景 sl 材质 h3 已换回原版原文，D3D11 上 60fps |
-| ❌ | `pot_gfx` 只有 D3D11 后端 | WebGL 版 | WebGL / GLES / Metal 下运行时着色器全部不可用，画面退回 PotLit；下一步做 GLES3 后端 |
+| ✅ | `pot_gfx` GLES3 / WebGL2 后端 | WebGL 版 | 源码直通驱动（不经 glslang），`glGetActiveUniform` 反射；程序化材质、three 方言、`gfx.bake`、`gfx.post` 在 WebGL 上均已生效。注意：Unity GL 的 `SetRenderTarget` 惰性生效，post 的输出目标由后端自行绑定 FBO；`gl_FragCoord` 原点随后端不同（D3D 左上、GL 左下）；Android GLES 尚未实测（需在渲染线程编译）；Metal、Vulkan 未做 |
 | ✅ | 屏幕空间内置量 | 后处理 | `pot_ScreenVP/InvVP`、`pot_DepthParams`、`<pot/post>` 的深度与世界坐标重建 |
 | ⚠️ | 遮蔽只有一个 `ao` | 海面 | 原版只遮直射与漫反射 IBL；建议拆成 diffuse / specular / direct 三项 |
 | ⚠️ | 高光钳制逐光源进行 | 海面 | 原版是所有光源之和钳到 40，只在多光源极亮时有差别 |
@@ -310,7 +310,7 @@ MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 W
 - iOS 上 Runner 的安装：走 TestFlight，或开发者用自己的证书从 Runner 工程编译安装。
 - 微信小游戏：Unity WebGL 或团结引擎的转换路径可行，Puerts 在小游戏上的支持程度待实测。
 - UE 内核：包体大，没有 Web 和小游戏平台，远期作为“高画质原生 Runner”考虑。API 层尽量设计成与引擎无关。
-- 运行时着色器的平台覆盖：目前只有 D3D11 后端；Vulkan、GLES、Metal 后端待实现。iOS 允许运行时编译 MSL（`newLibraryWithSource`），WebGL 直接提交 GLSL，小游戏环境待实测。
+- 运行时着色器的平台覆盖：D3D11 与 GLES3/WebGL2 后端已完成（`ctx.gfx.backend` 为 `"d3d11"` 或 `"gles3"`）；Vulkan、Metal 后端待实现，Android GLES 待实测。iOS 允许运行时编译 MSL（`newLibraryWithSource`），小游戏环境待实测。
 
 ## 14. 热重载
 

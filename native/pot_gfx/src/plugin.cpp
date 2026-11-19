@@ -1,6 +1,12 @@
-// pot_gfx：Unity 原生渲染插件入口与 C 导出（C# 侧 Pot.PotGfx 调用）
-#include <IUnityGraphics.h>
-#include <IUnityInterface.h>
+// pot_gfx：Unity 原生渲染插件入口与 C 导出（C# 侧 Pot.PotGfx 调用）。
+//
+// 两种构建：
+// - 桌面（CMake）：带 glslang/SPIRV-Cross 编译器和编译缓存（D3D11 需要先转 HLSL）；
+// - WebGL（__EMSCRIPTEN__，由 Unity 的 emscripten 编译 Plugins/WebGL 下的源码）：不带编译器，
+//   GLES3 后端直接把游戏源码交给驱动编译。WebGL 没有动态库加载，C# 先调 PotGfx_RegisterPlugin 注册渲染插件。
+// Unity 头文件用引号：WebGL 版的头文件和源码在同一目录（桌面版由 CMake 按 UNITY_PLUGIN_API 提供）。
+#include "IUnityGraphics.h"
+#include "IUnityInterface.h"
 
 #include <cstring>
 #include <mutex>
@@ -9,8 +15,12 @@
 #include <vector>
 
 #include "backend.h"
-#include "cache.h"
 #include "compiler.h"
+
+#if !defined(__EMSCRIPTEN__)
+#define POT_GFX_COMPILER 1
+#include "cache.h"
+#endif
 
 using namespace pot;
 
@@ -28,10 +38,13 @@ static std::mutex g_slotMutex;
 
 static void UNITY_INTERFACE_API OnDeviceEvent(UnityGfxDeviceEventType type) {
     if (type == kUnityGfxDeviceEventInitialize) {
-        if (g_backend) return;
+        if (g_backend || !g_graphics) return;
         UnityGfxRenderer r = g_graphics->GetRenderer();
 #if defined(_WIN32)
         if (r == kUnityGfxRendererD3D11) g_backend = CreateBackendD3D11(g_unity);
+#endif
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+        if (r == kUnityGfxRendererOpenGLES30) g_backend = CreateBackendGLES3();
 #endif
         (void)r;
     } else if (type == kUnityGfxDeviceEventShutdown) {
@@ -55,8 +68,24 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload() {
     OnDeviceEvent(kUnityGfxDeviceEventShutdown);
 }
 
+#if defined(__EMSCRIPTEN__)
+typedef void(UNITY_INTERFACE_API* PluginLoadFunc)(IUnityInterfaces* unityInterfaces);
+typedef void(UNITY_INTERFACE_API* PluginUnloadFunc)();
+// Unity WebGL 运行库导出的符号（不带 V5 后缀）
+extern "C" void UnityRegisterRenderingPlugin(PluginLoadFunc loadPlugin, PluginUnloadFunc unloadPlugin);
+
+// WebGL：静态链接的插件要自己注册，Unity 随即回调 UnityPluginLoad。重复调用无副作用。
+extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API PotGfx_RegisterPlugin() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    UnityRegisterRenderingPlugin(UnityPluginLoad, UnityPluginUnload);
+}
+#endif
+
+// eventId 0：data 为 Submit 返回的槽号，帧数据见 backend.h
+// eventId 1：帧数据前多一段目标：int64 原生贴图句柄, int32 宽, int32 高（后端据此自行绑定输出）
 static void UNITY_INTERFACE_API OnRenderEvent(int eventId, void* data) {
-    (void)eventId;
     if (!g_backend) return;
     int slot = (int)(intptr_t)data;
     std::vector<uint8_t> frame;
@@ -67,35 +96,58 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventId, void* data) {
         frame.swap(it->second);
         g_slots.erase(it);
     }
-    if (!frame.empty()) g_backend->Render(frame.data(), frame.size());
+    size_t skip = 0;
+    if (eventId == 1) {
+        pot::Reader r(frame.data(), frame.data() + frame.size());
+        int64_t tex = r.i64();
+        int w = r.i32(), h = r.i32();
+        if (!r.ok) return;
+        g_backend->SetNextTarget(tex, w, h);
+        skip = 16;
+    }
+    if (frame.size() > skip) g_backend->Render(frame.data() + skip, frame.size() - skip);
 }
+
+// GLES3：源码直接交给驱动（不经过 glslang/SPIRV-Cross），后端负责反射
+static bool Passthrough() { return g_backend && g_backend->ShaderTarget() == Target::GLSLES300; }
 
 // ---------------- C 导出 ----------------
 
 extern "C" {
 
-// 当前后端名（"d3d11"）；不支持的图形 API 返回空串
+// 当前后端名（"d3d11" / "gles3"）；不支持的图形 API 返回空串
 UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Backend() {
     return g_backend ? g_backend->Name() : "";
 }
 
 // 编译程序。成功返回 id（>0），PotGfx_Info 为反射 JSON；失败返回 0，PotGfx_Info 为错误信息。
-// 设置了缓存目录时先按源码 hash 查缓存，命中则跳过全部编译步骤
+// 设置了缓存目录时先按源码 hash 查缓存，命中则跳过全部编译步骤。
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_Create(const char* vs, const char* fs) {
     if (!g_backend) {
-        g_info = "当前图形 API 不支持运行时着色器（pot_gfx 目前支持 D3D11）";
+        g_info = "当前图形 API 不支持运行时着色器（pot_gfx 目前支持 D3D11、GLES3/WebGL2）";
         return 0;
     }
     std::string vsrc = vs ? vs : "", fsrc = fs ? fs : "";
     CompiledProgram p;
+    std::string err;
+    int id = g_nextId++;
+    if (Passthrough()) {
+        p.vsCode = vsrc;
+        p.fsCode = fsrc;
+        if (!g_backend->CreateProgram(id, p, err)) {
+            g_info = err;
+            return 0;
+        }
+        g_info = ReflectionJson(p);
+        return id;
+    }
+#if POT_GFX_COMPILER
     std::string key;
     bool hit = false;
     if (CacheEnabled()) {
         key = CacheKey(g_backend->Name(), vsrc, fsrc);
         hit = CacheLoad(key, p);
     }
-    int id = g_nextId++;
-    std::string err;
     if (hit && !g_backend->CreateProgram(id, p, err)) {
         // 缓存内容不可用（驱动拒绝等）：退回完整编译
         hit = false;
@@ -116,36 +168,58 @@ UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_Create(const char* vs, con
     CacheCount(hit);
     g_info = ReflectionJson(p);
     return id;
+#else
+    g_info = "pot_gfx 未包含着色器编译器";
+    return 0;
+#endif
 }
 
-// 设置编译缓存目录（UTF-8）；空串关闭
+// 设置编译缓存目录（UTF-8）；空串关闭。WebGL 版没有缓存（驱动直接编译源码）
 UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API PotGfx_SetCacheDir(const char* dir) {
+#if POT_GFX_COMPILER
     CacheSetDir(dir ? dir : "");
+#else
+    (void)dir;
+#endif
 }
 
 // 本进程缓存命中 / 未命中次数
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_CacheHits() {
+#if POT_GFX_COMPILER
     int h, m;
     CacheStats(h, m);
     return h;
+#else
+    return 0;
+#endif
 }
 
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_CacheMisses() {
+#if POT_GFX_COMPILER
     int h, m;
     CacheStats(h, m);
     return m;
+#else
+    return 0;
+#endif
 }
 
 UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Info() {
     return g_info.c_str();
 }
 
-// 只做转译（调试用）：返回目标语言源码，失败返回错误
+// 只做转译（调试用）：返回目标语言源码，失败返回错误。GLES3 不转译，原样返回
 UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Translate(const char* vs, const char* fs) {
-    CompiledProgram p;
-    Target t = g_backend ? g_backend->ShaderTarget() : Target::HLSL50;
-    if (!CompileProgram(vs ? vs : "", fs ? fs : "", t, p)) g_info = p.error;
-    else g_info = "----- vertex -----\n" + p.vsCode + "\n----- fragment -----\n" + p.fsCode;
+#if POT_GFX_COMPILER
+    if (!Passthrough()) {
+        CompiledProgram p;
+        Target t = g_backend ? g_backend->ShaderTarget() : Target::HLSL50;
+        if (!CompileProgram(vs ? vs : "", fs ? fs : "", t, p)) g_info = p.error;
+        else g_info = "----- vertex -----\n" + p.vsCode + "\n----- fragment -----\n" + p.fsCode;
+        return g_info.c_str();
+    }
+#endif
+    g_info = std::string("----- vertex -----\n") + (vs ? vs : "") + "\n----- fragment -----\n" + (fs ? fs : "");
     return g_info.c_str();
 }
 

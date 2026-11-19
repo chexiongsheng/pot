@@ -65,4 +65,4 @@ node js/devserver/cli.js release games/jimao --platform win64,android,webgl
 
 ## 状态
 
-Win64 Runner 与发布构建、Android APK 构建、WebGL 浏览器运行已跑通；Android 真机待验证。实现情况见 001 第 16 节、002 第 16 节。
+Win64 Runner 与发布构建、Android APK 构建、WebGL 浏览器运行已跑通；运行时着色器（`ctx.gfx`）支持 D3D11 与 WebGL2（GLES3）。Android 真机待验证。实现情况见 001 第 16 节、002 第 16 节。

@@ -68,5 +68,5 @@ Unity 的完整日志在 `<游戏目录>/.pot/release/unity-<平台>.log`，脚�
 - Win64 使用 Mono；Android 使用 IL2CPP + ARM64；WebGL 使用 Puerts 的浏览器 JS 后端。
 - Android 需要 Unity Android Build Support、SDK/NDK/JDK；WebGL 需要 WebGL Build Support。未安装对应模块时 Unity 会在日志中报错。
 - WebGL 产物必须通过 HTTP/HTTPS 打开，不能双击 `index.html` 使用 `file://`。默认 gzip 压缩并启用解压回退，普通静态服务器即可托管；配置 `Content-Encoding: gzip` 可减少下载前的浏览器解压工作。
-- 原生 `pot_gfx` 运行时着色器后端目前只有 D3D11。WebGL 下 `ctx.gfx.supported` 为 `false`，游戏应使用普通 URP 材质或自身提供的回退；jimao 已回退到 CPU 贴图和纯色材质，因此 WebGL 画面与桌面版不完全一致。
+- 原生 `pot_gfx` 运行时着色器后端支持 D3D11（win64）与 GLES3（WebGL2）。WebGL 插件以源码形式放在 `Plugins/WebGL/pot_gfx`，由 Unity 的 emscripten 一起编译；改了 `native/pot_gfx/src` 后要执行 `node native/pot_gfx/sync-webgl.js` 再出包。其他平台 `ctx.gfx.supported` 为 `false`，游戏需自备回退。
 - 各平台图形、输入、音频和文件系统能力仍受 Unity/Web 平台限制。构建成功不等于所有游戏功能都已在目标设备验证，发布前应在真实设备上试玩。

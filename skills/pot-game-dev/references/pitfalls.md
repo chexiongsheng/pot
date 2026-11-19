@@ -88,7 +88,7 @@
 
 ### 自定义着色器的限制（ctx.gfx）
 
-- 目前只支持 Windows D3D11；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
+- 支持 Windows D3D11 与 WebGL2（GLES3 后端，`ctx.gfx.backend` 为 `"gles3"`）；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
 - 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。后处理链（`gfx.post`）的 pass 拿不到主光阴影图，体积光暂时做不了。
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
 - 移植 three 材质优先用 `gfx.standard` 原文加 `onBeforeCompile`（见 api.md），比手改成 `pot_Lit` 更接近原版。限制：蒙皮实体不能用运行时着色器；没有自定义顶点属性；只画在主相机上（不进平面反射）；阴影仍由普通渲染器的回退材质投射，回退材质要保留 alphaTest 才能让镂空物体的阴影一致。
@@ -98,7 +98,8 @@
 - 没有实例化：原版 `InstancedBufferGeometry` + 每实例属性（雨、溅射、粒子）要把实例展开成普通网格，每个实例重复写它的顶点，实例数据塞进 `normals`（3 个浮点，原样传递）和 `uvs`（2 个浮点）；不要用 `colors`，会被当作 sRGB 转线性。
 - 顶点着色器重算位置（以相机为中心循环、广告牌）时网格包围盒不可信，物体会被视锥剔除而时有时无：绑定时加 `frustumCull: false`（对应 three 的 `frustumCulled = false`）。
 - three 的 `AdditiveBlending` 即 `blend: 'add'`（SrcAlpha, One）；`fov` 没有内置量，`2·tan(fov/2)` 用 `2.0 / abs(pot_Proj[1][1])` 求。
-- `gl_FragCoord.y` 方向与 WebGL 相反（原点在左上），移植屏幕空间效果时用 `pot_ScreenSize.y - gl_FragCoord.y`。
+- `gl_FragCoord.y` 原点随后端不同：D3D11 在左上（与 WebGL 相反），GLES3/WebGL 在左下。需要屏幕方向的效果用 `vUv` 或 `pot_WorldToUv` 求屏幕坐标，不要直接依赖 `gl_FragCoord.y`；只用作噪声种子则无所谓。
+- WebGL 上着色器源码由后端直接交给 `GLctx.shaderSource`，绕开了 emscripten 的 C 预处理（它会把 `sat(max(max(a,b),c))` 这类嵌套函数式宏展开坏）；游戏侧照常写宏即可。
 - 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。
 - 片元着色器没用到的 uniform 会被编译器剔除，对它调用 `uniforms` 不报错也无效果。
 - `gfx.bake` 的 `vUv` 与采样坐标一致（`vUv.y=0` 即贴图 `v=0`），不要再手动翻 y；颜色目标用 `format: 'srgb'` 并输出线性值，数据目标（遮罩、高度、法线）用 `rgba8`。
@@ -150,7 +151,15 @@
 
 ### PowerShell 改含中文的文件后乱码
 - 原因：Windows PowerShell 5 的 `Set-Content`/`Get-Content` 默认不是 UTF-8。
-- 做法：用编辑器或文件工具修改源码；`.ps1` 脚本保持纯 ASCII（PS5 按 ANSI 读取无 BOM 文件）。
+- 做法：用编辑器或文件工具修改源码；`.ps1` 脚本保持纯 ASCII（PS5 按 ANSI 读取无 BOM 文件）。C++ 源码被这样改坏后，中文注释会吞掉换行，表现为大量莫名其妙的编译错误。
+
+### 改了 pot_gfx 原生代码，WebGL 包没变化
+- 原因：WebGL 插件是 `packages/com.pot.core/Plugins/WebGL/pot_gfx` 下的源码副本。
+- 做法：改完 `native/pot_gfx/src` 后执行 `node native/pot_gfx/sync-webgl.js` 再出包；浏览器的 UnityCache 可能缓存旧包，验证时给页面 URL 加个参数。
+
+### WebGL 上 gfx.post 不生效、画面发灰偏亮
+- 原因：Unity GL 设备的 `CommandBuffer.SetRenderTarget` 惰性生效，要到 Unity 自己下一次绘制或清屏才绑定 FBO，插件事件发生时仍是相机目标。
+- 做法：Runner 已处理（GL 上 post pass 用事件 1，帧数据前缀带输出贴图，后端自行绑定 FBO 和视口）。新增“插件画到指定 RT”的路径时同样要这么做，或像 `gfx.bake` 那样先 `ClearRenderTarget` 强制绑定。
 
 ### cordis 内部错误没有日志
 - 原因：cordis 默认 logger 不输出。
