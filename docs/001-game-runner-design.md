@@ -297,7 +297,7 @@ MCP 服务放在电脑上，不放在手机里。所有 Runner 通过局域网 W
 
 ## 12. 发布流程与自定义 Runner
 
-发布：新建或使用模板发布工程，引入 `core` 和 `build`，导入游戏包，然后用命令行 `-batchmode` 构建各平台产物。
+发布：使用通用壳工程 `player/`（已引入 `core`、`build`、Puerts 和 URP），执行 `node js/devserver/cli.js release <游戏目录> --platform win64,android,webgl`。脚本先把 TS 编译打包为 `bundle.cjs`，读取 manifest 生成发布配置，再通过 Unity `-batchmode` 自动导入资源、生成启动场景并出包，无需打开编辑器。详见 [003 自动发布打包](003-release.md)。
 
 自定义 Runner：游戏需要通用 Runner 没有的原生能力（SDK、C# 插件）时，在 `manifest.extraPackages` 中声明，再用 `build` 一键构建包含这些扩展的专属 Runner。自定义着色器不在此列，它属于游戏内容（第 8 节）。这样可以避开 Expo Go 早期“通用客户端跑不了自定义原生代码”的问题。
 
@@ -383,7 +383,7 @@ HTTP：`GET /files/<相对 root 的路径>`，目录返回递归清单 `{files:[
 
 - JS：32 项用例（运行时、源码加载与共享模块、热重载事务与回滚、启动失败单元自动恢复、泄漏检查、Dev Server 转发与 `/files`）。
 - Unity：Win64 Runner 实测：`PotRunner.exe games/hello` 不开 Dev Server 直接运行并热重载；无参数 `pot dev` 后 Runner 自动连上，`pot open` 本地目录、`http://127.0.0.1:7788/files/games/hello/` 镜像（轮询热重载）、`.potg` 均可打开；启动时语法错误的单元修好后自动挂载；截图、eval 正常。
-- 发布：`Pot.Build.PotBuild.Build` 构建 `games/hello` 为独立 exe，启动后从 Resources 加载 `bundle.cjs`。
+- 发布：通用 `player/` 壳工程与 `pot release` 已实测 `games/jimao` 三平台构建；Win64 独立 exe 正常启动（启动日志显示从 Resources 加载，着色器缓存命中 37/37），Android 产出 ARM64 APK（真机未验证），WebGL 在浏览器正常进入游戏。WebGL 排查并修复了 Puerts 后端和碰撞体被 IL2CPP 裁剪的问题，以及无原生 gfx 后端时材质回退不完整的问题。
 - 运行时着色器（D3D11）：`PotRunner.exe games/shaders` 实测，水面（alpha）、全息球（add）、顶点变形方块（自定义 vert + frag）均正确绘制，与普通材质的柱子遮挡正确，方块正常投影；修改 `.frag` 后热重载生效，故意写错时浮层显示 `shaders/holo.frag:12` 的错误，画面保持旧程序。JS 用例增至 35 项。
 
 尚未实现：Android/iOS 真机验证、程序化网格与 uber 材质、物理、UI、音频、`record`/`replay`、多设备。

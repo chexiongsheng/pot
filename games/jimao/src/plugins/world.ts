@@ -90,6 +90,7 @@ export async function apply(ctx: Context) {
     try {
       mats = createMats(ctx, { tex: tuning.quality.tex })
     } catch (e: any) {
+      mats = undefined
       ctx.logger('world').error('GPU 材质不可用，回退 CPU 贴图：%s', e?.message ?? e)
     }
   }

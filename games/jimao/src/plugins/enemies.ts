@@ -74,9 +74,12 @@ const world = levelCollision(level, 'enemy')
   const rand = Math.random
   const models = new Map<number, EnemyModel>()
   const partOwner = new Map<number, { id: number; weak: boolean }>()
-  /** 猎犬外壳/金属用原版 GPU 烘焙材质（没有 gfx 时退回纯色） */
+  /** 猎犬外壳/金属用原版 GPU 烘焙材质（没有 gfx 后端时退回纯色） */
   let mats: Mats | undefined
-  try { mats = ctx.gfx ? createMats(ctx, { tex: tuning.quality?.tex }) : undefined } catch (err) { ctx.logger('enemies').warn('材质不可用：%s', String(err)) }
+  try { mats = ctx.gfx.supported ? createMats(ctx, { tex: tuning.quality?.tex }) : undefined } catch (err) {
+    mats = undefined
+    ctx.logger('enemies').warn('材质不可用：%s', String(err))
+  }
   const toThree = (v: Vec3) => ({ x: v[0], y: v[1], z: -v[2] })
   /** Unity 偏航（度，0 朝 +Z）→ 原版偏航（弧度，模型朝 +Z 的右手系） */
   const threeYaw = (yaw: number) => Math.PI - yaw * RAD

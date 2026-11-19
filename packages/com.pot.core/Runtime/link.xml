@@ -5,6 +5,10 @@
   <assembly fullname="Pot.Devtools" preserve="all" ignoreIfMissing="1" />
   <assembly fullname="com.tencent.puerts.core" preserve="all" />
   <assembly fullname="com.tencent.puerts.v8" preserve="all" />
+  <!-- WebGL 后端只被 PotRuntime 反射创建，不保留会被整个裁掉 -->
+  <assembly fullname="com.tencent.puerts.webgl" preserve="all" ignoreIfMissing="1" />
+  <!-- CreatePrimitive 由引擎内部创建碰撞体，IL2CPP 会把没有直接代码引用的类型裁掉 -->
+  <assembly fullname="UnityEngine.PhysicsModule" preserve="all" />
   <assembly fullname="UnityEngine.CoreModule">
     <type fullname="UnityEngine.Debug" preserve="all" />
   </assembly>

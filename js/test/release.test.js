@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { resolveRelease, toPackageId, toVersionCode, normalizePlatform } = require('../devserver/release')
+const { resolveRelease, stageGame, toPackageId, toVersionCode, normalizePlatform } = require('../devserver/release')
 
 test('release：包名规范化', () => {
   assert.equal(toPackageId('pot.jimao'), 'pot.jimao')
@@ -56,6 +56,31 @@ test('release：manifest → 出包配置', () => {
     assert.throws(() => resolveRelease({ id: 'x', icon: 'none.png' }, dir), /图标不存在/)
     fs.writeFileSync(path.join(dir, 'icon.bmp'), '')
     assert.throws(() => resolveRelease({ id: 'x', icon: 'icon.bmp' }, dir), /png\/jpg/)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('release：暂存时 TS 编译为 bundle.cjs，并复制数据与发布配置', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-stage-'))
+  try {
+    fs.mkdirSync(path.join(dir, 'src/plugins'), { recursive: true })
+    fs.mkdirSync(path.join(dir, 'data/shaders'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ id: 'pot.demo', name: 'Demo', version: '1.2.3', plugins: ['main'] }))
+    fs.writeFileSync(path.join(dir, 'src/plugins/main.ts'), 'export const name = "main"\nexport function apply(ctx: any) { ctx.scene.spawn({ name: "ok" }) }\n')
+    fs.writeFileSync(path.join(dir, 'data/config.json'), '{"ok":true}')
+    fs.writeFileSync(path.join(dir, 'data/shaders/water.frag'), 'void main() {}\n')
+    const stage = path.join(dir, 'stage')
+    const result = await stageGame(dir, stage)
+    assert.equal(result.units, 1)
+    assert.equal(result.config.packageId, 'pot.demo')
+    assert.equal(result.config.versionCode, 10203)
+    const game = path.join(stage, 'game')
+    assert.ok(fs.readFileSync(path.join(game, 'bundle.cjs'), 'utf8').includes('ctx.scene.spawn'))
+    assert.equal(fs.readFileSync(path.join(game, 'data/config.json'), 'utf8'), '{"ok":true}')
+    assert.ok(fs.existsSync(path.join(game, 'data/shaders/water.frag')))
+    assert.equal(fs.existsSync(path.join(game, 'src/plugins/main.ts')), false)
+    assert.equal(JSON.parse(fs.readFileSync(path.join(stage, 'release.json'), 'utf8')).productName, 'Demo')
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

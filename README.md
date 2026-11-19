@@ -8,6 +8,7 @@
 
 - [001 Game Runner 总体设计](docs/001-game-runner-design.md)
 - [002 热重载设计（基于 cordis）](docs/002-hot-reload-design.md)
+- [003 自动发布打包](docs/003-release.md)
 - [pot-game-dev Skill](skills/pot-game-dev/SKILL.md)
 
 ## 目录
@@ -16,6 +17,7 @@
 |---|---|
 | `packages/` | Unity 包：`com.pot.core`、`com.pot.devtools`、`com.pot.runner-shell`、`com.pot.build` |
 | `runner/` | Runner Unity 工程 |
+| `player/` | 通用发布壳工程（core + build + Puerts + URP），无需按游戏新建 Unity 工程 |
 | `js/` | `@pot/core` 运行时、devtools、Dev Server（CLI + MCP）、测试 |
 | `games/hello` | 示例游戏 |
 | `skills/pot-game-dev` | AI 开发用 Skill |
@@ -51,15 +53,16 @@ node js/devserver/cli.js check games/hello    # 类型检查 + 试打包
 
 MCP：`node js/devserver/cli.js mcp --port 7788`（stdio）。
 
-发布：
+发布（自动编译 TS、读取 manifest 配置并调用 Unity 批处理，无需打开编辑器）：
 
 ```powershell
-Unity -batchmode -quit -projectPath runner -executeMethod Pot.Build.PotBuild.Build `
-  -potGame=D:\path\to\pot\games\hello -potOut=D:\path\to\pot\release\hello\Hello.exe -potTarget=Win64
+node js/devserver/cli.js release games/jimao --platform win64
+node js/devserver/cli.js release games/jimao --platform win64,android,webgl
+# 可选：--unity "D:\...\Unity.exe" --out D:\build\jimao
 ```
 
-`-potGame`、`-potOut` 请用绝对路径（Unity 的工作目录是工程目录）。
+产物默认在 `release/<游戏名>/<平台>/`。manifest 字段、平台要求与限制见 [自动发布打包](docs/003-release.md)。
 
 ## 状态
 
-原型 v0.1：Win64 Runner 与发布构建已跑通，移动端待验证。实现情况见 001 第 16 节、002 第 16 节。
+Win64 Runner 与发布构建、Android APK 构建、WebGL 浏览器运行已跑通；Android 真机待验证。实现情况见 001 第 16 节、002 第 16 节。
