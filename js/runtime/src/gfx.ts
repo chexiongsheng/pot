@@ -620,9 +620,18 @@ export class GfxService extends Service {
 
   constructor(ctx: Context, private _host: Host) {
     super(ctx, 'gfx')
+    // 平台缺能力要显式：游戏常按 supported 静默走回退，不提示的话很难发现画面为什么不同
+    if (!this.backend) {
+      ctx.logger('gfx').warn(`运行时着色器不可用：${this.unsupported || '未知原因'}。自定义着色器、three 材质、烘焙和后处理链不会生效，游戏应走回退画面`)
+    }
   }
 
-  /** 后端名（d3d11）；为空表示当前平台不支持运行时着色器 */
+  /** 运行时着色器不可用的原因；可用时为空串 */
+  get unsupported(): string {
+    return this.backend ? '' : (this._host.engine.gfxUnsupported?.() ?? '当前平台没有 pot_gfx 后端')
+  }
+
+  /** 后端名（d3d11 / gles3）；为空表示当前平台不支持运行时着色器，原因见 unsupported */
   get backend(): string {
     return this._host.engine.gfxBackend()
   }

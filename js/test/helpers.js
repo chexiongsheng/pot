@@ -214,7 +214,8 @@ function readGameFiles(dir) {
 async function startGame(files, options = {}) {
   const pot = loadPot()
   const host = createHost(files)
-  const { loader, ...rest } = options
+  const { loader, setupHost, ...rest } = options
+  if (setupHost) setupHost(host)
   const runtime = await pot.createRuntime(host, { ...rest, loader: loader === false ? undefined : pot.devtools.createLoader(host) })
   pot.devtools.attach(runtime)
   await runtime.start()

@@ -157,7 +157,8 @@ export function apply(ctx: Context) {
   }
   function heading(eyebrow: string, title: string, x: number, bottom: number, size: number, a: number, tag?: string, tagColor = C.signal) {
     const lh = size * 0.8
-    spaced(title, x, bottom, { size, bold: true, spacing: 0.15, color: C.bone, alpha: a, shadow: true, valign: 'bottom' })
+    // 原版 CSS：line-height .8，字形在行框中竖直居中（会略微溢出行框底部），所以按行框中心摆放
+    spaced(title, x, bottom - lh / 2, { size, bold: true, spacing: 0.15, color: C.bone, alpha: a, shadow: true, valign: 'middle' })
     let ex = x
     const ey = bottom - lh - 22
     if (tag) {

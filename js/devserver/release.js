@@ -14,12 +14,15 @@
  *   release.orientation          landscape（缺省）| portrait | auto
  *   release.window               { width, height, fullscreen, resizable }（桌面）
  *   release.fileName             产物文件名（缺省为 id 最后一段）
+ *   release.font                 内置字体源（ttf/otf，相对游戏目录；缺省找本机 Noto Sans SC / 思源黑体），见 font.js
+ *   release.fontChars            额外要放进字体子集的字符（运行时拼出、源码里没有的字）
  */
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { spawn } = require('child_process')
 const { buildRelease } = require('./builder')
+const { stageFont } = require('./font')
 
 const REPO = path.resolve(__dirname, '../..')
 const DEFAULT_PROJECT = path.join(REPO, 'player')
@@ -107,8 +110,10 @@ async function stageGame(gameDir, stageDir) {
   const manifest = JSON.parse(fs.readFileSync(path.join(gameDir, 'manifest.json'), 'utf8'))
   const { config, iconFile } = resolveRelease(manifest, gameDir)
   if (iconFile) fs.copyFileSync(iconFile, path.join(stageDir, config.icon))
+  const font = await stageFont(manifest, gameDir, stageDir)
+  config.font = font.file
   fs.writeFileSync(path.join(stageDir, 'release.json'), JSON.stringify(config, null, 2))
-  return { stageDir, units: built.units, config }
+  return { stageDir, units: built.units, config, font }
 }
 
 function readProjectVersion(project) {
@@ -226,6 +231,9 @@ async function releaseGame(gameDir, options = {}) {
   const staged = await stageGame(gameDir, stageDir)
   const { config } = staged
   say(`      ${config.productName}  ${config.packageId}  v${config.version}（${config.versionCode}）${config.icon ? '  有图标' : ''}`)
+  const { font } = staged
+  if (font.file) say(`      内置字体：${path.basename(font.source)} 子集 ${font.chars} 字 ${Math.round(font.bytes / 1024)} KB`)
+  else say(`      警告：${font.warning}`)
 
   const outDir = path.resolve(options.out ?? path.join(REPO, 'release', config.fileName, platform))
   const output = outputPath(outDir, platform, config)

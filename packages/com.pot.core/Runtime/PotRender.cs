@@ -701,7 +701,7 @@ namespace Pot
         {
             var cfg = new TextCfg();
             JsonUtility.FromJsonOverwrite(json, cfg);
-            if (font == null) font = Font.CreateDynamicFontFromOSFont(new[] { "Microsoft YaHei", "Microsoft YaHei UI", "SimHei", "PingFang SC", "Noto Sans CJK SC", "Arial" }, 32);
+            if (font == null) font = PotFonts.Default(32);
             if (textMat == null) textMat = new Material(PotScene.LoadShader("pot/PotText", "UI/Default"));
             var style = cfg.bold > 0 ? FontStyle.Bold : FontStyle.Normal;
             var size = Mathf.Clamp(cfg.size, 4, 256);
@@ -791,7 +791,7 @@ namespace Pot
             families = string.IsNullOrEmpty(families) ? "Microsoft YaHei,Arial" : families;
             if (!canvasFonts.TryGetValue(families, out var f) || f == null)
             {
-                f = Font.CreateDynamicFontFromOSFont(families.Split(','), 32);
+                f = PotFonts.ForFamilies(families, 32);
                 canvasFonts[families] = f;
             }
             if (textMat == null) textMat = new Material(PotScene.LoadShader("pot/PotText", "UI/Default"));

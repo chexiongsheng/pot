@@ -131,8 +131,10 @@ namespace Pot
             LastError = ok ? null : error;
             BootSeconds = Time.realtimeSinceStartup - BootStartTime;
             var cache = PotGfx.CacheInfo();
-            if (ok) Debug.Log("[pot] 游戏已启动（" + BootSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " 秒" + (string.IsNullOrEmpty(cache) ? "" : "，着色器缓存命中 " + cache) + "）");
+            var gfx = PotGfx.Backend();
+            if (ok) Debug.Log("[pot] 游戏已启动（" + BootSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " 秒，运行时着色器 " + (string.IsNullOrEmpty(gfx) ? "不可用" : gfx) + (string.IsNullOrEmpty(cache) ? "" : "，着色器缓存命中 " + cache) + "）");
             else Debug.LogError("[pot] 启动失败：" + error);
+            if (ok && string.IsNullOrEmpty(gfx)) Debug.LogWarning("[pot] " + PotGfx.Unsupported() + "；ctx.gfx 的自定义着色器、three 材质、烘焙和后处理链都不会生效，游戏将走回退画面");
             if (Booted != null) Booted(ok, error);
         }
 

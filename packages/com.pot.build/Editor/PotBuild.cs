@@ -28,6 +28,7 @@ namespace Pot.Build
         public const string ResourcesDir = GameRoot + "/Resources/pot-game";
         public const string ScenePath = GameRoot + "/PotBoot.unity";
         public const string IconPath = GameRoot + "/Icon.png";
+        public const string FontBase = GameRoot + "/Resources/pot-font";
         const string PrefGame = "pot.build.game";
 
         /// <summary>release.json（由 js/devserver/release.js 的 resolveRelease 生成）</summary>
@@ -50,6 +51,8 @@ namespace Pot.Build
             public bool resizable = true;
             /// <summary>产物文件名（不含扩展名）</summary>
             public string fileName;
+            /// <summary>相对暂存目录的内置字体子集（font.ttf / font.otf）；空串表示不带字体</summary>
+            public string font;
         }
 
         /// <summary>batchmode 入口</summary>
@@ -194,7 +197,33 @@ namespace Pot.Build
 
             var link = Path.Combine(PackageRoot("com.pot.core"), "Runtime/link.xml");
             if (File.Exists(link)) File.Copy(link, Path.Combine(GameRoot, "link.xml"), true);
+            // 内置字体：Resources/pot-font.(ttf|otf)，运行时 PotFonts.Bundled 加载
+            foreach (var ext in new[] { ".ttf", ".otf" })
+            {
+                var old = FontBase + ext;
+                if (File.Exists(old)) AssetDatabase.DeleteAsset(old);
+            }
+            string fontPath = null;
+            if (!string.IsNullOrEmpty(config.font))
+            {
+                var src = Path.Combine(stageDir, config.font);
+                if (!File.Exists(src)) throw new Exception("找不到字体：" + src);
+                fontPath = FontBase + Path.GetExtension(src).ToLowerInvariant();
+                Directory.CreateDirectory(Path.GetDirectoryName(fontPath));
+                File.Copy(src, fontPath, true);
+            }
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            if (fontPath != null)
+            {
+                var fi = (TrueTypeFontImporter)AssetImporter.GetAtPath(fontPath);
+                fi.fontTextureCase = FontTextureCase.Dynamic;
+                fi.includeFontData = true;
+                // 子集缺字时回退的系统字体（WebGL 上无效）
+                fi.fontNames = new[] { "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Arial" };
+                fi.SaveAndReimport();
+                Debug.Log("[pot] 已导入内置字体 → " + fontPath + "（" + (new FileInfo(fontPath).Length / 1024) + " KB）");
+            }
+            else Debug.LogWarning("[pot] 发布包不带内置字体：WebGL 上中文无法显示");
             if (File.Exists(IconPath))
             {
                 var importer = (TextureImporter)AssetImporter.GetAtPath(IconPath);
@@ -251,6 +280,9 @@ namespace Pot.Build
             PlayerSettings.resizableWindow = config.resizable;
             PlayerSettings.usePlayerLog = true;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+            // pot_gfx 的桌面后端是 D3D11
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64, new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 });
 
             // Android：IL2CPP + ARM64（Google Play 要求 64 位）；版本号
             PlayerSettings.Android.bundleVersionCode = Math.Max(1, config.versionCode);
@@ -266,7 +298,28 @@ namespace Pot.Build
             PlayerSettings.WebGL.decompressionFallback = true;
             PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
             PlayerSettings.WebGL.dataCaching = true;
+            // pot_gfx 的 WebGL 后端只支持 WebGL2（GLES3）
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.WebGL, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.WebGL, new[] { UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
             Debug.Log("[pot] PlayerSettings：" + config.productName + " / " + config.packageId + " / " + config.version + "（" + config.versionCode + "）" + (icon != null ? " / 图标" : ""));
+            var gap = GfxGap(target);
+            if (gap != null) Debug.LogWarning("[pot] 平台能力：" + gap);
+        }
+
+        /// <summary>目标平台缺少的运行时着色器能力（pot_gfx 后端）；完整支持时为 null</summary>
+        public static string GfxGap(BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.StandaloneWindows64:
+                    return "Win64 运行时着色器只有 D3D11 后端；若改用 D3D12 / Vulkan 会退回普通材质";
+                case BuildTarget.WebGL:
+                    return null;
+                case BuildTarget.Android:
+                    return "Android 包不含 pot_gfx（GLES/Vulkan 后端未构建），ctx.gfx 不可用，画面走回退材质";
+                default:
+                    return target + " 没有 pot_gfx 后端，ctx.gfx 不可用";
+            }
         }
 
         public static void CreateBootScene()

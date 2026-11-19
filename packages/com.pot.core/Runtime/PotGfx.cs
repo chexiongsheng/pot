@@ -111,6 +111,13 @@ namespace Pot
             return Check() == null ? backendName : "";
         }
 
+        /// <summary>运行时着色器不可用的原因；可用时返回空串</summary>
+        [Preserve]
+        public static string Unsupported()
+        {
+            return Check() ?? "";
+        }
+
         // ---------------- 程序 ----------------
 
         [Serializable] class ReflMember { public string name; public int offset; public string @base; public int vec; public int cols; public int array; public int arrayStride; public int matrixStride; }

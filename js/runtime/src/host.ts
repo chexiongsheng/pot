@@ -117,6 +117,8 @@ export interface Engine {
   // ---- 运行时着色器（PotGfx.cs / native/pot_gfx） ----
   /** 后端名（d3d11）；空串表示不支持 */
   gfxBackend(): string
+  /** 运行时着色器不可用的原因（可用时为空串）；旧宿主可不实现 */
+  gfxUnsupported?(): string
   /** 编译并注册程序（同名替换）；成功返回空串，失败返回错误且保留旧程序 */
   gfxProgram(name: string, vs: string, fs: string): string
   gfxDestroyProgram(name: string): void

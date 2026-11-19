@@ -88,7 +88,8 @@
 
 ### 自定义着色器的限制（ctx.gfx）
 
-- 支持 Windows D3D11 与 WebGL2（GLES3 后端，`ctx.gfx.backend` 为 `"gles3"`）；其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
+- 支持 Windows D3D11 与 WebGL2（GLES3 后端，`ctx.gfx.backend` 为 `"gles3"`）；Android 包目前不含 `pot_gfx`，其他平台 `ctx.gfx.supported` 为 false，要提供普通材质的退路。
+- 发布包的文字用内置字体子集（只含游戏文件里出现过的字）。运行时拼出来的字（玩家输入、网络文本）不在子集里，WebGL 上会缺字，要在 manifest `release.fontChars` 里补上。UI 文字竖直位置按参考行高 1.32em 对齐，复刻 CSS 的 `line-height` 小于 1 的大标题时，按行框中心 `valign: 'middle'` 摆放，不要用 `bottom`（字形会偏高）。
 - 用自定义着色器的物体可以接收主光阴影（`pot_Lit` 已包含），但不进 SSAO，也不会出现在平面反射里；附加光（点光、聚光）没有阴影。后处理链（`gfx.post`）的 pass 拿不到主光阴影图，体积光暂时做不了。
 - 用 `pot_DefaultSurface()` 初始化 `PotSurface`，不要逐字段手写，否则新增字段（如 `planar`）会是未定义值。
 - 移植 three 材质优先用 `gfx.standard` 原文加 `onBeforeCompile`（见 api.md），比手改成 `pot_Lit` 更接近原版。限制：蒙皮实体不能用运行时着色器；没有自定义顶点属性；只画在主相机上（不进平面反射）；阴影仍由普通渲染器的回退材质投射，回退材质要保留 alphaTest 才能让镂空物体的阴影一致。

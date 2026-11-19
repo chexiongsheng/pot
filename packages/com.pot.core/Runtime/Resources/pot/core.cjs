@@ -5766,8 +5766,15 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       /** 程序名 → 引用数（同名程序可被多个插件共享） */
       __publicField(this, "_refs", /* @__PURE__ */ new Map());
       __publicField(this, "_post");
+      if (!this.backend) {
+        ctx.logger("gfx").warn(`运行时着色器不可用：${this.unsupported || "未知原因"}。自定义着色器、three 材质、烘焙和后处理链不会生效，游戏应走回退画面`);
+      }
     }
-    /** 后端名（d3d11）；为空表示当前平台不支持运行时着色器 */
+    /** 运行时着色器不可用的原因；可用时为空串 */
+    get unsupported() {
+      return this.backend ? "" : this._host.engine.gfxUnsupported?.() ?? "当前平台没有 pot_gfx 后端";
+    }
+    /** 后端名（d3d11 / gles3）；为空表示当前平台不支持运行时着色器，原因见 unsupported */
     get backend() {
       return this._host.engine.gfxBackend();
     }
@@ -6408,6 +6415,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         render: (kind, json) => R.Configure(kind, json) ?? "",
         burst: (json) => R.Burst(json),
         gfxBackend: () => G.Backend() ?? "",
+        gfxUnsupported: () => G.Unsupported() ?? "",
         gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
         gfxDestroyProgram: (name) => G.DestroyProgram(name),
         gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),

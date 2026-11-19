@@ -65,7 +65,7 @@ namespace Pot
                 {
                     try
                     {
-                        font = Font.CreateDynamicFontFromOSFont(new[] { "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", "Arial" }, 16);
+                        font = PotFonts.Default(16);
                     }
                     catch (Exception)
                     {
@@ -90,8 +90,40 @@ namespace Pot
             style.wordWrap = (flags & 4) != 0;
             style.clipping = TextClipping.Overflow;
             style.richText = false;
+            if (f != null) style.contentOffset = new Vector2(0, GlyphOffset(f, style.fontSize, style.fontStyle, Mathf.Clamp(align, 0, 8) / 3));
             styles[key] = style;
             return style;
+        }
+
+        /// <summary>参考行高（em）：微软雅黑的行高。游戏布局按它调好，其他字体向它看齐</summary>
+        const float RefLineHeight = 1.32f;
+
+        /// <summary>
+        /// 不同字体的 ascent / 行高差别很大（思源、Noto 的行框比雅黑高，字形偏上），IMGUI 按字体度量摆放，
+        /// 换字体后同一布局会上下错位。这里用参考汉字“国”的实际包围盒，把字形中心放到“参考行高的行框”中心：
+        /// row 0 顶对齐、1 居中、2 底对齐时，参考行框分别贴着真实行框的顶、中、底。这样布局与字体无关。
+        /// </summary>
+        static float GlyphOffset(Font f, int size, FontStyle fs, int row)
+        {
+            try
+            {
+                f.RequestCharactersInTexture("国", size, fs);
+                CharacterInfo ci;
+                if (!f.GetCharacterInfo('国', out ci, size, fs) || ci.maxY <= ci.minY) return 0;
+                var scale = f.fontSize > 0 ? (float)size / f.fontSize : 1f;
+                var ascent = f.ascent * scale;
+                var lineH = f.lineHeight * scale;
+                if (ascent <= 0 || lineH <= 0) return 0;
+                var refH = RefLineHeight * size;
+                // 参考行框中心相对真实行框顶部的位置
+                var target = row == 0 ? refH * 0.5f : row == 1 ? lineH * 0.5f : lineH - refH * 0.5f;
+                var center = ascent - (ci.minY + ci.maxY) * 0.5f;
+                return Mathf.Clamp(target - center, -0.5f * size, 0.5f * size);
+            }
+            catch (Exception)
+            {
+                return 0;
+            }
         }
 
         static float F(string s)

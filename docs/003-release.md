@@ -52,6 +52,18 @@ Unity 的完整日志在 `<游戏目录>/.pot/release/unity-<平台>.log`，脚�
 
 除 `id`、`plugins` 外，发布字段都可省略。`icon` 支持 PNG/JPG；未指定时自动查找 `icon.png`。`packageId` 缺省由 `id` 规范化；`versionCode` 缺省由三段版本号推出；`orientation` 支持 `landscape`、`portrait`、`auto`。
 
+### 内置字体
+
+发布包会带一份中文字体子集，WebGL 拿不到系统字体，没有它中文就不显示。暂存时脚本收集游戏文件（`bundle.cjs`、`data/**` 中的文本）里出现过的全部字符，加上 ASCII 和常用中文标点，从开源字体裁出子集，jimao 约 630 字、172 KB。
+
+- 字体来源依次为 `release.font`（相对游戏目录的 ttf/otf）、环境变量 `POT_FONT`、本机已安装的 Noto Sans SC 或思源黑体。只用 OFL 等可再分发的字体，微软雅黑等系统字体不能随包分发。
+- 找不到字体源时照常出包，但会打印警告，此时 WebGL 中文无法显示。
+- 运行时拼出来、源码里没出现过的字（例如玩家输入、服务器下发的文本）不在子集里，会回退到系统字体；可以用 `release.fontChars` 补充。
+
+### 平台能力提示
+
+打包时按目标平台输出 `[pot] 平台能力` 警告；运行时启动日志写明运行时着色器后端（`d3d11` / `gles3` / 不可用），不可用时说明原因。Win64 会被固定为 D3D11、WebGL 固定为 WebGL2，避免选到没有 `pot_gfx` 后端的图形 API。
+
 ## 打包流程
 
 1. `js/devserver/builder.js` 用 esbuild 把 `src/plugins/*.ts` 及其共享 TS/JS 模块编译、打包成 `bundle.cjs`，不把 TS 源文件放进发布包。

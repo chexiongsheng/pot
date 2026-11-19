@@ -39,7 +39,7 @@
 
 ### 自定义着色器（ctx.gfx，GLSL ES 3.10）
 
-参数表达不了的效果（水、全息、溶解、顶点动画等）由游戏自带 GLSL 实现，Runner 运行时编译，改 `.glsl/.frag/.vert` 即热重载。先查 `ctx.gfx.supported`，不支持时退回普通材质。
+参数表达不了的效果（水、全息、溶解、顶点动画等）由游戏自带 GLSL 实现，Runner 运行时编译，改 `.glsl/.frag/.vert` 即热重载。先查 `ctx.gfx.supported`，不支持时退回普通材质；`ctx.gfx.unsupported` 给出不可用的原因（可用时为空串），Runner 启动时也会警告一次。
 
 ```ts
 const water = ctx.gfx.shader({ fragment: 'shaders/water.frag' })          // 路径相对 data/，顶点默认 <pot/standard.vert>
