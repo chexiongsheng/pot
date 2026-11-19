@@ -38,3 +38,4 @@ Copy-Item native/pot_gfx/build/Release/pot_gfx.dll packages/com.pot.core/Plugins
 - 目前只实现 D3D11 后端，其他图形 API 下 `PotGfx.Check()` 返回不可用原因，JS 侧 `gfx.supported` 为 false。
 - 每次绘制的数据（uniform、贴图、状态）由 C# 写入一个按票号索引的槽，渲染线程事件按票号取出后删除。槽不设固定数量（同一帧可提交任意多次绘制或烘焙），超过 4096 个未消费槽时视为泄漏并清空。
 - 烘焙（`PotGfx.Bake`）不设视口和渲染目标：C# 用 CommandBuffer 先绑定 RenderTexture（单目标或 MRT）并清空，再发插件事件，原生端在当前绑定的目标上画裁剪空间全屏四边形；flags 带“关深度测试”，混合状态设在 RenderTarget[0] 上，对所有 MRT 目标生效。
+- 编译缓存（`src/cache.cpp`）：C# 启动时用 `PotGfx_SetCacheDir` 设为 `persistentDataPath/cache/shaders`。键是（`kCacheVersion`、后端、vs、fs）的 128 位哈希，文件 `<hex>.bin` 存反射信息和两段 DXBC；命中时跳过 glslang、SPIRV-Cross 与 D3DCompile，用缓存创建失败则退回完整编译并覆盖。升级 glslang、SPIRV-Cross、改反射结构或编译参数时必须改 `kCacheVersion`。写入先写 `.tmp` 再改名，写失败只影响缓存不影响运行。`PotGfx_CacheHits/Misses` 给出本次进程的命中统计。

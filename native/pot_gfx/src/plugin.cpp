@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "backend.h"
+#include "cache.h"
 #include "compiler.h"
 
 using namespace pot;
@@ -78,25 +79,61 @@ UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Backend() {
     return g_backend ? g_backend->Name() : "";
 }
 
-// 编译程序。成功返回 id（>0），PotGfx_Info 为反射 JSON；失败返回 0，PotGfx_Info 为错误信息
+// 编译程序。成功返回 id（>0），PotGfx_Info 为反射 JSON；失败返回 0，PotGfx_Info 为错误信息。
+// 设置了缓存目录时先按源码 hash 查缓存，命中则跳过全部编译步骤
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_Create(const char* vs, const char* fs) {
     if (!g_backend) {
         g_info = "当前图形 API 不支持运行时着色器（pot_gfx 目前支持 D3D11）";
         return 0;
     }
+    std::string vsrc = vs ? vs : "", fsrc = fs ? fs : "";
     CompiledProgram p;
-    if (!CompileProgram(vs ? vs : "", fs ? fs : "", g_backend->ShaderTarget(), p)) {
-        g_info = p.error;
-        return 0;
+    std::string key;
+    bool hit = false;
+    if (CacheEnabled()) {
+        key = CacheKey(g_backend->Name(), vsrc, fsrc);
+        hit = CacheLoad(key, p);
     }
     int id = g_nextId++;
     std::string err;
-    if (!g_backend->CreateProgram(id, p, err)) {
-        g_info = err + "\n----- 生成的顶点着色器 -----\n" + p.vsCode + "\n----- 生成的片元着色器 -----\n" + p.fsCode;
-        return 0;
+    if (hit && !g_backend->CreateProgram(id, p, err)) {
+        // 缓存内容不可用（驱动拒绝等）：退回完整编译
+        hit = false;
+        p = CompiledProgram();
+        err.clear();
     }
+    if (!hit) {
+        if (!CompileProgram(vsrc, fsrc, g_backend->ShaderTarget(), p)) {
+            g_info = p.error;
+            return 0;
+        }
+        if (!g_backend->CreateProgram(id, p, err)) {
+            g_info = err + "\n----- 生成的顶点着色器 -----\n" + p.vsCode + "\n----- 生成的片元着色器 -----\n" + p.fsCode;
+            return 0;
+        }
+        if (!key.empty()) CacheStore(key, p);
+    }
+    CacheCount(hit);
     g_info = ReflectionJson(p);
     return id;
+}
+
+// 设置编译缓存目录（UTF-8）；空串关闭
+UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API PotGfx_SetCacheDir(const char* dir) {
+    CacheSetDir(dir ? dir : "");
+}
+
+// 本进程缓存命中 / 未命中次数
+UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_CacheHits() {
+    int h, m;
+    CacheStats(h, m);
+    return h;
+}
+
+UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_CacheMisses() {
+    int h, m;
+    CacheStats(h, m);
+    return m;
 }
 
 UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Info() {

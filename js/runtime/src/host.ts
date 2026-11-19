@@ -151,5 +151,9 @@ export interface Host {
   gc?(): void
   /** 开发通道：向 Dev Server 发送消息（仅开发期，未连接时丢弃） */
   send?(message: string): void
+  /** 宿主每帧调用 runtime 的 pump（Unity 为 true）。为 false 时 loading.frame()/step() 不让帧、立即继续 */
+  frames?: boolean
+  /** 加载进度回报给外壳（显示加载界面）：progress 0..1，小于 0 表示未知；text 为当前阶段 */
+  loading?(progress: number, text: string): void
   engine: Engine
 }

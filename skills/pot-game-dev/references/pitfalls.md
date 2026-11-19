@@ -203,3 +203,10 @@
 - 蒙皮实体不能用运行时着色器（`entity.shader` 会抛错），这类部件保持刚性分件，挂在骨骼实体下。
 - 蒙皮实体没有碰撞体。命中体用 `spawn({ visible: false, collider: true, parent: 骨骼 })`，不要再用"全黑叠加材质"假装隐藏，那样仍然会被绘制。
 - `setTransforms` 的四元数是 Unity 坐标系：three 的世界矩阵先做 `S·M·S`（S 为 z 取反）再 decompose，分量可直接使用（jimao 的 `writeUnityTRS()`）。
+
+## 启动很慢、窗口像卡死
+
+启动时所有单元的 apply 在一次同步调用里跑完，期间窗口不刷新。做法：把重的单元写成 `async apply`，阶段之间 `await ctx.loading.step('阶段', 进度)`；大循环用 `for` 并在循环体里 step（不要用 `forEach`，回调里不能 await）。父单元按顺序 `await ctx.use('子单元')`。注意：
+- 在 await 之后注册的 `ctx.on('update')`、`ctx.effect` 照常生效，`update` 用到的变量在 await 前后都可访问。
+- 其他单元在启动期间读 `ctx.state` 时，被 await 中的单元可能还没 define 好，读时要判空（jimao 的 `game(ctx)?.`）。
+- 运行时着色器的编译结果缓存在 `persistentDataPath/cache/shaders`（按后端、编译器版本和源码哈希），第二次打开不再编译。怀疑缓存有问题时删掉这个目录即可；启动日志 `[pot] 游戏已启动（X 秒，着色器缓存命中 a/b）` 可以看命中情况。jimao 由此从 9.8 秒降到 3.8 秒。

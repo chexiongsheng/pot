@@ -35,8 +35,9 @@ public:
     virtual ~Backend() = default;
     virtual const char* Name() const = 0;
     virtual Target ShaderTarget() const = 0;
-    // 主线程调用；成功后 id 可在 Render 中使用
-    virtual bool CreateProgram(int id, const CompiledProgram& p, std::string& err) = 0;
+    // 主线程调用；成功后 id 可在 Render 中使用。
+    // p.vsBin/fsBin 非空时直接用字节码创建（缓存命中）；否则从 vsCode/fsCode 编译并把字节码写回 p
+    virtual bool CreateProgram(int id, CompiledProgram& p, std::string& err) = 0;
     // 主线程调用；真正释放推迟到渲染线程
     virtual void DestroyProgram(int id) = 0;
     // 渲染线程调用

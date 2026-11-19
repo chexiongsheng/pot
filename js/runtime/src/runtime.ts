@@ -16,6 +16,7 @@ import { TimerService } from './timer'
 import { UIService } from './ui'
 import { AudioService } from './audio'
 import { GfxService } from './gfx'
+import { LoadingService } from './loading'
 
 export const API_VERSION = '0.1'
 export const VERSION = '0.1.0'
@@ -93,6 +94,7 @@ export class Runtime {
   get scene() { return this.root.scene }
   get data() { return this.root.data }
   get cache() { return this.root.cache }
+  get loading() { return this.root.loading }
 
   /** 安装核心服务 */
   async init() {
@@ -109,6 +111,7 @@ export class Runtime {
     await install(bind(UIService, host))
     await install(bind(AudioService, host))
     await install(bind(GfxService, host))
+    await install(bind(LoadingService, host))
     await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this
@@ -132,10 +135,12 @@ export class Runtime {
    */
   async start() {
     this.status = 'starting'
+    this.root.loading.begin()
     try {
       this.manifest = this.readManifest()
     } catch (error: any) {
       this.status = 'failed'
+      this.root.loading.end()
       this.root.logger('pot').error(error)
       throw error
     }
@@ -148,6 +153,7 @@ export class Runtime {
         this.root.logger('pot').error('单元 %s 启动失败：%s', entry.name, error?.stack ?? error)
       }
     }
+    this.root.loading.end()
     this.status = 'running'
     return this
   }
@@ -155,6 +161,8 @@ export class Runtime {
   tick(dt: number) {
     const clock = this.root.clock
     const frame = clock.frame
+    // 先放行等帧的加载（热重载中 async 单元的 loading.step）
+    this.root.loading.pump()
     clock.tick(dt)
     // 只有游戏帧推进（update 执行过）才提交 UI；暂停/冻结时保留上一帧画面
     if (clock.frame !== frame) this.root.ui.flush()
@@ -192,6 +200,7 @@ export class Runtime {
       timers: this.root.clock.pending,
       state: this.root.state.keys(),
       failures: this.failures,
+      loading: { active: this.root.loading.active, progress: this.root.loading.progress, text: this.root.loading.text, yields: this.root.loading.yields },
     }
   }
 }

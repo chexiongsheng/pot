@@ -157,6 +157,15 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 
 `info`/`warn`/`error`/`debug`，支持 `%d %s %o` 格式化。日志会进入 Dev Server 的 `logs`。
 
+## ctx.loading
+
+启动期加载进度与让帧。单元 `apply` 可以写成 `async`，在耗时阶段之间 `await ctx.loading.step('编译材质', 0.4)`：
+- `step(text?, progress?)`：回报进度（0..1），本帧已连续执行超过 `budget`（默认 50 ms）时让出一帧，下一帧继续。宿主不按帧驱动（Node 测试）时立即继续。
+- `report(text?, progress?)`：只回报不让帧；`frame()`：无条件等下一帧。
+- 只读：`active`（启动中）、`progress`、`text`、`yields`（本次让帧次数）。
+- 父单元用 `await ctx.use('子单元')` 可以等子单元的 async apply 完成，按顺序加载并分段回报进度。
+- 启动期间 Runner 显示加载界面（游戏名、进度条、阶段文字、已用秒数）；游戏从没报过进度时显示"加载 单元名"和不确定进度条。
+
 ## ctx.effect(setup, label)
 
 自定义资源：`setup` 返回清理函数，单元卸载时执行。

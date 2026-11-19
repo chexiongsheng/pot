@@ -27,6 +27,8 @@ export function createUnityHost(): Host {
     },
     gc: () => H.RequestGC(),
     send: (message) => H.Send(message),
+    frames: true,
+    loading: (progress, text) => H.OnLoading(progress, text),
     engine: {
       spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
       destroy: (id) => S.Destroy(id),
@@ -136,6 +138,10 @@ export const unity = {
   },
   tick(dt: number) {
     unity.runtime?.tick(dt)
+  },
+  /** 启动期间（尚未 Running）每帧调用：放行 loading.frame()/step() 的等待 */
+  pump() {
+    unity.runtime?.root.loading.pump()
   },
   /** 冷重启前调用：导出 state JSON（失败返回空串） */
   exportState(): string {

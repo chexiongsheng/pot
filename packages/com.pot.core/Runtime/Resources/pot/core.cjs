@@ -44,6 +44,7 @@ var pot = (() => {
     Inject: () => Inject,
     InputService: () => InputService,
     LIBRARY: () => LIBRARY,
+    LoadingService: () => LoadingService,
     Logger: () => Logger,
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
@@ -4959,8 +4960,80 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return (h >>> 0).toString(36);
   }
 
+  // runtime/src/loading.ts
+  var LoadingService = class extends Service {
+    constructor(ctx, _host) {
+      super(ctx, "loading");
+      __publicField(this, "_host", _host);
+      /** 0..1；小于 0 表示未知（外壳画不确定进度条） */
+      __publicField(this, "progress", -1);
+      __publicField(this, "text", "");
+      /** 运行时启动期间为 true */
+      __publicField(this, "active", false);
+      /** 单次连续执行的时间预算（毫秒），超过后 step 让帧 */
+      __publicField(this, "budget", 50);
+      /** 本次启动/加载让出的帧数 */
+      __publicField(this, "yields", 0);
+      __publicField(this, "_waiters", []);
+      __publicField(this, "_sliceStart", Date.now());
+      __publicField(this, "_explicit", false);
+    }
+    /** 宿主是否按帧驱动（否则让帧是空操作） */
+    get frames() {
+      return !!this._host.frames;
+    }
+    /** 回报进度（不让帧）。progress 省略时保持不变；只在加载期间转发给宿主 */
+    report(text, progress) {
+      if (text !== void 0) this.text = text;
+      if (progress !== void 0) {
+        this.progress = Math.min(1, progress);
+        this._explicit = true;
+      }
+      if (this.active) this._host.loading?.(this.progress, this.text);
+    }
+    /** 运行时在单元开始 apply 时调用：游戏没报过进度时，至少显示正在加载哪个单元 */
+    unit(name) {
+      if (!this.active || this._explicit) return;
+      this.report(`加载 ${name}`);
+    }
+    /** 等到下一帧（宿主 pump 时继续） */
+    frame() {
+      if (!this._host.frames) return Promise.resolve();
+      this.yields++;
+      return new Promise((resolve) => this._waiters.push(resolve));
+    }
+    /** 回报进度；本帧连续执行超过 budget 时让出一帧 */
+    step(text, progress) {
+      this.report(text, progress);
+      if (Date.now() - this._sliceStart < this.budget) return Promise.resolve();
+      return this.frame();
+    }
+    /** 宿主每帧调用（Runtime.tick 与 Unity 启动期间） */
+    pump() {
+      this._sliceStart = Date.now();
+      if (!this._waiters.length) return;
+      const waiters = this._waiters;
+      this._waiters = [];
+      for (const resolve of waiters) resolve();
+    }
+    /** 运行时启动开始 */
+    begin(text = "启动") {
+      this.active = true;
+      this._explicit = false;
+      this.yields = 0;
+      this.progress = -1;
+      this._sliceStart = Date.now();
+      this.report(text);
+    }
+    /** 运行时启动结束 */
+    end() {
+      this.report("完成", 1);
+      this.active = false;
+    }
+  };
+
   // runtime/src/plugins.ts
-  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "plugins"];
+  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "loading", "plugins"];
   function compileModule(code, filename) {
     const indirectEval = eval;
     return indirectEval(`(function (exports, require, module, __filename) {${code}
@@ -5003,6 +5076,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         ctx.effect(() => () => {
           unit.mounts.delete(fiber);
         }, "pot:mount");
+        ctx.loading?.unit(name);
         try {
           const result = apply.call(plugin, ctx, config);
           if (result && typeof result.then === "function") {
@@ -5140,6 +5214,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     get cache() {
       return this.root.cache;
     }
+    get loading() {
+      return this.root.loading;
+    }
     /** 安装核心服务 */
     async init() {
       const { root, host } = this;
@@ -5155,6 +5232,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       await install(bind(UIService, host));
       await install(bind(AudioService, host));
       await install(bind(GfxService, host));
+      await install(bind(LoadingService, host));
       await install(bind(PluginsService, host, modules, this.options.loader));
       if (this.options.state) this.root.state.importJSON(this.options.state);
       return this;
@@ -5176,10 +5254,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
      */
     async start() {
       this.status = "starting";
+      this.root.loading.begin();
       try {
         this.manifest = this.readManifest();
       } catch (error) {
         this.status = "failed";
+        this.root.loading.end();
         this.root.logger("pot").error(error);
         throw error;
       }
@@ -5192,12 +5272,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           this.root.logger("pot").error("单元 %s 启动失败：%s", entry.name, error?.stack ?? error);
         }
       }
+      this.root.loading.end();
       this.status = "running";
       return this;
     }
     tick(dt) {
       const clock = this.root.clock;
       const frame = clock.frame;
+      this.root.loading.pump();
       clock.tick(dt);
       if (clock.frame !== frame) this.root.ui.flush();
     }
@@ -5230,7 +5312,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         objects: this.root.scene.objects.size,
         timers: this.root.clock.pending,
         state: this.root.state.keys(),
-        failures: this.failures
+        failures: this.failures,
+        loading: { active: this.root.loading.active, progress: this.root.loading.progress, text: this.root.loading.text, yields: this.root.loading.yields }
       };
     }
   };
@@ -5260,6 +5343,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       },
       gc: () => H.RequestGC(),
       send: (message) => H.Send(message),
+      frames: true,
+      loading: (progress, text) => H.OnLoading(progress, text),
       engine: {
         spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
         destroy: (id) => S.Destroy(id),
@@ -5364,6 +5449,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     },
     tick(dt) {
       unity.runtime?.tick(dt);
+    },
+    /** 启动期间（尚未 Running）每帧调用：放行 loading.frame()/step() 的等待 */
+    pump() {
+      unity.runtime?.root.loading.pump();
     },
     /** 冷重启前调用：导出 state JSON（失败返回空串） */
     exportState() {

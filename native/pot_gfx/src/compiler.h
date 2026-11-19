@@ -33,6 +33,9 @@ struct CompiledProgram {
     std::string vsCode, fsCode;           // 目标语言源码（调试用，也供后端编译）
     std::vector<uint32_t> vsSpirv, fsSpirv;
     StageReflection vs, fs;
+    // 后端原生字节码（D3D11 为 DXBC）。非空时后端直接创建，跳过编译；后端编译后也写回这里供缓存
+    std::vector<uint8_t> vsBin, fsBin;
+    bool cached = false;
 };
 
 bool CompileProgram(const std::string& vs, const std::string& fs, Target target, CompiledProgram& out);

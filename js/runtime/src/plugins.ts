@@ -21,7 +21,7 @@ declare module 'cordis' {
   }
 }
 
-export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'gfx', 'plugins']
+export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'gfx', 'loading', 'plugins']
 
 export interface UnitSource {
   exports: any
@@ -98,6 +98,7 @@ export function createUnit(name: string, exports: any, contentHash: string, sour
       ctx.effect(() => () => {
         unit.mounts.delete(fiber)
       }, 'pot:mount')
+      ;(ctx as any).loading?.unit(name)
       try {
         const result = apply.call(plugin, ctx, config)
         if (result && typeof result.then === 'function') {

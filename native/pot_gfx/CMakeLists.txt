@@ -44,6 +44,8 @@ add_library(pot_gfx SHARED
     src/plugin.cpp
     src/backend.h
     src/backend_d3d11.cpp
+    src/cache.cpp
+    src/cache.h
 )
 target_include_directories(pot_gfx PRIVATE ${UNITY_PLUGIN_API} ${POT_ROOT}/third_party/glslang ${POT_ROOT}/third_party/SPIRV-Cross)
 target_link_libraries(pot_gfx PRIVATE glslang glslang-default-resource-limits SPIRV spirv-cross-core spirv-cross-glsl spirv-cross-hlsl)

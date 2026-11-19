@@ -61,5 +61,13 @@ namespace Pot
             var runtime = PotRuntime.Instance;
             if (runtime != null) runtime.HandleBooted(ok, error);
         }
+
+        /// <summary>加载进度（JS loading 服务回报）：progress 0..1，小于 0 表示未知</summary>
+        [Preserve]
+        public static void OnLoading(double progress, string text)
+        {
+            PotRuntime.LoadProgress = (float)progress;
+            PotRuntime.LoadText = text ?? "";
+        }
     }
 }

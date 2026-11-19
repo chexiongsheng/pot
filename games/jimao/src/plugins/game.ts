@@ -8,7 +8,7 @@ import { ENEMIES, GAME, player, type EnemyType, type GameState, type Phase } fro
 
 export const name = 'game'
 
-export function apply(ctx: Context) {
+export async function apply(ctx: Context) {
   const flow = ctx.data.load('flow.json')
   const level = ctx.data.load<LevelData>('level.json')
   const points = levelPoints(level)
@@ -23,12 +23,15 @@ export function apply(ctx: Context) {
   })
   const g = ctx.state.define<GameState>(GAME, { version: 1, init: () => fresh() })
 
-  ctx.use('world')
-  ctx.use('player')
-  ctx.use('weapon')
-  ctx.use('enemies')
-  ctx.use('hud')
-  ctx.use('menu')
+  // 分阶段加载：逐个 await 子单元，期间让帧并回报进度（Runner 显示加载界面）
+  const stages: [string, string, number][] = [
+    ['world', '加载场景', 0], ['player', '加载角色', 0.76], ['weapon', '加载武器', 0.8],
+    ['enemies', '加载敌人', 0.9], ['hud', '加载界面', 0.97], ['menu', '加载菜单', 0.99],
+  ]
+  for (const [unit, text, progress] of stages) {
+    await ctx.loading.step(text, progress)
+    await ctx.use(unit)
+  }
 
   const cutCount = () => g.relays.filter((r) => r === 'cut').length
   const aliveCount = () => (ctx.state.get<{ list: { mode: string }[] }>(ENEMIES)?.list ?? []).filter((e) => e.mode !== 'dying').length + g.pending.length

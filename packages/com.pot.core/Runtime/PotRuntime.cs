@@ -26,6 +26,14 @@ namespace Pot
         /// <summary>JS 读取：本帧 dt（秒）</summary>
         [Preserve] public static double frameDt;
 
+        /// <summary>启动加载进度（0..1，小于 0 表示未知）与阶段文字，外壳据此画加载界面</summary>
+        public static float LoadProgress = -1;
+        public static string LoadText = "";
+
+        /// <summary>本次启动开始的时间（realtimeSinceStartup）与耗时（秒，启动完成后有效）</summary>
+        public float BootStartTime { get; private set; }
+        public float BootSeconds { get; private set; }
+
         internal static bool gcRequested;
         static string bootState = "";
 
@@ -77,6 +85,9 @@ namespace Pot
             LastError = null;
             tickErrors = 0;
             Boots++;
+            LoadProgress = -1;
+            LoadText = "";
+            BootStartTime = Time.realtimeSinceStartup;
             try
             {
                 backend = new BackendV8();
@@ -99,7 +110,9 @@ namespace Pot
             if (Status != RuntimeStatus.Booting) return;
             Status = ok ? RuntimeStatus.Running : RuntimeStatus.Failed;
             LastError = ok ? null : error;
-            if (ok) Debug.Log("[pot] 游戏已启动");
+            BootSeconds = Time.realtimeSinceStartup - BootStartTime;
+            var cache = PotGfx.CacheInfo();
+            if (ok) Debug.Log("[pot] 游戏已启动（" + BootSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " 秒" + (string.IsNullOrEmpty(cache) ? "" : "，着色器缓存命中 " + cache) + "）");
             else Debug.LogError("[pot] 启动失败：" + error);
             if (Booted != null) Booted(ok, error);
         }
@@ -171,6 +184,12 @@ namespace Pot
                     if (tickErrors <= 10 || tickErrors % 300 == 0)
                         Debug.LogError("[pot] tick 出错（第 " + tickErrors.ToString(CultureInfo.InvariantCulture) + " 次）：" + e.Message);
                 }
+            }
+            else if (Status == RuntimeStatus.Booting)
+            {
+                // 启动分阶段让帧（loading.step）：每帧放行一次，加载在帧之间推进，窗口保持响应
+                try { env.Eval("pot.unity.pump()", "pot/pump"); }
+                catch (Exception e) { Debug.LogError("[pot] 启动推进出错：" + e.Message); }
             }
             PotInput.EndFrame();
             if (env == null) return;

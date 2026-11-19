@@ -86,17 +86,21 @@ public:
     const char* Name() const override { return "d3d11"; }
     Target ShaderTarget() const override { return Target::HLSL50; }
 
-    bool CreateProgram(int id, const CompiledProgram& p, std::string& err) override {
+    bool CreateProgram(int id, CompiledProgram& p, std::string& err) override {
         ProgramD3D11 prog;
-        ID3DBlob* code = nullptr;
-        if (!Compile(p.vsCode, "vs_5_0", &code, err)) return false;
-        prog.vsBlob.assign((uint8_t*)code->GetBufferPointer(), (uint8_t*)code->GetBufferPointer() + code->GetBufferSize());
-        HRESULT hr = device_->CreateVertexShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &prog.vs);
-        code->Release();
+        if (p.vsBin.empty() || p.fsBin.empty()) {
+            ID3DBlob* code = nullptr;
+            if (!Compile(p.vsCode, "vs_5_0", &code, err)) return false;
+            p.vsBin.assign((uint8_t*)code->GetBufferPointer(), (uint8_t*)code->GetBufferPointer() + code->GetBufferSize());
+            code->Release();
+            if (!Compile(p.fsCode, "ps_5_0", &code, err)) { p.vsBin.clear(); return false; }
+            p.fsBin.assign((uint8_t*)code->GetBufferPointer(), (uint8_t*)code->GetBufferPointer() + code->GetBufferSize());
+            code->Release();
+        }
+        prog.vsBlob = p.vsBin;
+        HRESULT hr = device_->CreateVertexShader(p.vsBin.data(), p.vsBin.size(), nullptr, &prog.vs);
         if (FAILED(hr)) { err = "CreateVertexShader 失败"; return false; }
-        if (!Compile(p.fsCode, "ps_5_0", &code, err)) { prog.Release(); return false; }
-        hr = device_->CreatePixelShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &prog.ps);
-        code->Release();
+        hr = device_->CreatePixelShader(p.fsBin.data(), p.fsBin.size(), nullptr, &prog.ps);
         if (FAILED(hr)) { err = "CreatePixelShader 失败"; prog.Release(); return false; }
         prog.vsCBSize = p.vs.blockSize;
         prog.psCBSize = p.fs.blockSize;

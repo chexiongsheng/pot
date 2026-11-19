@@ -71,7 +71,9 @@ function hexRgb(hex: string): [number, number, number] {
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]
 }
 
-export function apply(ctx: Context) {
+export async function apply(ctx: Context) {
+  // 进度区间：world 占 0–0.75（game 在其后加载其余单元）
+  const step = (text: string, p: number) => ctx.loading.step(text, p)
   registerSfx(ctx)
   const level = ctx.data.load<LevelData>('level.json')
   const tuning = ctx.data.load<any>('tuning.json')
@@ -83,6 +85,7 @@ export function apply(ctx: Context) {
   // ---- 程序化贴图（按需烘焙并缓存） ----
   // GPU 烘焙（原版材质系统机械移植）；没有运行时着色器后端时回退到下面的 CPU 近似贴图
   let mats: Mats | undefined
+  await step('编译材质', 0.02)
   if (ctx.gfx.supported) {
     try {
       mats = createMats(ctx, { tex: tuning.quality.tex })
@@ -164,12 +167,15 @@ export function apply(ctx: Context) {
   }
 
   // ---- 原版地面（apron：积水/干湿/油污/接缝，ctx.gfx 着色器）；不可用时用下面的近似地面 ----
+  await step('生成地面', 0.06)
   const apron = createApron(ctx, { maskRes: tuning.quality.tex >= 1024 ? 1024 : 512, detailRes: tuning.quality.tex >= 1024 ? 512 : 256 })
   // ---- 原版海面（Gerstner 波、泡沫、闪光、远处雾霭）；不可用时保留 level.ts 的盒子海面 ----
+  await step('生成海面', 0.1)
   const sea = apron ? createSea(ctx, apron) : false
   const replaced = new Set<string>([...(apron ? ['ground', 'quay-deck'] : []), ...(sea ? ['sea'] : [])])
 
   // ---- 关卡几何：地面、码头、海面、起重机、远景（原版 ground/backdrop 未移植前的近似） ----
+  await step('搭建码头', 0.14)
   for (const piece of buildLevel(level, { origStatic: true })) {
     if (piece.hidden || replaced.has(piece.name ?? '')) continue
     const collide = piece.collide !== false
@@ -192,8 +198,10 @@ export function apply(ctx: Context) {
   }
 
   // ---- 机械移植的原版关卡：堆场、仓库、围栏、道具、中继 ----
+  await step('构建堆场', 0.2)
   const orig = origLevel()
   // ---- 原版雨丝 + 檐口滴水 + 地面溅射（ctx.gfx）；可用时关掉 scene.weather 的内置雨滴粒子 ----
+  await step('生成雨幕', 0.26)
   const rainFx = apron ? createRain(ctx, { mask: apron.mask, level: orig.data }) : undefined
   /** 材质令牌 → Runner 材质：GPU 烘焙的原版材质；没有运行时着色器时退回纯色 */
   const resolveToken = (t: MatToken): { color: string; material: MaterialOptions } => {
@@ -212,8 +220,10 @@ export function apply(ctx: Context) {
   const drawable = (t: MatToken) => t.kind !== 'decal' && t.kind !== 'label'
   // 网格带 key 惰性注册：关卡构建代码没变（orig.stamp 不变）时，热重载直接复用 Runner 里已有的网格
   const meshKey = { key: orig.stamp }
-  orig.statics.forEach((s, k) => {
-    if (!drawable(s.material)) return
+  for (let k = 0; k < orig.statics.length; k++) {
+    const s = orig.statics[k]
+    await step('装配场景模型', 0.28 + (0.6 - 0.28) * k / orig.statics.length)
+    if (!drawable(s.material)) continue
     const name = `orig-static-${k}`
     scene.mesh(name, () => toMesh(s.geometry), meshKey)
     const r = resolveToken(s.material)
@@ -222,10 +232,12 @@ export function apply(ctx: Context) {
       shape: `mesh:${name}`, name: `level:${s.material.name}`, color: r.color,
       material: { ...r.material, shadows: s.cast }, collider: solid, layer: solid ? LEVEL_LAYER : undefined,
     })
-  })
+  }
   const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
-  orig.dynamics.forEach((d, k) => {
-    if (!drawable(d.material)) return
+  for (let k = 0; k < orig.dynamics.length; k++) {
+    const d = orig.dynamics[k]
+    await step('装配动态模型', 0.6 + (0.66 - 0.6) * k / orig.dynamics.length)
+    if (!drawable(d.material)) continue
     const name = `orig-dyn-${k}`
     scene.mesh(name, () => toMesh(d.mesh.geometry), meshKey)
     const r = resolveToken(d.material)
@@ -235,7 +247,8 @@ export function apply(ctx: Context) {
       color: r.color, material: { ...r.material, shadows: d.mesh.castShadow }, collider: false,
     })
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
-  })
+  }
+  await step('布置灯光', 0.67)
   // 原版点光源（three 物理单位坎德拉；URP 漫反射不除以 π，强度按 1/π 换算）
   const origLights = orig.lights.map((l) => {
     l.updateWorldMatrix(true, false)
@@ -280,6 +293,7 @@ export function apply(ctx: Context) {
   scene.sky(look.sky)
   scene.fog(look.fog.color, look.fog.density, { height: look.fog.height, base: look.fog.base, sun: look.fog.sun })
   // 后处理：游戏自己的链（原版移植）；平台不支持运行时着色器时回退到 URP 后处理
+  await step('编译后处理', 0.7)
   const post = createPost(ctx, { exposure: look.postExposure ?? 1, sunColor: look.sky.sun })
   if (!post) scene.post(look.post)
   on(ctx, 'jimao/post', (values) => post?.set(values))
@@ -303,6 +317,7 @@ export function apply(ctx: Context) {
     post?.quality(q.bloom !== false)
     scene.weather({ ...look.weather, drops: rainFx ? 0 : q.drops })
   }
+  await step('应用画质', 0.73)
   applyQuality(game(ctx)?.settings.quality ?? 2)
   scene.refreshEnvironment()
 

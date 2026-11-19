@@ -255,8 +255,51 @@ namespace Pot.Runner
             var height = Screen.height / scale;
 
             if (!session.IsOpen) DrawHome(width, height);
-            else DrawStatusBar(width, height);
+            else
+            {
+                var rt = PotRuntime.Instance;
+                if (rt != null && rt.Status == PotRuntime.RuntimeStatus.Booting) DrawLoading(width, height, rt);
+                DrawStatusBar(width, height);
+            }
             if (showPanel) DrawPanel(width);
+        }
+
+        GUIStyle loadTitleStyle, loadTextStyle;
+
+        /// <summary>启动加载界面：不透明遮住半成品场景，显示游戏名、进度条与当前阶段（进度未知时画来回移动的滑块）</summary>
+        void DrawLoading(float width, float height, PotRuntime rt)
+        {
+            if (loadTitleStyle == null)
+            {
+                loadTitleStyle = new GUIStyle(GUI.skin.label) { fontSize = 26, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                loadTitleStyle.normal.textColor = new Color(0.92f, 0.94f, 0.96f);
+                loadTextStyle = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+                loadTextStyle.normal.textColor = new Color(0.7f, 0.74f, 0.78f);
+            }
+            var old = GUI.color;
+            GUI.color = new Color(0.055f, 0.06f, 0.07f, 1f);
+            GUI.DrawTexture(new Rect(0, 0, width, height), Texture2D.whiteTexture);
+            var w = Mathf.Min(520f, width - 64f);
+            var x = (width - w) / 2f;
+            var y = height * 0.5f;
+            GUI.color = old;
+            GUI.Label(new Rect(0, y - 70, width, 36), session.Name ?? "加载中", loadTitleStyle);
+            // 进度条
+            GUI.color = new Color(1f, 1f, 1f, 0.12f);
+            GUI.DrawTexture(new Rect(x, y, w, 6), Texture2D.whiteTexture);
+            GUI.color = new Color(0.35f, 0.75f, 1f, 0.95f);
+            var p = PotRuntime.LoadProgress;
+            var elapsed = Time.realtimeSinceStartup - rt.BootStartTime;
+            if (p >= 0) GUI.DrawTexture(new Rect(x, y, w * Mathf.Clamp01(p), 6), Texture2D.whiteTexture);
+            else
+            {
+                var seg = w * 0.22f;
+                var t = Mathf.PingPong(elapsed * 0.8f, 1f);
+                GUI.DrawTexture(new Rect(x + (w - seg) * t, y, seg, 6), Texture2D.whiteTexture);
+            }
+            GUI.color = old;
+            var pct = p >= 0 ? Mathf.RoundToInt(Mathf.Clamp01(p) * 100) + "%  " : "";
+            GUI.Label(new Rect(0, y + 14, width, 22), pct + (string.IsNullOrEmpty(PotRuntime.LoadText) ? "启动中" : PotRuntime.LoadText) + "  " + elapsed.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "s", loadTextStyle);
         }
 
         void DrawHome(float width, float height)

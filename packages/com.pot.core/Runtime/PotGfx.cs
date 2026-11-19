@@ -28,6 +28,21 @@ namespace Pot
         [DllImport(Dll)] static extern void PotGfx_Destroy(int id);
         [DllImport(Dll)] static extern int PotGfx_Submit(byte[] data, int len);
         [DllImport(Dll)] static extern IntPtr PotGfx_RenderEvent();
+        [DllImport(Dll)] static extern void PotGfx_SetCacheDir(byte[] dir);
+        [DllImport(Dll)] static extern int PotGfx_CacheHits();
+        [DllImport(Dll)] static extern int PotGfx_CacheMisses();
+
+        /// <summary>着色器编译缓存目录（persistentDataPath/cache/shaders）；按源码内容 hash 存编译产物，第二次打开跳过编译</summary>
+        public static string CacheDir { get { return System.IO.Path.Combine(Application.persistentDataPath, "cache", "shaders"); } }
+
+        /// <summary>本进程着色器缓存命中/未命中次数（"命中/总数"）；插件过旧不支持时返回空串</summary>
+        [Preserve]
+        public static string CacheInfo()
+        {
+            if (Check() != null) return "";
+            try { return PotGfx_CacheHits() + "/" + (PotGfx_CacheHits() + PotGfx_CacheMisses()); }
+            catch (Exception) { return ""; }
+        }
 
         // flags 位（与 native/pot_gfx/src/backend.h 一致）
         const int F_CullMask = 3;
@@ -66,6 +81,8 @@ namespace Pot
                 {
                     backendName = Str(PotGfx_Backend());
                     available = true;
+                    try { PotGfx_SetCacheDir(Utf8(CacheDir)); }
+                    catch (Exception e) { Debug.LogWarning("[pot] pot_gfx 不支持编译缓存（插件过旧？）：" + e.Message); }
                 }
                 catch (Exception e)
                 {
