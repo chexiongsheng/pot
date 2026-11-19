@@ -1,0 +1,15 @@
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Bb]uilds/
+*.csproj
+*.sln
+
+# 每次打包重新生成：游戏 bundle / 启动场景 / 图标、Puerts il2cpp 胶水代码
+Assets/PotGame/
+Assets/PotGame.meta
+Assets/Gen/
+Assets/Gen.meta

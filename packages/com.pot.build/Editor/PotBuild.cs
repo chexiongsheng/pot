@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -11,15 +12,45 @@ using Debug = UnityEngine.Debug;
 namespace Pot.Build
 {
     /// <summary>
-    /// 发布构建：pot build（esbuild 打包为 bundle.cjs）→ 复制到 Assets/PotGame/Resources/pot-game
-    /// → 生成启动场景（只有 PotBoot）→ 复制 link.xml → BuildPipeline.BuildPlayer。
+    /// 发布构建（通用打包工程 player/ 与 runner/ 都可用）：
+    /// 1. 暂存：pot stage（esbuild 打包为 bundle.cjs + manifest.json + data/**，并按 manifest 解析出 release.json 与图标）
+    /// 2. 导入：暂存目录 game/** 以 .bytes 文本资源放进 Assets/PotGame/Resources/pot-game，图标放进 Assets/PotGame
+    /// 3. 生成启动场景（只有 PotBoot）、Puerts 胶水代码、URP 管线
+    /// 4. 按 release.json 设置 PlayerSettings（名称、公司、包名、版本、图标、方向、窗口）
+    /// 5. BuildPipeline.BuildPlayer
+    /// 命令行（推荐用 node js/devserver/cli.js release，它会先暂存再调用这里）：
+    ///   Unity -batchmode -quit -projectPath player -buildTarget Win64|Android|WebGL
+    ///         -executeMethod Pot.Build.PotBuild.Build -potStage=暂存目录 | -potGame=游戏目录  [-potTarget=…] [-potOut=…]
     /// </summary>
     public static class PotBuild
     {
         public const string GameRoot = "Assets/PotGame";
         public const string ResourcesDir = GameRoot + "/Resources/pot-game";
         public const string ScenePath = GameRoot + "/PotBoot.unity";
+        public const string IconPath = GameRoot + "/Icon.png";
         const string PrefGame = "pot.build.game";
+
+        /// <summary>release.json（由 js/devserver/release.js 的 resolveRelease 生成）</summary>
+        [Serializable]
+        public class ReleaseConfig
+        {
+            public string id;
+            public string productName;
+            public string company;
+            public string packageId;
+            public string version;
+            public int versionCode = 1;
+            /// <summary>相对暂存目录的图标路径；空串表示不设图标</summary>
+            public string icon;
+            /// <summary>landscape | portrait | auto</summary>
+            public string orientation;
+            public int width = 1280;
+            public int height = 720;
+            public bool fullscreen;
+            public bool resizable = true;
+            /// <summary>产物文件名（不含扩展名）</summary>
+            public string fileName;
+        }
 
         /// <summary>batchmode 入口</summary>
         public static void Build()
@@ -27,12 +58,14 @@ namespace Pot.Build
             var code = 0;
             try
             {
+                var stage = Arg("potStage");
                 var game = Arg("potGame");
-                var output = Arg("potOut");
-                if (string.IsNullOrEmpty(game) || string.IsNullOrEmpty(output))
-                    throw new Exception("用法：-executeMethod Pot.Build.PotBuild.Build -potGame=<游戏目录> -potOut=<输出路径> [-potTarget=Win64|Android|iOS|WebGL] [-potNode=node] [-potCli=cli.js]");
-                var target = ParseTarget(Arg("potTarget") ?? "Win64");
-                var report = BuildGame(game, output, target);
+                if (string.IsNullOrEmpty(stage) && string.IsNullOrEmpty(game))
+                    throw new Exception("用法：-executeMethod Pot.Build.PotBuild.Build -potStage=<暂存目录>|-potGame=<游戏目录> [-potOut=<输出路径>] [-potTarget=Win64|Android|WebGL]");
+                var targetArg = Arg("potTarget");
+                var target = string.IsNullOrEmpty(targetArg) ? EditorUserBuildSettings.activeBuildTarget : ParseTarget(targetArg);
+                if (string.IsNullOrEmpty(stage)) stage = StageGame(game);
+                var report = BuildStage(stage, Arg("potOut"), target);
                 if (report.summary.result != BuildResult.Succeeded) code = 2;
             }
             catch (Exception e)
@@ -50,12 +83,14 @@ namespace Pot.Build
             if (string.IsNullOrEmpty(game)) return;
             EditorPrefs.SetString(PrefGame, game);
             var target = EditorUserBuildSettings.activeBuildTarget;
-            var ext = target == BuildTarget.StandaloneWindows64 ? "exe" : target == BuildTarget.Android ? "apk" : "";
+            var stage = StageGame(game);
+            var config = LoadConfig(stage);
+            var ext = OutputExtension(target);
             var output = string.IsNullOrEmpty(ext)
-                ? EditorUtility.SaveFolderPanel("输出目录", "", "")
-                : EditorUtility.SaveFilePanel("输出", "", Path.GetFileName(game), ext);
+                ? EditorUtility.SaveFolderPanel("输出目录", "", config.fileName)
+                : EditorUtility.SaveFilePanel("输出", "", config.fileName, ext.TrimStart('.'));
             if (string.IsNullOrEmpty(output)) return;
-            BuildGame(game, output, target);
+            BuildStage(stage, output, target);
         }
 
         [MenuItem("pot/Import Game Only", false, 2)]
@@ -64,47 +99,174 @@ namespace Pot.Build
             var game = EditorUtility.OpenFolderPanel("选择游戏目录（含 manifest.json）", EditorPrefs.GetString(PrefGame, ""), "");
             if (string.IsNullOrEmpty(game)) return;
             EditorPrefs.SetString(PrefGame, game);
-            ImportGame(game);
+            var stage = StageGame(game);
+            ImportStage(stage);
+            ApplyPlayerSettings(LoadConfig(stage), EditorUserBuildSettings.activeBuildTarget);
             CreateBootScene();
+            EditorSceneManager.OpenScene(ScenePath);
         }
 
+        /// <summary>兼容旧入口：从游戏目录直接构建</summary>
         public static BuildReport BuildGame(string gameDir, string outputPath, BuildTarget target)
         {
-            ImportGame(gameDir);
+            return BuildStage(StageGame(gameDir), outputPath, target);
+        }
+
+        public static BuildReport BuildStage(string stageDir, string outputPath, BuildTarget target)
+        {
+            stageDir = Path.GetFullPath(stageDir);
+            var config = LoadConfig(stageDir);
+            if (string.IsNullOrEmpty(outputPath))
+                outputPath = Path.Combine("Builds", TargetName(target), config.fileName + OutputExtension(target));
+            ImportStage(stageDir);
             CreateBootScene();
             EnsurePuertsGenerated();
             PotPipeline.Ensure();
+            ApplyPlayerSettings(config, target);
+            AssetDatabase.SaveAssets();
+
+            var full = Path.GetFullPath(outputPath);
+            var parent = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
             var options = new BuildPlayerOptions
             {
                 scenes = new[] { ScenePath },
-                locationPathName = Path.GetFullPath(outputPath),
+                locationPathName = full,
                 target = target,
                 targetGroup = BuildPipeline.GetBuildTargetGroup(target),
                 options = BuildOptions.None,
             };
-            Debug.Log("[pot] BuildPlayer → " + options.locationPathName + "（" + target + "）");
+            Debug.Log("[pot] BuildPlayer → " + full + "（" + target + "，" + config.productName + " " + config.version + "）");
             var report = BuildPipeline.BuildPlayer(options);
             Debug.Log("[pot] 构建结果：" + report.summary.result + "，大小 " + (report.summary.totalSize / 1024) + " KB，耗时 " + report.summary.totalTime);
             return report;
         }
 
-        /// <summary>运行 pot build 并把产物复制进 Resources</summary>
-        public static void ImportGame(string gameDir)
+        /// <summary>运行 pot stage：游戏目录 → 暂存目录（Temp/pot-stage）</summary>
+        public static string StageGame(string gameDir)
         {
             gameDir = Path.GetFullPath(gameDir);
             if (!File.Exists(Path.Combine(gameDir, "manifest.json"))) throw new Exception("不是 pot 游戏目录（缺少 manifest.json）：" + gameDir);
-            var temp = Path.Combine(Path.GetFullPath("Temp"), "pot-release");
-            if (Directory.Exists(temp)) Directory.Delete(temp, true);
-            RunNode(FindCli(), "build", gameDir, temp);
+            var stage = Path.Combine(Path.GetFullPath("Temp"), "pot-stage");
+            RunNode(FindCli(), "stage", gameDir, stage);
+            return stage;
+        }
 
+        public static ReleaseConfig LoadConfig(string stageDir)
+        {
+            var file = Path.Combine(stageDir, "release.json");
+            if (!File.Exists(file)) throw new Exception("暂存目录缺少 release.json（请用 pot stage 生成）：" + stageDir);
+            var config = JsonUtility.FromJson<ReleaseConfig>(File.ReadAllText(file, Encoding.UTF8));
+            if (string.IsNullOrEmpty(config.productName)) throw new Exception("release.json 缺少 productName");
+            if (string.IsNullOrEmpty(config.fileName)) config.fileName = "game";
+            return config;
+        }
+
+        /// <summary>
+        /// 暂存目录 game/** → Resources/pot-game/**.bytes。统一加 .bytes：Unity 只把少数扩展名识别为文本资源（.frag/.vert/.glsl 不行），
+        /// 且 Resources 路径不含扩展名，sea.frag 与 sea.vert 会撞名；加后缀后资源名 = 原文件名（GameFS 按完整路径读取）。
+        /// </summary>
+        public static void ImportStage(string stageDir)
+        {
+            var gameDir = Path.Combine(stageDir, "game");
+            if (!File.Exists(Path.Combine(gameDir, "manifest.json"))) throw new Exception("暂存目录缺少 game/manifest.json：" + stageDir);
             if (Directory.Exists(ResourcesDir)) FileUtil.DeleteFileOrDirectory(ResourcesDir);
+            if (File.Exists(ResourcesDir + ".meta")) File.Delete(ResourcesDir + ".meta");
             Directory.CreateDirectory(ResourcesDir);
-            CopyDir(temp, ResourcesDir);
+            var files = 0;
+            foreach (var file in Directory.GetFiles(gameDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = file.Substring(gameDir.Length).TrimStart('\\', '/');
+                var target = Path.Combine(ResourcesDir, rel + ".bytes");
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                File.Copy(file, target, true);
+                files++;
+            }
+
+            var config = LoadConfig(stageDir);
+            if (File.Exists(IconPath)) AssetDatabase.DeleteAsset(IconPath);
+            if (!string.IsNullOrEmpty(config.icon))
+            {
+                var icon = Path.Combine(stageDir, config.icon);
+                if (!File.Exists(icon)) throw new Exception("找不到图标：" + icon);
+                File.Copy(icon, IconPath, true);
+            }
 
             var link = Path.Combine(PackageRoot("com.pot.core"), "Runtime/link.xml");
             if (File.Exists(link)) File.Copy(link, Path.Combine(GameRoot, "link.xml"), true);
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
-            Debug.Log("[pot] 已导入游戏 " + gameDir + " → " + ResourcesDir);
+            if (File.Exists(IconPath))
+            {
+                var importer = (TextureImporter)AssetImporter.GetAtPath(IconPath);
+                importer.textureType = TextureImporterType.Default;
+                importer.npotScale = TextureImporterNPOTScale.None;
+                importer.mipmapEnabled = false;
+                importer.alphaIsTransparency = true;
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
+                importer.SaveAndReimport();
+            }
+            Debug.Log("[pot] 已导入 " + files + " 个游戏文件 → " + ResourcesDir);
+        }
+
+        public static void ApplyPlayerSettings(ReleaseConfig config, BuildTarget target)
+        {
+            var group = BuildPipeline.GetBuildTargetGroup(target);
+            var named = NamedBuildTarget.FromBuildTargetGroup(group);
+            PlayerSettings.productName = config.productName;
+            PlayerSettings.companyName = string.IsNullOrEmpty(config.company) ? "pot" : config.company;
+            PlayerSettings.bundleVersion = string.IsNullOrEmpty(config.version) ? "0.0.0" : config.version;
+            if (!string.IsNullOrEmpty(config.packageId))
+            {
+                PlayerSettings.SetApplicationIdentifier(named, config.packageId);
+                PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Standalone, config.packageId);
+            }
+            PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+            PlayerSettings.runInBackground = true;
+            PlayerSettings.SplashScreen.showUnityLogo = false;
+
+            var icon = File.Exists(IconPath) ? AssetDatabase.LoadAssetAtPath<Texture2D>(IconPath) : null;
+            PlayerSettings.SetIconsForTargetGroup(BuildTargetGroup.Unknown, icon != null ? new[] { icon } : new Texture2D[0]);
+
+            switch ((config.orientation ?? "").ToLowerInvariant())
+            {
+                case "portrait":
+                    PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
+                    break;
+                case "auto":
+                    PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
+                    PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+                    PlayerSettings.allowedAutorotateToLandscapeRight = true;
+                    PlayerSettings.allowedAutorotateToPortrait = true;
+                    PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+                    break;
+                default:
+                    PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+                    break;
+            }
+
+            // 桌面窗口
+            PlayerSettings.fullScreenMode = config.fullscreen ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed;
+            PlayerSettings.defaultScreenWidth = config.width > 0 ? config.width : 1280;
+            PlayerSettings.defaultScreenHeight = config.height > 0 ? config.height : 720;
+            PlayerSettings.resizableWindow = config.resizable;
+            PlayerSettings.usePlayerLog = true;
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+
+            // Android：IL2CPP + ARM64（Google Play 要求 64 位）；版本号
+            PlayerSettings.Android.bundleVersionCode = Math.Max(1, config.versionCode);
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Minimal);
+            if (PlayerSettings.Android.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
+                PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+
+            // WebGL：gzip + 解压回退（任意静态服务器可直接托管）
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.WebGL, ManagedStrippingLevel.Minimal);
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;
+            PlayerSettings.WebGL.decompressionFallback = true;
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
+            PlayerSettings.WebGL.dataCaching = true;
+            Debug.Log("[pot] PlayerSettings：" + config.productName + " / " + config.packageId + " / " + config.version + "（" + config.versionCode + "）" + (icon != null ? " / 图标" : ""));
         }
 
         public static void CreateBootScene()
@@ -113,6 +275,7 @@ namespace Pot.Build
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             new GameObject("PotBoot").AddComponent<PotBoot>();
             EditorSceneManager.SaveScene(scene, ScenePath);
+            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             AssetDatabase.Refresh();
         }
 
@@ -137,6 +300,7 @@ namespace Pot.Build
             gen.Invoke(null, null);
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
         }
+
         static string Arg(string name)
         {
             var prefix = "-" + name + "=";
@@ -145,7 +309,7 @@ namespace Pot.Build
             return null;
         }
 
-        static BuildTarget ParseTarget(string name)
+        public static BuildTarget ParseTarget(string name)
         {
             switch (name.ToLowerInvariant())
             {
@@ -156,6 +320,28 @@ namespace Pot.Build
                 case "osx": case "mac": return BuildTarget.StandaloneOSX;
                 case "linux": return BuildTarget.StandaloneLinux64;
                 default: throw new Exception("未知目标平台：" + name);
+            }
+        }
+
+        static string TargetName(BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.StandaloneWindows64: return "win64";
+                case BuildTarget.Android: return "android";
+                case BuildTarget.WebGL: return "webgl";
+                default: return target.ToString().ToLowerInvariant();
+            }
+        }
+
+        /// <summary>BuildPlayer 的输出：Win64 为 exe 文件、Android 为 apk 文件、WebGL 为目录</summary>
+        static string OutputExtension(BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.StandaloneWindows64: return ".exe";
+                case BuildTarget.Android: return ".apk";
+                default: return "";
             }
         }
 
@@ -197,21 +383,13 @@ namespace Pot.Build
                 p.WaitForExit();
                 var output = stdout.Result;
                 if (!string.IsNullOrEmpty(output)) Debug.Log("[pot] " + output.Trim());
-                if (p.ExitCode != 0) throw new Exception("pot build 失败（exit " + p.ExitCode + "）：\n" + stderr + output);
+                if (p.ExitCode != 0) throw new Exception("pot " + args[0] + " 失败（exit " + p.ExitCode + "）：\n" + stderr + output);
             }
         }
 
         static string Quote(string s)
         {
             return "\"" + s.Replace("\"", "\\\"") + "\"";
-        }
-
-        static void CopyDir(string from, string to)
-        {
-            foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
-                Directory.CreateDirectory(dir.Replace(from, to));
-            foreach (var file in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
-                File.Copy(file, file.Replace(from, to), true);
         }
     }
 }

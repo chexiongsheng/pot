@@ -46,10 +46,16 @@ if (path.Length == 0 || path == ".." || path.StartsWith("../") || path.Contains(
             }
             if (UseResources)
             {
-                var ext = Path.GetExtension(path);
-                var resPath = ResourcesPrefix + (ext.Length > 0 ? path.Substring(0, path.Length - ext.Length) : path);
-                var asset = Resources.Load<TextAsset>(resPath);
+                // 新格式：pot-game/<完整路径>.bytes（资源名含原扩展名，sea.frag 与 sea.vert 不撞名）
+                var asset = Resources.Load<TextAsset>(ResourcesPrefix + path);
                 if (asset != null) return asset.text;
+                // 旧格式：去掉扩展名（仅 .json/.txt/.cjs 等 Unity 认识的文本类型）
+                var ext = Path.GetExtension(path);
+                if (ext.Length > 0)
+                {
+                    asset = Resources.Load<TextAsset>(ResourcesPrefix + path.Substring(0, path.Length - ext.Length));
+                    if (asset != null) return asset.text;
+                }
             }
             return null;
         }

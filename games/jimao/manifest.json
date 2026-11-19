@@ -3,5 +3,12 @@
   "name": "几猫 · 港区突击",
   "version": "0.1.0",
   "apiVersion": "0.1",
-  "plugins": ["game"]
+  "plugins": ["game"],
+  "icon": "icon.png",
+  "release": {
+    "company": "pot",
+    "packageId": "com.pot.jimao",
+    "orientation": "landscape",
+    "window": { "width": 1600, "height": 900 }
+  }
 }

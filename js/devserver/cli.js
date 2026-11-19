@@ -7,6 +7,9 @@
  *   pot check <游戏目录>                     类型检查 + 试打包，Runner 运行前发现错误
  *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
  *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
+ *   pot release <游戏目录> [--platform win64|android|webgl[,…]] [--unity Unity.exe] [--out 目录]
+ *                                           出包：TS 编译 → 暂存 → Unity -batchmode 打包（通用工程 player/），不用打开编辑器
+ *   pot stage <游戏目录> <暂存目录>           只暂存（game/ + release.json + 图标），供 Unity 菜单 pot/Build Game 使用
  *   pot mcp [--port 7788]                   以 stdio MCP 方式暴露调试工具
  *   pot status | logs [--follow] [--level error]
  *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules] [unit]
@@ -88,6 +91,24 @@ async function main() {
       const { packGame } = require('./builder')
       if (args.length < 1) throw new Error('用法：pot pack <游戏目录> [输出文件.potg]')
       return print(await packGame(path.resolve(args[0]), args[1] && path.resolve(args[1])))
+    }
+    case 'stage': {
+      const { stageGame } = require('./release')
+      if (args.length < 2) throw new Error('用法：pot stage <游戏目录> <暂存目录>')
+      const res = await stageGame(path.resolve(args[0]), path.resolve(args[1]))
+      return print({ stageDir: res.stageDir, units: res.units, release: res.config })
+    }
+    case 'release': {
+      const { releaseGame } = require('./release')
+      if (args.length < 1) throw new Error('用法：pot release <游戏目录> [--platform win64|android|webgl] [--unity Unity.exe] [--out 输出目录] [--project Unity 工程]')
+      const platforms = String(flags.platform ?? 'win64').split(',')
+      const results = []
+      for (const platform of platforms) {
+        results.push(await releaseGame(args[0], { platform, unity: flags.unity, out: platforms.length > 1 && flags.out ? path.join(flags.out, platform) : flags.out, project: flags.project }))
+        if (!results[results.length - 1].ok) break
+      }
+      const brief = results.map((r) => ({ ok: r.ok, platform: r.platform, output: r.output, seconds: r.seconds, log: r.log, ...(r.ok ? {} : { exitCode: r.exitCode, errors: r.errors }) }))
+      return exitBy(brief.length === 1 ? brief[0] : { ok: brief.every((r) => r.ok), results: brief })
     }
     case 'mcp':
       return require('./mcp').runMcp(port)

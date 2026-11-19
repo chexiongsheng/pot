@@ -46,8 +46,27 @@ namespace Pot
         public float maxDeltaTime = 0.1f;
 
         ScriptEnv env;
-        BackendV8 backend;
+        Backend backend;
         int tickErrors;
+
+        /// <summary>
+        /// JS 后端：桌面/移动用 V8；WebGL 用浏览器自身的 JS 引擎（Puerts.BackendWebGL，来自 com.tencent.puerts.webgl 包）。
+        /// </summary>
+        static Backend CreateBackend()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            Type type = null;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = asm.GetType("Puerts.BackendWebGL");
+                if (type != null) break;
+            }
+            if (type == null) throw new Exception("WebGL 需要 Puerts WebGL 后端（com.tencent.puerts.webgl 包），当前工程未安装");
+            return (Backend)Activator.CreateInstance(type, new object[] { new DefaultLoader() });
+#else
+            return new BackendV8();
+#endif
+        }
 
         public static PotRuntime Ensure()
         {
@@ -90,7 +109,7 @@ namespace Pot
             BootStartTime = Time.realtimeSinceStartup;
             try
             {
-                backend = new BackendV8();
+                backend = CreateBackend();
                 env = new ScriptEnv(backend);
                 var core = Resources.Load<TextAsset>("pot/core");
                 if (core == null) throw new Exception("找不到 Resources/pot/core.cjs（com.pot.core 包不完整，请运行 js 的 npm run build）");
