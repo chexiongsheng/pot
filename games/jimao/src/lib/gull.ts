@@ -5,10 +5,10 @@
  */
 import { Vector2, Vector3, Object3D, LatheGeometry, CylinderGeometry, TorusGeometry, BufferGeometry, Float32BufferAttribute } from '../vendor/three-geo'
 import { Fn } from './orig/port'
-import { toMesh } from './geo'
+import { toMesh, moduleStamp } from './geo'
 import { ENEMY_LAYER } from './level'
-import { hdr, toUnityTransform } from './origlevel'
-import { Rig, Ss, vm, Ts, s0, ga, Of, As, Yn, an, va, ft, Ce, ds, Ro, Si, su, Ur, Yv, slotMaterial, HIDDEN } from './hound'
+import { hdr, writeUnityTRS } from './origlevel'
+import { Rig, Ss, vm, Ts, s0, ga, Of, As, Yn, an, va, ft, Ce, ds, Ro, Si, su, Ur, Yv, slotMaterial } from './hound'
 
 const Ci = TorusGeometry
 
@@ -200,10 +200,9 @@ export function createGullAnimator(rand = Math.random) {
 
 // ---- Runner 侧 ----
 
+const STAMP = moduleStamp()
 const registered = new WeakSet<object>()
 const meshName = (p) => `gull-${p.bone}-${p.slot}`
-/** 需要同步缩放的骨骼（频闪灯开关、掉落旋翼、熄灭探照灯） */
-const SCALED = new Set(['rotor0', 'rotor1', 'rotor2', 'rotor3', 'lamp', 'strobeG', 'strobeR', 'strobeW'])
 
 export interface GullModel {
   anim: any
@@ -211,6 +210,11 @@ export interface GullModel {
   lens: any[]
   lastLens: number[]
   hits: any[]
+  /** 批量变换：骨骼实体 id、对应的 three 骨骼、每根 10 个数的暂存区 */
+  scene: any
+  ids: Int32Array
+  objs: any[]
+  data: Float32Array
 }
 
 export function buildGull(ctx, name: string, mats?: any) {
@@ -223,11 +227,16 @@ export function buildGull(ctx, name: string, mats?: any) {
   }
   if (!registered.has(ctx)) {
     registered.add(ctx)
-    for (const p of def.parts) scene.mesh(meshName(p), toMesh(p.geometry))
+    for (const p of def.parts) scene.mesh(meshName(p), () => toMesh(p.geometry), { key: STAMP })
   }
   const root = scene.spawn({ shape: 'empty', name })
   const ents = new Map()
-  for (const b of def.bones) if (b.parent) ents.set(b.name, scene.spawn({ shape: 'empty', name: `${name}-${b.name}`, parent: root }))
+  const names = def.bones.filter((b) => b.parent).map((b) => b.name)
+  const bones = names.map((n) => {
+    const e = scene.spawn({ shape: 'empty', name: `${name}-${n}`, parent: root })
+    ents.set(n, e)
+    return e
+  })
   const lens = []
   for (const p of def.parts) {
     const parent = ents.get(p.bone)
@@ -245,22 +254,19 @@ export function buildGull(ctx, name: string, mats?: any) {
   }
   // 原版 _raycast：以机身为中心、半径 .5、竖向压扁 2.3 倍的椭球（无弱点）
   const parts = new Map<number, boolean>()
-  const hit = scene.spawn({ ...HIDDEN, parent: ents.get('body'), shape: 'sphere', name: `${name}-hit`, position: [0, -0.03, 0], scale: [1, 1 / 2.3, 1], collider: true, layer: ENEMY_LAYER })
+  const hit = scene.spawn({ visible: false, parent: ents.get('body'), shape: 'sphere', name: `${name}-hit`, position: [0, -0.03, 0], scale: [1, 1 / 2.3, 1], collider: true, layer: ENEMY_LAYER })
   parts.set(hit.id, false)
   const light = scene.light({ type: 'point', name: `${name}-light`, parent: ents.get('ball'), position: [0, 0, 0.1], intensity: 0.4, range: 4, color: '#ff8a40' })
   const anim = createGullAnimator(Math.random)
-  const gull: GullModel = { anim, ents, lens, lastLens: [-1, -1, -1], hits: [hit] }
+  const gull: GullModel = { anim, ents, lens, lastLens: [-1, -1, -1], hits: [hit], scene, ids: Int32Array.from(bones, (e) => e.id), objs: names.map((n) => anim.bones[n]), data: new Float32Array(names.length * 10) }
   return { root, parts, light, gull }
 }
 
+/** 骨骼世界矩阵 → 骨骼实体（一次批量下发，含缩放：频闪灯开关、掉落旋翼、熄灭探照灯都靠缩放） */
 export function syncGull(g: GullModel) {
-  const l = g.anim.bones
-  for (const [name, ent] of g.ents) {
-    const tr = toUnityTransform(l[name].matrixWorld)
-    ent.position = tr.position
-    ent.rotation = tr.rotation
-    if (SCALED.has(name)) ent.scale = tr.scale
-  }
+  const objs = g.objs, data = g.data
+  for (let k = 0; k < objs.length; k++) writeUnityTRS(objs[k].matrixWorld, data, k * 10)
+  g.scene.setTransforms(g.ids, data)
   const c = g.anim.lens
   if (Math.abs(c[0] - g.lastLens[0]) + Math.abs(c[1] - g.lastLens[1]) + Math.abs(c[2] - g.lastLens[2]) > 0.05) {
     g.lastLens = [c[0], c[1], c[2]]

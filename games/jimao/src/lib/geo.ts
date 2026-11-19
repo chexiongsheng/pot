@@ -282,5 +282,37 @@ export function toMesh(g: Geo): MeshData {
   return { positions, normals, uvs, colors, indices }
 }
 
+/**
+ * 模块戳：共享模块只在自己或依赖变化时才重新执行，所以这个值在"建模代码没动"的热重载之间保持不变。
+ * 拼进 scene.mesh 的 key，网格就能跨热重载复用，改了建模代码又会自动失效。
+ */
+export const moduleStamp = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 0xffffff).toString(36)}`
+
+/**
+ * 把若干刚性部件合成一个蒙皮网格：每个顶点只绑所在部件的那根骨骼（权重 1）。
+ * 顶点留在各自骨骼的局部空间，所以绑定姿态是单位矩阵，不用给 bindPoses。
+ */
+export function skinMesh(parts: { geometry: Geo; bone: number }[]): MeshData {
+  const list = parts.map((p) => ({ mesh: toMesh(p.geometry), bone: p.bone }))
+  let nv = 0, ni = 0
+  for (const p of list) { nv += p.mesh.positions.length / 3; ni += p.mesh.indices!.length }
+  const hasUv = list.every((p) => p.mesh.uvs), hasColor = list.every((p) => p.mesh.colors)
+  const positions = new Float32Array(nv * 3), normals = new Float32Array(nv * 3), indices = new Uint32Array(ni), boneIndices = new Int32Array(nv)
+  const uvs = hasUv ? new Float32Array(nv * 2) : undefined, colors = hasColor ? new Float32Array(nv * 4) : undefined
+  let v = 0, k = 0
+  for (const p of list) {
+    const m = p.mesh, n = m.positions.length / 3
+    positions.set(m.positions as Float32Array, v * 3)
+    normals.set(m.normals as Float32Array, v * 3)
+    if (uvs) uvs.set(m.uvs as Float32Array, v * 2)
+    if (colors) colors.set(m.colors as Float32Array, v * 4)
+    boneIndices.fill(p.bone, v, v + n)
+    const src = m.indices!
+    for (let j = 0; j < src.length; j++) indices[k++] = src[j] + v
+    v += n
+  }
+  return { positions, normals, uvs, colors, indices, boneIndices }
+}
+
 /** 线性 RGB → sRGB（给 MaterialOptions.color 用，原版材质颜色都是线性值） */
 export const linearColor = (c: RGB): [number, number, number] => [toSrgb(c[0]), toSrgb(c[1]), toSrgb(c[2])]

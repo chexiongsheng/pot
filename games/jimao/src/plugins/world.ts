@@ -7,7 +7,7 @@ import { createRain } from '../lib/rain'
 import { rng } from '../lib/math'
 import { createMats, MATS, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
-import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, type MatToken } from '../lib/origlevel'
+import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '../lib/origlevel'
 import { registerSfx, sfx } from '../lib/sfx'
 import { createPost } from '../lib/post'
 import { on } from '../lib/bus'
@@ -210,10 +210,12 @@ export function apply(ctx: Context) {
   }
   // Canvas 2D 绘制的贴花与喷字（decal/label）暂缺，跳过
   const drawable = (t: MatToken) => t.kind !== 'decal' && t.kind !== 'label'
+  // 网格带 key 惰性注册：关卡构建代码没变（orig.stamp 不变）时，热重载直接复用 Runner 里已有的网格
+  const meshKey = { key: orig.stamp }
   orig.statics.forEach((s, k) => {
     if (!drawable(s.material)) return
     const name = `orig-static-${k}`
-    scene.mesh(name, toMesh(s.geometry))
+    scene.mesh(name, () => toMesh(s.geometry), meshKey)
     const r = resolveToken(s.material)
     const solid = !s.material.transparent && s.material.kind === 'std'
     scene.spawn({
@@ -225,7 +227,7 @@ export function apply(ctx: Context) {
   orig.dynamics.forEach((d, k) => {
     if (!drawable(d.material)) return
     const name = `orig-dyn-${k}`
-    scene.mesh(name, toMesh(d.mesh.geometry))
+    scene.mesh(name, () => toMesh(d.mesh.geometry), meshKey)
     const r = resolveToken(d.material)
     const tr = toUnityTransform(d.mesh.matrixWorld)
     const ent = scene.spawn({
@@ -242,24 +244,27 @@ export function apply(ctx: Context) {
     const ent = scene.light({ type: 'point', name: 'orig-light', position: p, intensity: (l.intensity * c.intensity) / Math.PI, range: l.distance || 15, color: c.color })
     return { l, ent, last: l.intensity }
   })
+  // 变了的动态网格收集起来一次下发（原版每帧改几十个矩阵）
+  const dynIds = new Int32Array(dynamic.length), dynData = new Float32Array(dynamic.length * 10)
   const syncOrig = (dt: number) => {
     orig.update(dt)
     orig.data.root.updateMatrixWorld(true)
+    let moved = 0
     for (const d of dynamic) {
       const e = d.mesh.matrixWorld.elements
       let changed = false
       for (let k = 0; k < 16; k++) if (e[k] !== d.last[k]) { changed = true; d.last[k] = e[k] }
       if (changed) {
-        const tr = toUnityTransform(d.mesh.matrixWorld)
-        d.ent.position = tr.position
-        d.ent.rotation = tr.rotation
-        d.ent.scale = tr.scale
+        dynIds[moved] = d.ent.id
+        writeUnityTRS(d.mesh.matrixWorld, dynData, moved * 10)
+        moved++
       }
       if (d.token.version !== d.version) {
         d.version = d.token.version
         d.ent.material(emissiveMaterial(d.token).material)
       }
     }
+    if (moved) scene.setTransforms(dynIds, dynData, { count: moved })
     for (const o of origLights) {
       if (o.l.intensity !== o.last) {
         o.last = o.l.intensity

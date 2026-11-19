@@ -7,6 +7,7 @@
  */
 import type { MaterialOptions, Vec3 } from '@pot/core'
 import { Color, Euler, Group, Matrix4, Quaternion, Vector3 } from '../vendor/three-geo'
+import { moduleStamp } from './geo'
 import type { Box } from './level'
 import { MATS } from './mats'
 import * as port from './orig/port'
@@ -97,9 +98,12 @@ export interface OrigLevel {
   boxes: OrigBox[]
   data: any
   backdrop: any
+  /** 关卡构建代码（本模块及其依赖）没变就不变，拼进 scene.mesh 的 key 让网格跨热重载复用 */
+  stamp: string
   update(dt: number): void
 }
 
+const STAMP = moduleStamp()
 let built: OrigLevel | undefined
 
 /** 构建原版关卡（模块内缓存；同一游戏包里多个插件共享） */
@@ -146,7 +150,7 @@ export function origLevel(): OrigLevel {
     dynamics.push({ mesh: o, material: asToken(o.material) })
   })
   built = {
-    statics, dynamics, lights, boxes, data, backdrop,
+    statics, dynamics, lights, boxes, data, backdrop, stamp: STAMP,
     update: (dt) => { data.update(dt); backdrop.update(dt); backdrop.root.updateMatrixWorld(true) },
   }
   return built
@@ -170,6 +174,20 @@ export function toUnityTransform(matrixWorld: any) {
     rotation: [_e.x * DEG, _e.y * DEG, _e.z * DEG] as Vec3,
     scale: [_s.x, _s.y, _s.z] as Vec3,
   }
+}
+
+const snap1 = (v: number) => (Math.abs(v - 1) < 1e-5 ? 1 : v)
+
+/**
+ * 无分配版本：把位置(3)、四元数(4)、缩放(3) 共 10 个数写到 out[offset..]，给 scene.setTransforms 用。
+ * S·M·S 分解出的四元数分量可直接当 Unity 四元数。
+ */
+export function writeUnityTRS(matrixWorld: any, out: Float32Array, offset: number) {
+  _m.multiplyMatrices(S, matrixWorld).multiply(S)
+  _m.decompose(_p, _q, _s)
+  out[offset] = _p.x; out[offset + 1] = _p.y; out[offset + 2] = _p.z
+  out[offset + 3] = _q.x; out[offset + 4] = _q.y; out[offset + 5] = _q.z; out[offset + 6] = _q.w
+  out[offset + 7] = snap1(_s.x); out[offset + 8] = snap1(_s.y); out[offset + 9] = snap1(_s.z)
 }
 
 const toSrgb = (v: number) => (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)

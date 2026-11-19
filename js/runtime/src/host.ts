@@ -9,11 +9,20 @@ export type Vec3 = [number, number, number]
 
 /** 引擎桥：只用数字 id 引用引擎对象，不把引擎对象交给游戏代码 */
 export interface Engine {
-  /** shape: cube/sphere/capsule/cylinder/plane/quad/empty；parent 为 0 表示无父节点；返回对象 id */
+  /** shape: cube/sphere/capsule/cylinder/plane/quad/empty、mesh:名字、skin:名字（蒙皮，之后调 skin 绑骨骼）；parent 为 0 表示无父节点；返回对象 id */
   spawn(shape: string, name: string, parent: number): number
   destroy(id: number): void
   exists(id: number): boolean
   setVec(id: number, prop: VecProp, x: number, y: number, z: number): void
+  /**
+   * 批量设置变换。ids 为 Int32 对象 id；data 每个对象 10 个 Float32（位置 xyz、四元数 xyzw、缩放 xyz）。
+   * flags：bit0 位置、bit1 旋转、bit2 缩放、bit3 位置与旋转按局部空间。返回实际写入的对象数
+   */
+  setTransforms(ids: ArrayBuffer, data: ArrayBuffer, count: number, flags: number): number
+  /** 开关渲染（碰撞体不受影响） */
+  visible(id: number, visible: boolean): void
+  /** 给 spawn('skin:名字') 的对象绑定骨骼（Int32 对象 id，顺序对应骨骼下标）；成功返回空串 */
+  skin(id: number, bones: ArrayBuffer): string
   getVec(id: number, prop: VecProp): Vec3
   setColor(id: number, r: number, g: number, b: number, a: number): void
   setActive(id: number, active: boolean): void
@@ -86,8 +95,15 @@ export interface Engine {
    * 返回 Float32 头 [w,h,ox,base,adv,ascent,descent,0] + w*h 字节 alpha（行从上到下）；不支持返回 null
    */
   canvasText(text: string, family: string, size: number, style: number): ArrayBuffer | null
-  /** 注册网格（Float32 xyz / uv / rgba，Uint32 索引）；返回顶点数 */
-  mesh(name: string, positions: ArrayBuffer, normals: ArrayBuffer | null, uvs: ArrayBuffer | null, colors: ArrayBuffer | null, indices: ArrayBuffer): number
+  /** 注册网格（Float32 xyz / uv / rgba，Uint32 索引）；key 非空时登记为内容标识；返回顶点数 */
+  mesh(name: string, positions: ArrayBuffer, normals: ArrayBuffer | null, uvs: ArrayBuffer | null, colors: ArrayBuffer | null, indices: ArrayBuffer, key: string): number
+  /** 同名网格是否已按这个 key 注册过：命中返回顶点数，否则 -1（网格只在冷重启时清空） */
+  meshCached(name: string, key: string): number
+  /**
+   * 给刚注册的网格补蒙皮数据：boneIndices 为 Int32（每顶点 1 到 4 个），weights 为 Float32（null 表示第一根权重 1），
+   * bindPoses 为 Float32（每根 16 个，列主序；null 表示单位矩阵）。成功返回空串
+   */
+  meshSkin(name: string, boneIndices: ArrayBuffer, weights: ArrayBuffer | null, bindPoses: ArrayBuffer | null): string
   /** slot：map / normal / mask 或着色器属性名；tex 为 0 表示解除 */
   matTexture(id: number, slot: string, tex: number): void
   matFloat(id: number, prop: string, value: number): void

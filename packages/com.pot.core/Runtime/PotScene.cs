@@ -119,6 +119,20 @@ namespace Pot
                         }
                         else Debug.LogWarning("[pot] 未注册的网格：" + meshName);
                     }
+                    else if (shape != null && shape.StartsWith("skin:", StringComparison.Ordinal))
+                    {
+                        // 蒙皮网格：顶点由骨骼摆放，不建碰撞体（命中体另用 visible:false 的图元挂在骨骼上）
+                        var meshName = shape.Substring(5);
+                        Mesh mesh;
+                        if (meshes.TryGetValue(meshName, out mesh) && mesh != null)
+                        {
+                            var smr = go.AddComponent<SkinnedMeshRenderer>();
+                            smr.sharedMesh = mesh;
+                            smr.updateWhenOffscreen = true;
+                            smr.skinnedMotionVectors = false;
+                        }
+                        else Debug.LogWarning("[pot] 未注册的网格：" + meshName);
+                    }
                     break;
             }
             var id = nextId++;
@@ -149,6 +163,92 @@ namespace Pot
         public static bool Exists(int id)
         {
             return Get(id) != null;
+        }
+
+        static readonly int RestId = Shader.PropertyToID("_Rest");
+
+        /// <summary>
+        /// 给 Spawn("skin:名字") 建出的对象绑定骨骼。boneIds 为 Int32 对象 id，顺序对应网格的骨骼下标。
+        /// 成功返回空串。蒙皮结果在该对象自身的局部空间里，通常让它留在父节点原点不动。
+        /// </summary>
+        [Preserve]
+        public static string Skin(int id, Puerts.ArrayBuffer boneIds)
+        {
+            var go = Get(id);
+            var smr = go != null ? go.GetComponent<SkinnedMeshRenderer>() : null;
+            if (smr == null || smr.sharedMesh == null) return "对象不是蒙皮网格";
+            var b = Ints(boneIds);
+            var need = smr.sharedMesh.bindposes.Length;
+            if (need == 0) return "网格没有骨骼数据（注册网格时需要 boneIndices）";
+            if (b == null || b.Length < need) return "骨骼数量不足：网格需要 " + need + " 根，只给了 " + (b == null ? 0 : b.Length) + " 根";
+            var ts = new Transform[b.Length];
+            for (var i = 0; i < b.Length; i++)
+            {
+                var bone = Get(b[i]);
+                if (bone == null) return "第 " + i + " 根骨骼不存在";
+                ts[i] = bone.transform;
+            }
+            smr.bones = ts;
+            // 物体空间三平面改用静止姿态采样，贴图才不会随肢体游动（见 PotLit 的 _Rest）
+            SetProp(smr, RestId, 1f);
+            return "";
+        }
+
+        static int[] xfIds = new int[64];
+        static float[] xfData = new float[640];
+
+        /// <summary>
+        /// 批量设置变换。ids 为 Int32 对象 id；data 每个对象 10 个 Float32：位置 xyz、四元数 xyzw、缩放 xyz。
+        /// flags：bit0 写位置、bit1 写旋转、bit2 写缩放（始终是 localScale）、bit3 位置与旋转按局部空间。
+        /// 世界空间下父节点要排在子节点之前。返回实际写入的对象数。
+        /// </summary>
+        [Preserve]
+        public static int SetTransforms(Puerts.ArrayBuffer ids, Puerts.ArrayBuffer data, int count, int flags)
+        {
+            if (ids == null || data == null || ids.Bytes == null || data.Bytes == null || count <= 0) return 0;
+            count = Mathf.Min(count, Mathf.Min(ids.Count / 4, data.Count / 40));
+            if (count <= 0) return 0;
+            if (xfIds.Length < count) { xfIds = new int[Mathf.NextPowerOfTwo(count)]; xfData = new float[xfIds.Length * 10]; }
+            Buffer.BlockCopy(ids.Bytes, 0, xfIds, 0, count * 4);
+            Buffer.BlockCopy(data.Bytes, 0, xfData, 0, count * 40);
+            bool pos = (flags & 1) != 0, rot = (flags & 2) != 0, scale = (flags & 4) != 0, local = (flags & 8) != 0;
+            var done = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var go = Get(xfIds[i]);
+                if (go == null) continue;
+                var t = go.transform;
+                var o = i * 10;
+                if (pos && rot)
+                {
+                    var p = new Vector3(xfData[o], xfData[o + 1], xfData[o + 2]);
+                    var q = new Quaternion(xfData[o + 3], xfData[o + 4], xfData[o + 5], xfData[o + 6]);
+                    if (local) t.SetLocalPositionAndRotation(p, q);
+                    else t.SetPositionAndRotation(p, q);
+                }
+                else if (pos)
+                {
+                    var p = new Vector3(xfData[o], xfData[o + 1], xfData[o + 2]);
+                    if (local) t.localPosition = p; else t.position = p;
+                }
+                else if (rot)
+                {
+                    var q = new Quaternion(xfData[o + 3], xfData[o + 4], xfData[o + 5], xfData[o + 6]);
+                    if (local) t.localRotation = q; else t.rotation = q;
+                }
+                if (scale) t.localScale = new Vector3(xfData[o + 7], xfData[o + 8], xfData[o + 9]);
+                done++;
+            }
+            return done;
+        }
+
+        /// <summary>开关渲染（碰撞体、子节点、灯光不受影响）：只碰撞不渲染的命中体用它</summary>
+        [Preserve]
+        public static void SetVisible(int id, bool visible)
+        {
+            var go = Get(id);
+            if (go == null) return;
+            foreach (var r in go.GetComponents<Renderer>()) r.enabled = visible;
         }
 
         [Preserve]
@@ -470,13 +570,40 @@ namespace Pot
             return f;
         }
 
+        static int[] Ints(Puerts.ArrayBuffer b)
+        {
+            if (b == null || b.Bytes == null || b.Count < 4) return null;
+            var f = new int[b.Count / 4];
+            Buffer.BlockCopy(b.Bytes, 0, f, 0, f.Length * 4);
+            return f;
+        }
+
+        static readonly Dictionary<string, string> meshKeys = new Dictionary<string, string>();
+
+        /// <summary>
+        /// 同名网格是否已按这个 key 注册过。命中返回顶点数，否则返回 -1。
+        /// 网格只在冷重启时清空，热重载时内容没变的大网格可以据此跳过生成与上传。
+        /// </summary>
+        [Preserve]
+        public static int MeshCached(string name, string key)
+        {
+            if (string.IsNullOrEmpty(key)) return -1;
+            Mesh mesh;
+            string old;
+            if (!meshes.TryGetValue(name, out mesh) || mesh == null) return -1;
+            if (!meshKeys.TryGetValue(name, out old) || !string.Equals(old, key, StringComparison.Ordinal)) return -1;
+            return mesh.vertexCount;
+        }
+
         /// <summary>
         /// 注册网格（之后可用 Spawn("mesh:name")）。positions/normals 为 Float32 xyz，uvs 为 Float32 uv，
         /// colors 为 Float32 rgba（sRGB），indices 为 Uint32 三角形。normals/uvs/colors 可为 null。同名覆盖。
+        /// key 非空时登记为该网格的内容标识，供 MeshCached 查询。
         /// </summary>
         [Preserve]
-        public static int Mesh(string name, Puerts.ArrayBuffer positions, Puerts.ArrayBuffer normals, Puerts.ArrayBuffer uvs, Puerts.ArrayBuffer colors, Puerts.ArrayBuffer indices)
+        public static int Mesh(string name, Puerts.ArrayBuffer positions, Puerts.ArrayBuffer normals, Puerts.ArrayBuffer uvs, Puerts.ArrayBuffer colors, Puerts.ArrayBuffer indices, string key)
         {
+            meshKeys.Remove(name);
             var p = Floats(positions);
             if (p == null || indices == null || indices.Bytes == null) return 0;
             var vcount = p.Length / 3;
@@ -521,7 +648,107 @@ namespace Pot
             if (uv != null) mesh.RecalculateTangents();
             mesh.RecalculateBounds();
             meshes[name] = mesh;
+            if (!string.IsNullOrEmpty(key)) meshKeys[name] = key;
             return vcount;
+        }
+
+        /// <summary>
+        /// 给已注册的网格补蒙皮数据（紧跟在 Mesh 之后调用）。boneIndices 为 Int32，每顶点 1 到 4 个（个数 = 长度 / 顶点数）；
+        /// weights 为 Float32，形状同 boneIndices，null 表示第一根骨骼权重 1（刚性蒙皮）；
+        /// bindPoses 为 Float32，每根骨骼 16 个（列主序），null 表示全是单位矩阵（顶点已在骨骼局部空间）。
+        /// 同时把静止姿态的位置、法线、切线存进 UV1 到 UV3，供物体空间三平面采样。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string MeshSkin(string name, Puerts.ArrayBuffer boneIndices, Puerts.ArrayBuffer weights, Puerts.ArrayBuffer bindPoses)
+        {
+            Mesh mesh;
+            if (!meshes.TryGetValue(name, out mesh) || mesh == null) return "未注册的网格：" + name;
+            var err = SkinData(mesh, Ints(boneIndices), Floats(weights), Floats(bindPoses));
+            if (err.Length > 0) meshKeys.Remove(name);
+            return err;
+        }
+
+        static string SkinData(Mesh mesh, int[] bi, float[] w, float[] bp)
+        {
+            var vcount = mesh.vertexCount;
+            if (bi == null || vcount == 0 || bi.Length % vcount != 0) return "boneIndices 的长度须为顶点数的整数倍";
+            var per = bi.Length / vcount;
+            if (per < 1 || per > 4) return "每个顶点只能有 1 到 4 根骨骼";
+            if (w != null && w.Length != bi.Length) return "boneWeights 的长度须与 boneIndices 相同";
+            var maxBone = 0;
+            var bw = new BoneWeight[vcount];
+            var ii = new int[4];
+            var ww = new float[4];
+            for (var v = 0; v < vcount; v++)
+            {
+                var sum = 0f;
+                for (var k = 0; k < 4; k++)
+                {
+                    ii[k] = k < per ? bi[v * per + k] : 0;
+                    ww[k] = k >= per ? 0f : w != null ? Mathf.Max(0f, w[v * per + k]) : k == 0 ? 1f : 0f;
+                    if (ii[k] < 0) return "骨骼下标不能为负";
+                    sum += ww[k];
+                }
+                if (sum <= 0f) { ww[0] = 1f; sum = 1f; }
+                // Unity 要求权重从大到小
+                for (var a = 1; a < 4; a++)
+                    for (var c = a; c > 0 && ww[c] > ww[c - 1]; c--)
+                    {
+                        var tw = ww[c]; ww[c] = ww[c - 1]; ww[c - 1] = tw;
+                        var ti = ii[c]; ii[c] = ii[c - 1]; ii[c - 1] = ti;
+                    }
+                for (var k = 0; k < 4; k++)
+                {
+                    if (ww[k] <= 0f) ii[k] = 0;
+                    else if (ii[k] > maxBone) maxBone = ii[k];
+                }
+                bw[v] = new BoneWeight
+                {
+                    boneIndex0 = ii[0], weight0 = ww[0] / sum,
+                    boneIndex1 = ii[1], weight1 = ww[1] / sum,
+                    boneIndex2 = ii[2], weight2 = ww[2] / sum,
+                    boneIndex3 = ii[3], weight3 = ww[3] / sum,
+                };
+            }
+            Matrix4x4[] poses;
+            if (bp != null)
+            {
+                if (bp.Length % 16 != 0) return "bindPoses 每根骨骼 16 个数";
+                if (bp.Length / 16 <= maxBone) return "bindPoses 只有 " + bp.Length / 16 + " 根，顶点用到了第 " + maxBone + " 根";
+                poses = new Matrix4x4[bp.Length / 16];
+                for (var i = 0; i < poses.Length; i++)
+                    for (var k = 0; k < 16; k++) poses[i][k] = bp[i * 16 + k];
+            }
+            else
+            {
+                poses = new Matrix4x4[maxBone + 1];
+                for (var i = 0; i < poses.Length; i++) poses[i] = Matrix4x4.identity;
+            }
+
+            // 静止姿态：Unity 只对位置、法线、切线做蒙皮，UV 通道原样透传。
+            // 切线与法线正交化（没有 UV 或 UV 退化时任取一个垂直方向），着色器靠这对标架把静止空间的法线扰动转到蒙皮后的空间
+            var verts = mesh.vertices;
+            var normals = mesh.normals;
+            var tangents = mesh.tangents;
+            if (tangents == null || tangents.Length != vcount) tangents = new Vector4[vcount];
+            var rest = new Vector3[vcount];
+            for (var i = 0; i < vcount; i++)
+            {
+                var n = normals[i];
+                var t = (Vector3)tangents[i];
+                t -= n * Vector3.Dot(n, t);
+                if (t.sqrMagnitude < 1e-8f) t = Vector3.Cross(n, Mathf.Abs(n.y) < 0.99f ? Vector3.up : Vector3.right);
+                t.Normalize();
+                rest[i] = t;
+                tangents[i] = new Vector4(t.x, t.y, t.z, tangents[i].w < 0f ? -1f : 1f);
+            }
+            mesh.tangents = tangents;
+            mesh.SetUVs(1, verts);
+            mesh.SetUVs(2, normals);
+            mesh.SetUVs(3, rest);
+            mesh.boneWeights = bw;
+            mesh.bindposes = poses;
+            return "";
         }
 
         // ---------------- 碰撞与射线 ----------------
@@ -718,6 +945,7 @@ namespace Pot
             textures.Clear();
             foreach (var m in meshes.Values) if (m != null) Object.Destroy(m);
             meshes.Clear();
+            meshKeys.Clear();
             ResetEnvironment();
             PotRender.Clear();
             PotUI.Clear();

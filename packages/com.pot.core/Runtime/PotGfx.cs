@@ -95,6 +95,7 @@ namespace Pot
         class GpuProgram
         {
             public int id;
+            public string vsSource, fsSource;
             public ReflStage vs, fs;
             public readonly Dictionary<string, int> textures = new Dictionary<string, int>();
         }
@@ -103,17 +104,20 @@ namespace Pot
 
         /// <summary>
         /// 编译并注册程序（同名替换）。成功返回空串；失败返回错误信息，旧程序保持不变（热重载出错时画面不丢）。
+        /// 同名程序的两段源码都没变时直接复用，不重新编译（热重载时绝大多数着色器没改）。
         /// </summary>
         [Preserve]
         public static string Program(string name, string vs, string fs)
         {
             var why = Check();
             if (why != null) return why;
+            GpuProgram same;
+            if (programs.TryGetValue(name, out same) && string.Equals(same.vsSource, vs, StringComparison.Ordinal) && string.Equals(same.fsSource, fs, StringComparison.Ordinal)) return "";
             var id = PotGfx_Create(Utf8(vs), Utf8(fs));
             var info = Str(PotGfx_Info());
             if (id == 0) return string.IsNullOrEmpty(info) ? "着色器编译失败" : info;
             var refl = JsonUtility.FromJson<Refl>(info);
-            var p = new GpuProgram { id = id, vs = refl.vs ?? new ReflStage(), fs = refl.fs ?? new ReflStage() };
+            var p = new GpuProgram { id = id, vsSource = vs, fsSource = fs, vs = refl.vs ?? new ReflStage(), fs = refl.fs ?? new ReflStage() };
             AddTextures(p, p.vs);
             AddTextures(p, p.fs);
             GpuProgram old;
@@ -617,6 +621,8 @@ namespace Pot
                 if (go == null) { (dead ??= new List<int>()).Add(kv.Key); continue; }
                 if (!go.activeInHierarchy || !programs.ContainsKey(b.program)) continue;
                 var r = go.GetComponent<Renderer>();
+                // visible(false)：Unity 渲染器被禁用，运行时着色器这条路径也要跟着不画
+                if (r != null && !r.enabled) continue;
                 if (r != null && !b.noFrustumCull && !GeometryUtility.TestPlanesAABB(planes, r.bounds)) continue;
                 drawList.Add(b);
                 drawDist.Add(queue == 1 ? (go.transform.position - camPos).sqrMagnitude : 0);

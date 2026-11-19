@@ -3691,6 +3691,26 @@ var pot = (() => {
     const typed = view instanceof Type ? view : new Type(view);
     return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength ? typed.buffer : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
   }
+  function contentKey(buffers) {
+    let a = 2166136261 | 0;
+    let b = 2654435769 | 0;
+    let total = 0;
+    for (const buffer of buffers) {
+      if (!buffer) {
+        a = Math.imul(a ^ 255, 16777619);
+        continue;
+      }
+      const w = new Uint32Array(buffer, 0, buffer.byteLength >> 2);
+      total += w.length;
+      a = Math.imul(a ^ w.length, 16777619);
+      for (let i = 0; i < w.length; i++) {
+        const x = w[i];
+        a = Math.imul(a ^ x, 16777619);
+        b = Math.imul(b ^ x + 2654435769 + (b << 6) + (b >>> 2), 2246822507);
+      }
+    }
+    return `#${(a >>> 0).toString(16)}${(b >>> 0).toString(16)}.${total}`;
+  }
   function applyUniforms(engine, id, values) {
     for (const name of Object.keys(values)) {
       const v = values[name];
@@ -3767,6 +3787,11 @@ var pot = (() => {
       this._engine.setActive(this.id, value);
       return this;
     }
+    /** 开关渲染。false 时碰撞体、子节点、灯光照常工作（只碰撞不渲染的命中体） */
+    visible(value) {
+      this._engine.visible(this.id, value);
+      return this;
+    }
     /** 相对父节点的位置 */
     get localPosition() {
       return this._engine.getVec(this.id, "localPosition");
@@ -3826,6 +3851,7 @@ var pot = (() => {
         engine.gfxBind(this.id, "", 0, 0, 0);
         return this;
       }
+      if (this._scene.skinned.has(this.id)) throw new Error("蒙皮实体暂不支持运行时着色器（顶点由引擎蒙皮，运行时着色器拿不到蒙皮后的网格）");
       const blend = options.blend ?? "none";
       const queue = options.queue ?? (blend === "none" ? "opaque" : "transparent");
       const cull = options.cull ?? "back";
@@ -3867,6 +3893,8 @@ var pot = (() => {
       __publicField(this, "host", host);
       /** id → 对象登记信息（只登记 pot 创建的对象） */
       __publicField(this, "objects", /* @__PURE__ */ new Map());
+      /** 蒙皮实体的 id */
+      __publicField(this, "skinned", /* @__PURE__ */ new Set());
     }
     /** 主相机（不归任何插件所有，不能销毁） */
     get camera() {
@@ -3881,12 +3909,25 @@ var pot = (() => {
       const shape = options.shape ?? "cube";
       const name = options.name ?? shape;
       const unit = unitOf(this.ctx) ?? "(host)";
+      const bones = options.bones;
+      if (bones && !shape.startsWith("mesh:")) throw new Error(`scene.spawn(${name})：bones 只能配 mesh: 形状`);
       let id = 0;
       const dispose = this.ctx.effect(() => {
-        id = engine.spawn(shape, name, options.parent?.id ?? 0);
+        id = engine.spawn(bones ? `skin:${shape.slice(5)}` : shape, name, options.parent?.id ?? 0);
+        if (bones) {
+          const ids = new Int32Array(bones.length);
+          for (let i = 0; i < bones.length; i++) ids[i] = bones[i].id;
+          const error = engine.skin(id, ids.buffer);
+          if (error) {
+            engine.destroy(id);
+            throw new Error(`scene.spawn(${name})：${error}`);
+          }
+          this.skinned.add(id);
+        }
         this.objects.set(id, { id, name, shape, unit });
         return () => {
           this.objects.delete(id);
+          this.skinned.delete(id);
           engine.destroy(id);
         };
       }, `scene.spawn(${name})`);
@@ -3907,7 +3948,35 @@ var pot = (() => {
       if (options.collider === false) entity.collider(false);
       if (options.layer !== void 0) entity.layer(options.layer);
       if (options.active === false) entity.active(false);
+      if (options.visible === false) entity.visible(false);
       return entity;
+    }
+    /**
+     * 批量设置变换：一次跨语言调用写完一批实体（骨骼、成群的动态物体），比逐个设 position/rotation/scale 省得多。
+     * data 每个实体 10 个数：位置 xyz、单位四元数 xyzw、缩放 xyz（引擎坐标系）。
+     * targets 传 Int32Array（实体 id，建好后复用）时不产生分配；也可以传实体数组。
+     * 世界空间下若同一批里有父子关系，父节点要排在子节点前面。返回实际写入的实体数（已销毁的跳过）
+     */
+    setTransforms(targets, data, options = {}) {
+      let ids;
+      if (targets instanceof Int32Array) ids = targets;
+      else {
+        ids = new Int32Array(targets.length);
+        for (let i = 0; i < targets.length; i++) {
+          const t = targets[i];
+          ids[i] = typeof t === "number" ? t : t.id;
+        }
+      }
+      const count = options.count ?? Math.min(ids.length, Math.floor(data.length / 10));
+      if (count <= 0) return 0;
+      if (count > ids.length || count * 10 > data.length) throw new Error(`scene.setTransforms：count ${count} 超出范围（${ids.length} 个实体，data 能容纳 ${Math.floor(data.length / 10)} 个）`);
+      let flags = 0;
+      if (options.position !== false) flags |= 1;
+      if (options.rotation !== false) flags |= 2;
+      if (options.scale !== false) flags |= 4;
+      if (options.space === "local") flags |= 8;
+      if (!(flags & 7)) return 0;
+      return this.host.engine.setTransforms(bytesOf(ids, Int32Array), bytesOf(data, Float32Array), count, flags);
     }
     light(options = {}) {
       const entity = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, parent: options.parent, position: options.position, rotation: options.rotation });
@@ -3991,10 +4060,40 @@ var pot = (() => {
       }, `scene.text(${options.text})`);
       return new Texture(id, width, height, dispose);
     }
-    /** 注册网格，之后用 spawn({ shape: 'mesh:名字' }) 创建（自带网格碰撞体）。同名覆盖 */
-    mesh(name, data) {
+    /**
+     * 注册网格，之后用 spawn({ shape: 'mesh:名字' }) 创建（自带网格碰撞体）。同名覆盖。
+     * 大网格给 options.key 并把 data 写成函数：热重载时内容没变就直接复用 Runner 里已有的网格。
+     * 带 boneIndices 的网格用 spawn({ shape: 'mesh:名字', bones }) 建成蒙皮网格。返回顶点数
+     */
+    mesh(name, data, options = {}) {
+      const engine = this.host.engine;
+      let key = typeof options.key === "string" ? options.key : "";
+      if (key) {
+        const cached = engine.meshCached(name, key);
+        if (cached >= 0) return cached;
+      }
+      const d = typeof data === "function" ? data() : data;
       const f = (v) => v ? bytesOf(v, Float32Array) : null;
-      return this.host.engine.mesh(name, f(data.positions), f(data.normals), f(data.uvs), f(data.colors), bytesOf(data.indices, Uint32Array));
+      const positions = f(d.positions);
+      const normals = f(d.normals);
+      const uvs = f(d.uvs);
+      const colors = f(d.colors);
+      const indices = bytesOf(d.indices, Uint32Array);
+      const boneIndices = d.boneIndices ? bytesOf(d.boneIndices, Int32Array) : null;
+      const boneWeights = f(d.boneWeights);
+      const bindPoses = f(d.bindPoses);
+      if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`);
+      if (options.key === true) {
+        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses]);
+        const cached = engine.meshCached(name, key);
+        if (cached >= 0) return cached;
+      }
+      const count = engine.mesh(name, positions, normals, uvs, colors, indices, key);
+      if (boneIndices) {
+        const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses);
+        if (error) throw new Error(`scene.mesh(${name})：${error}`);
+      }
+      return count;
     }
     /** 后处理（色调映射、曝光、调色、泛光、暗角、颗粒、色差、SSAO、抗锯齿）；只改传入的字段 */
     post(options) {
@@ -5166,6 +5265,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         destroy: (id) => S.Destroy(id),
         exists: (id) => S.Exists(id),
         setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
+        setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
+        visible: (id, visible) => S.SetVisible(id, visible),
+        skin: (id, bones) => S.Skin(id, bones) ?? "",
         getVec: (id, prop) => {
           S.GetVec(id, prop);
           return [S.vx, S.vy, S.vz];
@@ -5226,7 +5328,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         destroyTexture: (id) => S.DestroyTexture(id),
         textTexture: (json) => R.TextTexture(json),
         canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
-        mesh: (name, positions, normals, uvs, colors, indices) => S.Mesh(name, positions, normals, uvs, colors, indices),
+        mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
+        meshCached: (name, key) => S.MeshCached(name, key),
+        meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
         matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
         matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),

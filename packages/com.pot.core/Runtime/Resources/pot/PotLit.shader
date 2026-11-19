@@ -22,6 +22,7 @@ Shader "Pot/Lit"
         _Planar ("Planar Reflection", Float) = 0
         _Cutoff ("Alpha Cutoff", Float) = 0
         _VColor ("Use Vertex Color", Float) = 0
+        _Rest ("Rest Pose Triplanar (skinned)", Float) = 0
         [HideInInspector] _SrcBlend ("Src", Float) = 1
         [HideInInspector] _DstBlend ("Dst", Float) = 0
         [HideInInspector] _ZWrite ("ZWrite", Float) = 1
@@ -51,6 +52,7 @@ Shader "Pot/Lit"
         float _Planar;
         float _Cutoff;
         float _VColor;
+        float _Rest;
         CBUFFER_END
 
         TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
@@ -71,8 +73,9 @@ Shader "Pot/Lit"
             return n;
         }
 
-        // 采样基础色/遮罩/法线（法线输出为世界空间）
-        void PotSample(float2 uv0, float3 positionWS, float3 positionOS, float3 normalOS, float3 geomN, float4 tangentWS,
+        // 采样基础色/遮罩/法线（法线输出为世界空间）。
+        // 蒙皮网格（_Rest）：positionOS、normalOS 由顶点着色器换成静止姿态的值，restT 是静止姿态的切线
+        void PotSample(float2 uv0, float3 positionWS, float3 positionOS, float3 normalOS, float3 geomN, float4 tangentWS, float3 restT,
                        out half4 base, out half4 mask, out float3 nWS)
         {
             mask = half4(1, 1, 1, 1);
@@ -101,7 +104,8 @@ Shader "Pot/Lit"
             }
             else
             {
-                s = PotObjectScale();
+                // 蒙皮网格的"物体空间"是静止姿态，单位就是建模单位，不看渲染器自身的缩放
+                if (_Rest < 0.5) s = PotObjectScale();
                 p = positionOS * s;
                 n = normalize(normalOS / s);
             }
@@ -134,6 +138,15 @@ Shader "Pot/Lit"
                 tz = half3(tz.xy + n.xy, abs(tz.z) * n.z);
                 float3 nb = normalize(tx.zyx * bw.x + ty.xzy * bw.y + tz.xyz * bw.z);
                 if (_UVMode < 1.5) nWS = nb;
+                else if (_Rest > 0.5)
+                {
+                    // 静止标架（rT、rB、n）到蒙皮后的世界标架（T、B、geomN）：刚性蒙皮下就是骨骼的旋转
+                    float3 rT = normalize(restT - n * dot(restT, n));
+                    float3 rB = cross(n, rT);
+                    float3 T = normalize(tangentWS.xyz - geomN * dot(tangentWS.xyz, geomN));
+                    float3 B = cross(geomN, T);
+                    nWS = normalize(dot(nb, rT) * T + dot(nb, rB) * B + dot(nb, n) * geomN);
+                }
                 else nWS = normalize(mul((float3x3)GetObjectToWorldMatrix(), nb / s));
             }
         }
@@ -168,6 +181,9 @@ Shader "Pot/Lit"
                 float3 normalOS : NORMAL;
                 float4 tangentOS : TANGENT;
                 float2 uv : TEXCOORD0;
+                float3 restPos : TEXCOORD1;
+                float3 restN : TEXCOORD2;
+                float3 restT : TEXCOORD3;
                 float4 color : COLOR;
             };
 
@@ -181,6 +197,7 @@ Shader "Pot/Lit"
                 float3 positionOS : TEXCOORD4;
                 float3 normalOS : TEXCOORD5;
                 float4 color : TEXCOORD6;
+                float3 restT : TEXCOORD7;
             };
 
             Varyings vert(Attributes v)
@@ -193,8 +210,10 @@ Shader "Pot/Lit"
                 o.normalWS = nrm.normalWS;
                 o.tangentWS = float4(nrm.tangentWS, v.tangentOS.w);
                 o.uv = v.uv;
-                o.positionOS = v.positionOS.xyz;
-                o.normalOS = v.normalOS;
+                bool rest = _Rest > 0.5;
+                o.positionOS = rest ? v.restPos : v.positionOS.xyz;
+                o.normalOS = rest ? v.restN : v.normalOS;
+                o.restT = v.restT;
                 o.color = v.color;
                 return o;
             }
@@ -205,7 +224,7 @@ Shader "Pot/Lit"
                 half4 base;
                 half4 mask;
                 float3 n;
-                PotSample(i.uv, i.positionWS, i.positionOS, i.normalOS, geomN, i.tangentWS, base, mask, n);
+                PotSample(i.uv, i.positionWS, i.positionOS, i.normalOS, geomN, i.tangentWS, i.restT, base, mask, n);
                 half4 albedo = base * _Color;
                 if (_VColor > 0.5) albedo *= i.color;
                 if (_Cutoff > 0) clip(albedo.a - _Cutoff);
@@ -390,7 +409,7 @@ Shader "Pot/Lit"
             #pragma vertex vert
             #pragma fragment frag
 
-            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float4 tangentOS : TANGENT; float2 uv : TEXCOORD0; };
+            struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; float4 tangentOS : TANGENT; float2 uv : TEXCOORD0; float3 restPos : TEXCOORD1; float3 restN : TEXCOORD2; float3 restT : TEXCOORD3; };
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
@@ -400,6 +419,7 @@ Shader "Pot/Lit"
                 float2 uv : TEXCOORD3;
                 float3 positionOS : TEXCOORD4;
                 float3 normalOS : TEXCOORD5;
+                float3 restT : TEXCOORD6;
             };
 
             Varyings vert(Attributes v)
@@ -412,8 +432,10 @@ Shader "Pot/Lit"
                 o.normalWS = nrm.normalWS;
                 o.tangentWS = float4(nrm.tangentWS, v.tangentOS.w);
                 o.uv = v.uv;
-                o.positionOS = v.positionOS.xyz;
-                o.normalOS = v.normalOS;
+                bool rest = _Rest > 0.5;
+                o.positionOS = rest ? v.restPos : v.positionOS.xyz;
+                o.normalOS = rest ? v.restN : v.normalOS;
+                o.restT = v.restT;
                 return o;
             }
 
@@ -423,7 +445,7 @@ Shader "Pot/Lit"
                 half4 base;
                 half4 mask;
                 float3 n;
-                PotSample(i.uv, i.positionWS, i.positionOS, i.normalOS, geomN, i.tangentWS, base, mask, n);
+                PotSample(i.uv, i.positionWS, i.positionOS, i.normalOS, geomN, i.tangentWS, i.restT, base, mask, n);
                 if (_Cutoff > 0) clip(base.a * _Color.a - _Cutoff);
                 return half4(NormalizeNormalPerPixel(n), 0.0);
             }

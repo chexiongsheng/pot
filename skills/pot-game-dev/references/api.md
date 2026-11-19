@@ -10,13 +10,14 @@
 
 | API | 说明 |
 |---|---|
-| `spawn({ shape, name, parent, position, rotation, scale, color, active })` | shape：cube/sphere/capsule/cylinder/plane/quad/empty。返回 `Entity`，随单元卸载自动销毁 |
+| `spawn({ shape, name, parent, position, rotation, scale, color, active, collider, layer, visible, bones })` | shape：cube/sphere/capsule/cylinder/plane/quad/empty/`mesh:名字`。返回 `Entity`，随单元卸载自动销毁。`collider: false` 去掉自带碰撞体；`visible: false` 只留碰撞体不渲染（命中盒、触发区）；`bones` 见下方蒙皮 |
+| `setTransforms(ids, data, { count, position, rotation, scale, space })` | 批量设置变换，一次跨语言调用。`data` 每个实体 10 个数：位置 xyz、四元数 xyzw、缩放 xyz（Unity 坐标系）。`ids` 传建好后复用的 `Int32Array`（实体 id）则不产生分配，也可传实体数组。默认三项都写、世界空间；缩放始终是本地缩放。同一批里父节点要排在子节点前面。返回实际写入的个数 |
 | `light({ type, intensity, color, range, position, rotation })` | type：directional/point/spot |
 | `camera` | 主相机 Entity，不能销毁；每次热重载都要重新设置位置 |
 | `background(color)` | 纯色背景 |
 | `find(name)` / `list(unit?)` | 查找 pot 创建的对象 |
 
-`Entity`：`position`/`rotation`（欧拉角，度）/`scale` 读写都是一次跨语言调用，热点循环里先缓存；`move(dx,dy,dz)`、`lookAt(vec|entity)`、`color(c)`、`active(bool)`、`destroy()`、`alive`。
+`Entity`：`position`/`rotation`（欧拉角，度）/`scale` 读写都是一次跨语言调用，热点循环里先缓存，成批的改用 `scene.setTransforms`；`move(dx,dy,dz)`、`lookAt(vec|entity)`、`color(c)`、`active(bool)`、`visible(bool)`（只开关渲染，碰撞体与子节点不受影响）、`destroy()`、`alive`。
 
 颜色可用 `'#rgb'`、`'#rrggbb'`、`'#rrggbbaa'` 或 `[r,g,b,a?]`（0 到 1）。
 
@@ -29,7 +30,7 @@
 | `spawn({ material })` | `mode`：lit/lit-cutout/lit-twosided/lit-fade/unlit/unlit-fade/additive；`map`/`normalMap`/`maskMap`（mask：R 金属 G AO B 高度 A 光滑）；`smoothness`/`metallic`（与 mask 相乘，用贴图时传 1）；`uv`：mesh/world/object（三平面）；`tiling`/`offset`；`vertexColors`；`emission`/`emissionIntensity`；`wet`（湿润响应，0 关）；`planar`（接收平面反射）；`shadows` |
 | `texture({ data, width, height, linear })` | RGBA8 像素，行从下到上；法线和遮罩贴图传 `linear: true` |
 | `text({ text, width, height, size, color, bold, letterSpacing })` | 生成文字贴图，用于贴花 |
-| `mesh(name, { positions, normals, uvs, colors, indices })` | 注册程序化网格，`shape: 'mesh:name'` 使用。左手系、+Z 为前、顺时针为正面；`colors` 为 RGBA（sRGB，可大于 1 作亮度倍数），材质开 `vertexColors` 才生效。移植 Three.js 建模代码用 `toMesh()` 转换（见 pitfalls） |
+| `mesh(name, data \| () => data, { key })` | 注册程序化网格，`shape: 'mesh:name'` 使用。`data` 为 `{ positions, normals, uvs, colors, indices }`，左手系、+Z 为前、顺时针为正面；`colors` 为 RGBA（sRGB，可大于 1 作亮度倍数），材质开 `vertexColors` 才生效。移植 Three.js 建模代码用 `toMesh()` 转换（见 pitfalls）。网格在 Runner 里跨热重载保留：给了字符串 `key` 且与上次相同就直接复用，`data` 写成函数时连生成也跳过；`key: true` 按内容算哈希（仍要生成，只省上传）；不给 key 每次都上传（每帧变的动态网格）。蒙皮：`data` 加 `boneIndices`（每顶点 1 到 4 个骨骼下标）、可选 `boneWeights`（省略为第一根权重 1）与 `bindPoses`（每根 16 个数；省略为单位矩阵，即顶点已在各自骨骼的局部空间），再用 `spawn({ shape: 'mesh:name', bones: [骨骼实体…] })` 建成蒙皮网格，之后只移动骨骼实体。蒙皮实体没有碰撞体，不能用运行时着色器 |
 | `view({ near, far })` / `quality({ renderScale, shadowDistance, shadowResolution, shadowCascades })` | 相机与画质 |
 | `sky(...)` / `ambient(...)` / `fog(...)` / `weather({ wetness, puddles, rain, drops })` | 程序化天空、环境光、高度雾、雨与湿地 |
 | `reflection({ enabled, height, scale, exclude, shadows })` | 地面平面反射，`exclude` 为不进反射的层 |

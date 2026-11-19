@@ -80,6 +80,33 @@ export interface SpawnOptions {
   /** 层 0 到 31，配合 raycast 的 mask 使用 */
   layer?: number
   active?: boolean
+  /** false：只留碰撞体不渲染（命中盒、触发区）。与 active 不同，碰撞体和子节点照常工作 */
+  visible?: boolean
+  /**
+   * 骨骼（仅 mesh: 形状，网格须带 boneIndices）：顺序对应网格里的骨骼下标。给了就建成蒙皮网格，
+   * 之后只要移动骨骼实体（通常用 scene.setTransforms 一次下发）。蒙皮实体没有碰撞体，也不能用运行时着色器
+   */
+  bones?: ArrayLike<Entity>
+}
+
+export interface TransformBatchOptions {
+  /** 写入的实体数，默认取 targets 与 data 能容纳的较小值 */
+  count?: number
+  /** 默认三项都写；不需要的关掉（例如只同步位置与旋转） */
+  position?: boolean
+  rotation?: boolean
+  scale?: boolean
+  /** 位置与旋转所在空间，默认 world。缩放始终是本地缩放 */
+  space?: 'world' | 'local'
+}
+
+export interface MeshOptions {
+  /**
+   * 内容标识。Runner 里同名网格已按同一个 key 注册过时直接复用，不再上传；data 传函数时连生成也跳过。
+   * 网格跨热重载保留（冷重启才清空），所以大网格给一个随内容变化的 key 能省掉热重载里的重建。
+   * true 表示由运行时按内容算哈希（仍要生成数据，只省上传）。不给则每次都上传（内容每帧变的动态网格）
+   */
+  key?: string | true
 }
 
 export interface LightOptions {
@@ -151,6 +178,12 @@ export interface MeshData {
   uvs?: ArrayLike<number>
   /** RGBA（sRGB 0 到 1） */
   colors?: ArrayLike<number>
+  /** 蒙皮：每个顶点 1 到 4 个骨骼下标（个数 = 长度 / 顶点数） */
+  boneIndices?: ArrayLike<number>
+  /** 蒙皮权重，形状同 boneIndices；省略表示第一根骨骼权重 1（刚性蒙皮） */
+  boneWeights?: ArrayLike<number>
+  /** 每根骨骼的绑定矩阵（16 个数，列主序，引擎坐标系）；省略表示单位矩阵，即顶点已经在各自骨骼的局部空间里 */
+  bindPoses?: ArrayLike<number>
 }
 
 export interface PostOptions {
@@ -289,11 +322,33 @@ function bool(v: boolean | undefined) {
   return v === undefined ? undefined : v ? 1 : 0
 }
 
-function bytesOf(view: ArrayLike<number>, Type: Float32ArrayConstructor | Uint32ArrayConstructor): ArrayBuffer {
+function bytesOf(view: ArrayLike<number>, Type: Float32ArrayConstructor | Uint32ArrayConstructor | Int32ArrayConstructor): ArrayBuffer {
   const typed = view instanceof Type ? view : new Type(view as ArrayLike<number>)
   return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength
     ? typed.buffer as ArrayBuffer
     : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength) as ArrayBuffer
+}
+
+/** 网格内容哈希（两路 32 位，按 4 字节字混合）：百万顶点量级几十毫秒，远快于上传 */
+function contentKey(buffers: (ArrayBuffer | null)[]): string {
+  let a = 0x811c9dc5 | 0
+  let b = 0x9e3779b9 | 0
+  let total = 0
+  for (const buffer of buffers) {
+    if (!buffer) {
+      a = Math.imul(a ^ 0xff, 16777619)
+      continue
+    }
+    const w = new Uint32Array(buffer, 0, buffer.byteLength >> 2)
+    total += w.length
+    a = Math.imul(a ^ w.length, 16777619)
+    for (let i = 0; i < w.length; i++) {
+      const x = w[i]
+      a = Math.imul(a ^ x, 16777619)
+      b = Math.imul(b ^ (x + 0x9e3779b9 + (b << 6) + (b >>> 2)), 0x85ebca6b)
+    }
+  }
+  return `#${(a >>> 0).toString(16)}${(b >>> 0).toString(16)}.${total}`
 }
 
 export interface ObjectInfo {
@@ -411,6 +466,12 @@ export class Entity {
     return this
   }
 
+  /** 开关渲染。false 时碰撞体、子节点、灯光照常工作（只碰撞不渲染的命中体） */
+  visible(value: boolean) {
+    this._engine.visible(this.id, value)
+    return this
+  }
+
   /** 相对父节点的位置 */
   get localPosition(): Vec3 {
     return this._engine.getVec(this.id, 'localPosition')
@@ -476,6 +537,7 @@ export class Entity {
       engine.gfxBind(this.id, '', 0, 0, 0)
       return this
     }
+    if (this._scene.skinned.has(this.id)) throw new Error('蒙皮实体暂不支持运行时着色器（顶点由引擎蒙皮，运行时着色器拿不到蒙皮后的网格）')
     const blend = options.blend ?? 'none'
     const queue = options.queue ?? (blend === 'none' ? 'opaque' : 'transparent')
     const cull = options.cull ?? 'back'
@@ -519,6 +581,8 @@ export class Entity {
 export class SceneService extends Service {
   /** id → 对象登记信息（只登记 pot 创建的对象） */
   readonly objects = new Map<number, ObjectInfo>()
+  /** 蒙皮实体的 id */
+  readonly skinned = new Set<number>()
 
   constructor(ctx: Context, readonly host: Host) {
     super(ctx, 'scene')
@@ -539,12 +603,25 @@ export class SceneService extends Service {
     const shape = options.shape ?? 'cube'
     const name = options.name ?? shape
     const unit = unitOf(this.ctx) ?? '(host)'
+    const bones = options.bones
+    if (bones && !shape.startsWith('mesh:')) throw new Error(`scene.spawn(${name})：bones 只能配 mesh: 形状`)
     let id = 0
     const dispose = this.ctx.effect(() => {
-      id = engine.spawn(shape, name, options.parent?.id ?? 0)
+      id = engine.spawn(bones ? `skin:${shape.slice(5)}` : shape, name, options.parent?.id ?? 0)
+      if (bones) {
+        const ids = new Int32Array(bones.length)
+        for (let i = 0; i < bones.length; i++) ids[i] = bones[i].id
+        const error = engine.skin(id, ids.buffer as ArrayBuffer)
+        if (error) {
+          engine.destroy(id)
+          throw new Error(`scene.spawn(${name})：${error}`)
+        }
+        this.skinned.add(id)
+      }
       this.objects.set(id, { id, name, shape, unit })
       return () => {
         this.objects.delete(id)
+        this.skinned.delete(id)
         engine.destroy(id)
       }
     }, `scene.spawn(${name})`)
@@ -565,7 +642,36 @@ export class SceneService extends Service {
     if (options.collider === false) entity.collider(false)
     if (options.layer !== undefined) entity.layer(options.layer)
     if (options.active === false) entity.active(false)
+    if (options.visible === false) entity.visible(false)
     return entity
+  }
+
+  /**
+   * 批量设置变换：一次跨语言调用写完一批实体（骨骼、成群的动态物体），比逐个设 position/rotation/scale 省得多。
+   * data 每个实体 10 个数：位置 xyz、单位四元数 xyzw、缩放 xyz（引擎坐标系）。
+   * targets 传 Int32Array（实体 id，建好后复用）时不产生分配；也可以传实体数组。
+   * 世界空间下若同一批里有父子关系，父节点要排在子节点前面。返回实际写入的实体数（已销毁的跳过）
+   */
+  setTransforms(targets: Int32Array | ArrayLike<Entity | number>, data: Float32Array, options: TransformBatchOptions = {}): number {
+    let ids: Int32Array
+    if (targets instanceof Int32Array) ids = targets
+    else {
+      ids = new Int32Array(targets.length)
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i]
+        ids[i] = typeof t === 'number' ? t : t.id
+      }
+    }
+    const count = options.count ?? Math.min(ids.length, Math.floor(data.length / 10))
+    if (count <= 0) return 0
+    if (count > ids.length || count * 10 > data.length) throw new Error(`scene.setTransforms：count ${count} 超出范围（${ids.length} 个实体，data 能容纳 ${Math.floor(data.length / 10)} 个）`)
+    let flags = 0
+    if (options.position !== false) flags |= 1
+    if (options.rotation !== false) flags |= 2
+    if (options.scale !== false) flags |= 4
+    if (options.space === 'local') flags |= 8
+    if (!(flags & 7)) return 0
+    return this.host.engine.setTransforms(bytesOf(ids, Int32Array), bytesOf(data, Float32Array), count, flags)
   }
 
   light(options: LightOptions = {}): Entity {
@@ -658,10 +764,40 @@ export class SceneService extends Service {
     return new Texture(id, width, height, dispose)
   }
 
-  /** 注册网格，之后用 spawn({ shape: 'mesh:名字' }) 创建（自带网格碰撞体）。同名覆盖 */
-  mesh(name: string, data: MeshData): number {
+  /**
+   * 注册网格，之后用 spawn({ shape: 'mesh:名字' }) 创建（自带网格碰撞体）。同名覆盖。
+   * 大网格给 options.key 并把 data 写成函数：热重载时内容没变就直接复用 Runner 里已有的网格。
+   * 带 boneIndices 的网格用 spawn({ shape: 'mesh:名字', bones }) 建成蒙皮网格。返回顶点数
+   */
+  mesh(name: string, data: MeshData | (() => MeshData), options: MeshOptions = {}): number {
+    const engine = this.host.engine
+    let key = typeof options.key === 'string' ? options.key : ''
+    if (key) {
+      const cached = engine.meshCached(name, key)
+      if (cached >= 0) return cached
+    }
+    const d = typeof data === 'function' ? data() : data
     const f = (v?: ArrayLike<number>) => v ? bytesOf(v, Float32Array) : null
-    return this.host.engine.mesh(name, f(data.positions)!, f(data.normals), f(data.uvs), f(data.colors), bytesOf(data.indices, Uint32Array))
+    const positions = f(d.positions)!
+    const normals = f(d.normals)
+    const uvs = f(d.uvs)
+    const colors = f(d.colors)
+    const indices = bytesOf(d.indices, Uint32Array)
+    const boneIndices = d.boneIndices ? bytesOf(d.boneIndices, Int32Array) : null
+    const boneWeights = f(d.boneWeights)
+    const bindPoses = f(d.bindPoses)
+    if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`)
+    if (options.key === true) {
+      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses])
+      const cached = engine.meshCached(name, key)
+      if (cached >= 0) return cached
+    }
+    const count = engine.mesh(name, positions, normals, uvs, colors, indices, key)
+    if (boneIndices) {
+      const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses)
+      if (error) throw new Error(`scene.mesh(${name})：${error}`)
+    }
+    return count
   }
 
   /** 后处理（色调映射、曝光、调色、泛光、暗角、颗粒、色差、SSAO、抗锯齿）；只改传入的字段 */

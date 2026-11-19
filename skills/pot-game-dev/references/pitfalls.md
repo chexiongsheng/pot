@@ -142,6 +142,10 @@
 - 原因：Runner 窗口不在前台时收不到系统按键。
 - 做法：调试时用 `eval` 改 state（如 phase、yaw、health）再截图。
 
+### 帧率突然只有约 4fps，CPU 和显卡都不忙
+- 原因：同时开了两个 Runner 连同一个 Dev Server。Dev Server 只保留一个连接，两边互相顶替、反复重连，`logs` 里不断出现"新的 Runner 连接，替换旧连接"。和游戏内容、敌人数量无关。
+- 做法：启动前先 `Stop-Process -Name PotRunner`，确认 `Get-Process PotRunner` 只有一个。排查性能前先看这一条，再去怀疑代码。
+
 ### PowerShell 改含中文的文件后乱码
 - 原因：Windows PowerShell 5 的 `Set-Content`/`Get-Content` 默认不是 UTF-8。
 - 做法：用编辑器或文件工具修改源码；`.ps1` 脚本保持纯 ASCII（PS5 按 ANSI 读取无 BOM 文件）。
@@ -187,3 +191,15 @@
 现象：物体都是纯洋红色，日志无报错。这是 Runner 自身缺陷（着色器没打进 Runner），不是游戏代码问题，游戏侧无法也不应修复：游戏不能新增 Unity 着色器（自定义效果用 `ctx.gfx` 的 GLSL，那条路径不会洋红）。遇到时把截图和日志反馈给 Runner 维护者。
 
 （Runner 维护者注意：Runner 内置着色器必须放在 core 的 Resources 或 Always Included 中；构建 Runner 不要加 `-nographics`，否则着色器不会编译。）
+
+## 热重载一次要好几秒
+
+单元每次热重载都会重新执行，里面的 `scene.mesh` 会把网格重新生成并上传一遍。大网格这样写：`scene.mesh(name, () => toMesh(geo), { key })`。key 相同时 Runner 直接复用已有网格，生成函数不会被调用。key 要随内容变化：建模代码放在 `src/lib/*.ts` 里，在模块顶层取一个随机戳（jimao 的 `moduleStamp()`），共享模块只有自己或依赖改动时才重新执行，所以戳正好在"建模代码没动"的热重载之间保持不变。着色器不用处理，源码没变 Runner 不会重编。jimao 的 world 单元由此从约 6.3 秒降到约 0.2 秒。
+
+## 多部件角色每帧同步变换很慢、渲染器很多
+
+刚性分件的角色（机器狗）不要每个"骨骼 × 材质"建一个网格实体再逐个设变换。做法：每种材质合成一个带 `boneIndices` 的网格（jimao 的 `skinMesh()`），`spawn({ shape, bones })` 建成蒙皮网格；每帧把所有骨骼的世界变换写进一个 `Float32Array`，调一次 `scene.setTransforms(ids, data)`。注意：
+- `bones` 的顺序就是 `boneIndices` 里的下标；不给 `bindPoses` 时顶点必须已经在各自骨骼的局部空间里（three 里挂在骨骼下的几何体经 `toMesh` 后正好满足）。
+- 蒙皮实体不能用运行时着色器（`entity.shader` 会抛错），这类部件保持刚性分件，挂在骨骼实体下。
+- 蒙皮实体没有碰撞体。命中体用 `spawn({ visible: false, collider: true, parent: 骨骼 })`，不要再用"全黑叠加材质"假装隐藏，那样仍然会被绘制。
+- `setTransforms` 的四元数是 Unity 坐标系：three 的世界矩阵先做 `S·M·S`（S 为 z 取反）再 decompose，分量可直接使用（jimao 的 `writeUnityTRS()`）。

@@ -89,7 +89,48 @@ class MockEngine {
     ;(this.canvasTexts ??= []).push({ text, family, size })
     return buf
   }
-  mesh(name, positions, normals, uvs, colors, indices) { (this.meshes ??= new Map()).set(name, { vertices: positions.byteLength / 12, indices: indices.byteLength / 4 }); return positions.byteLength / 12 }
+  mesh(name, positions, normals, uvs, colors, indices, key) {
+    const old = (this.meshes ??= new Map()).get(name)
+    this.meshes.set(name, { vertices: positions.byteLength / 12, indices: indices.byteLength / 4, key: key || '', uploads: (old?.uploads ?? 0) + 1 })
+    return positions.byteLength / 12
+  }
+  meshCached(name, key) { const m = this.meshes?.get(name); return m && key && m.key === key ? m.vertices : -1 }
+  meshSkin(name, boneIndices, weights, bindPoses) {
+    const m = this.meshes?.get(name)
+    if (!m) return '未注册的网格：' + name
+    const bi = new Int32Array(boneIndices)
+    if (bi.length % m.vertices !== 0) { m.key = ''; return 'boneIndices 的长度须为顶点数的整数倍' }
+    m.skin = { per: bi.length / m.vertices, bones: bindPoses ? bindPoses.byteLength / 64 : Math.max(...bi) + 1, weights: weights ? [...new Float32Array(weights)] : null }
+    return ''
+  }
+  skin(id, bones) {
+    const o = this._get(id)
+    const m = this.meshes?.get(o.shape.slice(5))
+    if (!o.shape.startsWith('skin:') || !m) return '对象不是蒙皮网格'
+    if (!m.skin) return '网格没有骨骼数据（注册网格时需要 boneIndices）'
+    const ids = [...new Int32Array(bones)]
+    if (ids.length < m.skin.bones) return `骨骼数量不足：网格需要 ${m.skin.bones} 根，只给了 ${ids.length} 根`
+    o.bones = ids
+    return ''
+  }
+  setTransforms(ids, data, count, flags) {
+    const i = new Int32Array(ids)
+    const d = new Float32Array(data)
+    this.transformCalls = (this.transformCalls ?? 0) + 1
+    let done = 0
+    for (let k = 0; k < count; k++) {
+      const o = this.objects.get(i[k])
+      if (!o) continue
+      const at = k * 10
+      const local = !!(flags & 8)
+      if (flags & 1) o[local ? 'localPosition' : 'position'] = [d[at], d[at + 1], d[at + 2]]
+      if (flags & 2) o[local ? 'localQuaternion' : 'quaternion'] = [d[at + 3], d[at + 4], d[at + 5], d[at + 6]]
+      if (flags & 4) o.scale = [d[at + 7], d[at + 8], d[at + 9]]
+      done++
+    }
+    return done
+  }
+  visible(id, visible) { this._get(id).visible = visible }
   matTexture(id, slot, tex) { const o = this._get(id); (o.textures ??= {})[slot] = tex }
   matFloat(id, prop, value) { const o = this._get(id); (o.props ??= {})[prop] = value }
   matVector(id, prop, x, y, z, w) { const o = this._get(id); (o.props ??= {})[prop] = [x, y, z, w] }

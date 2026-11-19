@@ -32,6 +32,9 @@ export function createUnityHost(): Host {
       destroy: (id) => S.Destroy(id),
       exists: (id) => S.Exists(id),
       setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
+      setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
+      visible: (id, visible) => S.SetVisible(id, visible),
+      skin: (id, bones) => S.Skin(id, bones) ?? '',
       getVec: (id, prop) => {
         S.GetVec(id, prop)
         return [S.vx, S.vy, S.vz]
@@ -92,7 +95,9 @@ export function createUnityHost(): Host {
       destroyTexture: (id) => S.DestroyTexture(id),
       textTexture: (json) => R.TextTexture(json),
       canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
-      mesh: (name, positions, normals, uvs, colors, indices) => S.Mesh(name, positions, normals, uvs, colors, indices),
+      mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
+      meshCached: (name, key) => S.MeshCached(name, key),
+      meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? '',
       matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
       matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
       matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),

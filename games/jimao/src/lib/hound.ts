@@ -2,14 +2,15 @@
 /**
  * 机械猎犬：原版 Z_（模型）、iu（刚性骨骼 rig）、q_（两段腿 IK）、H（步态）、O（姿态）、q/U（死亡）的机械移植。
  * 原版用 SkinnedMesh + 每顶点 1 根骨骼（权重 1），等价于"每根骨骼一个刚体"：
- * 这里在 Three.js 坐标里搭同样的 Object3D 骨骼层级，每帧按原版代码设旋转，再把各骨骼的世界矩阵经 toUnityTransform 写到 Runner 实体。
+ * 这里在 Three.js 坐标里搭同样的 Object3D 骨骼层级，每帧按原版代码设旋转，再把各骨骼的世界矩阵一次批量写到 Runner 的骨骼实体（scene.setTransforms）。
+ * 外观按材质槽合成蒙皮网格（每顶点绑一根骨骼），一只猎犬 4 个渲染器，而不是每个"骨骼×槽"一个。
  * 坐标为原版右手系（模型朝 +Z），几何经 geo.toMesh() 翻转。
  */
 import { Vector3, Matrix4, Quaternion, SphereGeometry, TorusGeometry, Object3D, BufferAttribute } from '../vendor/three-geo'
 import { Wi, ot, Fn, Dc, sa } from './orig/port'
-import { toMesh } from './geo'
+import { toMesh, skinMesh, moduleStamp } from './geo'
 import { ENEMY_LAYER } from './level'
-import { hdr, toUnityTransform } from './origlevel'
+import { hdr, writeUnityTRS } from './origlevel'
 
 const W = Vector3, Ye = Matrix4, Lt = Quaternion, ls = SphereGeometry, Ci = TorusGeometry
 
@@ -346,8 +347,27 @@ export function createHoundAnimator(rand = Math.random) {
 
 // ---- Runner 侧：网格注册、实体层级、每帧同步 ----
 
+const STAMP = moduleStamp()
 const registered = new WeakSet<object>()
-const meshName = (p) => `hound-${p.bone}-${p.slot}`
+let layout = null
+/**
+ * 骨骼编号（跳过没有实体的 root）与按材质槽分好的部件。
+ * 跨多根骨骼的槽合成一个蒙皮网格，只挂在一根骨骼上的槽（镜头）保持刚性网格。
+ */
+function houndLayout() {
+  if (layout) return layout
+  const def = houndDef()
+  const names = def.bones.filter((b) => b.parent).map((b) => b.name)
+  const index = new Map(names.map((n, k) => [n, k]))
+  const bySlot = new Map()
+  for (const p of def.parts) {
+    let list = bySlot.get(p.slot)
+    if (!list) bySlot.set(p.slot, (list = []))
+    list.push(p)
+  }
+  const slots = [...bySlot].map(([slot, parts]) => ({ slot, parts, mesh: `hound-${slot}`, skinned: parts.length > 1 }))
+  return (layout = { names, index, slots })
+}
 
 /** 原版 Em 的材质槽：shell/metal 用 GPU 烘焙材质（三平面，乘顶点色）；glow 为 HDR 顶点色的无光照；lens 每只一份、每帧改颜色 */
 export function slotMaterial(slot, mats) {
@@ -361,38 +381,49 @@ export function slotMaterial(slot, mats) {
   return { color: slot === 'shell' ? '#aeb5b8' : '#2a2d31', material: { metallic: slot === 'shell' ? 0.1 : 0.8, smoothness: 0.5, vertexColors: true } }
 }
 
-/** 隐形命中体（Runner 没有"只碰撞不渲染"的开关：用加色混合的黑色代替） */
-export const HIDDEN = { color: '#000000', material: { mode: 'additive', shadows: false } }
-
 export interface HoundModel {
   anim: any
   ents: Map<string, any>
   lens: any[]
   lastLens: number[]
-  /** 隐形命中体（死亡后关闭） */
+  /** 只碰撞不渲染的命中体（死亡后关闭） */
   hits: any[]
+  /** 批量变换：骨骼实体 id、对应的 three 骨骼、每根 10 个数的暂存区 */
+  scene: any
+  ids: Int32Array
+  objs: any[]
+  data: Float32Array
 }
 
 export function buildHound(ctx, name: string, mats?: any) {
   const { scene } = ctx
-  const def = houndDef()
+  const { names, index, slots } = houndLayout()
   if (!registered.has(ctx)) {
     registered.add(ctx)
-    for (const p of def.parts) scene.mesh(meshName(p), toMesh(p.geometry))
+    // 带 key 的惰性注册：建模代码没变时，热重载直接复用 Runner 里已有的网格，连合并和 toMesh 都不跑
+    for (const s of slots) {
+      scene.mesh(s.mesh, () => (s.skinned ? skinMesh(s.parts.map((p) => ({ geometry: p.geometry, bone: index.get(p.bone) }))) : toMesh(s.parts[0].geometry)), { key: STAMP })
+    }
   }
   const root = scene.spawn({ shape: 'empty', name })
   const ents = new Map()
-  for (const b of def.bones) if (b.parent) ents.set(b.name, scene.spawn({ shape: 'empty', name: `${name}-${b.name}`, parent: root }))
+  const bones = names.map((n) => {
+    const e = scene.spawn({ shape: 'empty', name: `${name}-${n}`, parent: root })
+    ents.set(n, e)
+    return e
+  })
   const lens = []
-  for (const p of def.parts) {
-    const r = slotMaterial(p.slot, mats)
-    const e = scene.spawn({ shape: `mesh:${meshName(p)}`, name: `${name}-${p.slot}`, parent: ents.get(p.bone), color: r.color, material: r.material, collider: false })
-    if (p.slot === 'lens') lens.push(e)
+  for (const s of slots) {
+    const r = slotMaterial(s.slot, mats)
+    const common = { shape: `mesh:${s.mesh}`, name: `${name}-${s.slot}`, color: r.color, material: r.material, collider: false }
+    // 蒙皮实体留在根节点原点，形状完全由骨骼决定
+    const e = s.skinned ? scene.spawn({ ...common, parent: root, bones }) : scene.spawn({ ...common, parent: ents.get(s.parts[0].bone) })
+    if (s.slot === 'lens') lens.push(e)
   }
   const parts = new Map<number, boolean>()
   const hits = []
   const hit = (parent, opts, weak) => {
-    const e = scene.spawn({ ...HIDDEN, parent, collider: true, layer: ENEMY_LAYER, ...opts })
+    const e = scene.spawn({ visible: false, parent, collider: true, layer: ENEMY_LAYER, ...opts })
     parts.set(e.id, weak)
     hits.push(e)
   }
@@ -402,19 +433,15 @@ export function buildHound(ctx, name: string, mats?: any) {
   hit(ents.get('body'), { shape: 'capsule', name: `${name}-hit-legs`, position: [0, -0.37, -0.01], rotation: [90, 0, 0], scale: [0.5, 0.71, 0.5] }, false)
   const light = scene.light({ type: 'point', name: `${name}-light`, parent: ents.get('head'), position: [0, 0, -0.3], intensity: 0.4, range: 4, color: '#ff8a40' })
   const anim = createHoundAnimator(Math.random)
-  const hound: HoundModel = { anim, ents, lens, lastLens: [-1, -1, -1], hits }
+  const hound: HoundModel = { anim, ents, lens, lastLens: [-1, -1, -1], hits, scene, ids: Int32Array.from(bones, (e) => e.id), objs: names.map((n) => anim.bones[n]), data: new Float32Array(names.length * 10) }
   return { root, parts, light, hound }
 }
 
-/** 骨骼世界矩阵 → 实体；镜头颜色有变化时更新自发光 */
+/** 骨骼世界矩阵 → 骨骼实体（一次批量下发）；镜头颜色有变化时更新自发光 */
 export function syncHound(h: HoundModel) {
-  const l = h.anim.bones
-  for (const [name, ent] of h.ents) {
-    const tr = toUnityTransform(l[name].matrixWorld)
-    ent.position = tr.position
-    ent.rotation = tr.rotation
-    if (name === 'beacon') ent.scale = tr.scale
-  }
+  const objs = h.objs, data = h.data
+  for (let k = 0; k < objs.length; k++) writeUnityTRS(objs[k].matrixWorld, data, k * 10)
+  h.scene.setTransforms(h.ids, data)
   const c = h.anim.lens
   if (Math.abs(c[0] - h.lastLens[0]) + Math.abs(c[1] - h.lastLens[1]) + Math.abs(c[2] - h.lastLens[2]) > 0.05) {
     h.lastLens = [c[0], c[1], c[2]]
