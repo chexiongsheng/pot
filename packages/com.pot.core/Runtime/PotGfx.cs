@@ -3,11 +3,15 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Scripting;
+#if UNITY_6000_0_OR_NEWER
+using UnityEngine.Rendering.RenderGraphModule;
+#endif
 
 namespace Pot
 {
@@ -285,10 +289,72 @@ namespace Pot
         }
 
         // ---------------- URP 接入 ----------------
+        // URP 14（Unity 2022.3）走 Execute(ref RenderingData)；Unity 6 的 URP 17 移除了这套接口，
+        // 改走 RenderGraph：录制时从 frameData 取相机/光源/阴影数据，执行时再解析出贴图。
+        // 两条路径都整理成 FrameIn，打包与后处理代码共用。
+
+        /// <summary>打包与后处理需要的每相机输入</summary>
+        sealed class FrameIn
+        {
+            public Camera camera;
+            public bool flipped;
+            public float maxShadowDistance;
+            public RenderTextureDescriptor desc;
+            public int mainLightIndex;
+            public NativeArray<VisibleLight> visibleLights;
+            public CullingResults cull;
+#if UNITY_6000_0_OR_NEWER
+            public UniversalShadowData shadow;
+#else
+            public ShadowData shadow;
+#endif
+            public Texture shadowMap;
+            public Texture depth;
+            public RenderTargetIdentifier color;
+        }
+
+#if UNITY_6000_0_OR_NEWER
+        static void FillFrameIn(FrameIn f, ContextContainer frameData)
+        {
+            var cd = frameData.Get<UniversalCameraData>();
+            var ld = frameData.Get<UniversalLightData>();
+            var res = frameData.Get<UniversalResourceData>();
+            f.camera = cd.camera;
+            // 与 URP 14 的 CameraData.IsCameraProjectionMatrixFlipped 一致：非 GL 平台渲染到贴图时翻转
+            f.flipped = SystemInfo.graphicsUVStartsAtTop &&
+                        (cd.cameraType == CameraType.SceneView || cd.targetTexture != null || !res.isActiveTargetBackBuffer);
+            f.maxShadowDistance = cd.maxShadowDistance;
+            f.desc = cd.cameraTargetDescriptor;
+            f.mainLightIndex = ld.mainLightIndex;
+            f.visibleLights = ld.visibleLights;
+            f.cull = frameData.Get<UniversalRenderingData>().cullResults;
+            f.shadow = frameData.Get<UniversalShadowData>();
+            f.shadowMap = null;
+            f.depth = null;
+            f.color = default;
+        }
+#else
+        static void FillFrameIn(FrameIn f, ref RenderingData rd)
+        {
+            ref var cd = ref rd.cameraData;
+            f.camera = cd.camera;
+            f.flipped = cd.IsCameraProjectionMatrixFlipped();
+            f.maxShadowDistance = cd.maxShadowDistance;
+            f.desc = cd.cameraTargetDescriptor;
+            f.mainLightIndex = rd.lightData.mainLightIndex;
+            f.visibleLights = rd.lightData.visibleLights;
+            f.cull = rd.cullResults;
+            f.shadow = rd.shadowData;
+            f.shadowMap = Shader.GetGlobalTexture(shadowMapId);
+            f.depth = Shader.GetGlobalTexture(depthTexId);
+            f.color = cd.renderer.cameraColorTargetHandle.nameID;
+        }
+#endif
 
         class GfxPass : ScriptableRenderPass
         {
             readonly int queue;
+            readonly FrameIn frameIn = new FrameIn();
 
             public GfxPass(int queue, RenderPassEvent evt)
             {
@@ -296,6 +362,48 @@ namespace Pot
                 renderPassEvent = evt;
             }
 
+            static void Draw(int queue, FrameIn f, CommandBuffer cmd)
+            {
+                var len = Pack(queue, f);
+                if (len <= 0) return;
+                var slot = PotGfx_Submit(frame.GetBuffer(), len);
+                cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
+            }
+
+#if UNITY_6000_0_OR_NEWER
+            class PassData
+            {
+                public int queue;
+                public FrameIn input;
+                public TextureHandle color, depth, shadow;
+            }
+
+            public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+            {
+                var res = frameData.Get<UniversalResourceData>();
+                using var builder = renderGraph.AddUnsafePass<PassData>(queue == 0 ? "PotGfx.Opaque" : "PotGfx.Transparent", out var d);
+                FillFrameIn(frameIn, frameData);
+                d.queue = queue;
+                d.input = frameIn;
+                d.color = res.activeColorTexture;
+                d.depth = res.activeDepthTexture;
+                d.shadow = res.mainShadowsTexture;
+                builder.UseTexture(d.color, AccessFlags.ReadWrite);
+                if (d.depth.IsValid()) builder.UseTexture(d.depth, AccessFlags.ReadWrite);
+                if (d.shadow.IsValid()) builder.UseTexture(d.shadow);
+                builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
+                builder.SetRenderFunc((PassData p, UnsafeGraphContext ctx) =>
+                {
+                    var f = p.input;
+                    f.shadowMap = p.shadow.IsValid() ? (Texture)p.shadow : null;
+                    var cmd = CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd);
+                    if (p.depth.IsValid()) cmd.SetRenderTarget((RenderTargetIdentifier)p.color, (RenderTargetIdentifier)p.depth);
+                    else cmd.SetRenderTarget((RenderTargetIdentifier)p.color);
+                    Draw(p.queue, f, cmd);
+                });
+            }
+#else
             public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
             {
                 var r = renderingData.cameraData.renderer;
@@ -304,14 +412,13 @@ namespace Pot
 
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
-                var len = Pack(queue, ref renderingData.cameraData, ref renderingData);
-                if (len <= 0) return;
-                var slot = PotGfx_Submit(frame.GetBuffer(), len);
+                FillFrameIn(frameIn, ref renderingData);
                 var cmd = CommandBufferPool.Get("PotGfx");
-                cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
+                Draw(queue, frameIn, cmd);
                 context.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
             }
+#endif
         }
 
         static GfxPass opaquePass, transparentPass;
@@ -448,22 +555,22 @@ namespace Pot
         /// 主光阴影：按 URP MainLightShadowCasterPass.Setup 的同一算法复算级联矩阵（全局变量要到 Submit 才生效，
         /// 读 _MainLightShadowmapWorldToShadow 只能拿到上一帧）。贴图取 URP 的 shadowmap（RTHandle 跨帧稳定）。
         /// </summary>
-        static Texture ShadowBuiltins(ref RenderingData rd)
+        static Texture ShadowBuiltins(FrameIn f)
         {
-            var cam = rd.cameraData.camera;
+            var cam = f.camera;
             if (shadowFrame == Time.frameCount && shadowCam == cam) return shadowTex;
             shadowFrame = Time.frameCount;
             shadowCam = cam;
             shadowTex = null;
             SetVec("pot_ShadowParams", 0, 0, 0, 0);
-            ref var sd = ref rd.shadowData;
-            var li = rd.lightData.mainLightIndex;
-            if (!sd.supportsMainLightShadows || li < 0) return null;
-            var vl = rd.lightData.visibleLights[li];
+            var sd = f.shadow;
+            var li = f.mainLightIndex;
+            if (!sd.supportsMainLightShadows || li < 0 || li >= f.visibleLights.Length) return null;
+            var vl = f.visibleLights[li];
             var light = vl.light;
             if (light == null || light.shadows == LightShadows.None || vl.lightType != LightType.Directional) return null;
-            if (!rd.cullResults.GetShadowCasterBounds(li, out _)) return null;
-            var tex = Shader.GetGlobalTexture(shadowMapId);
+            if (!f.cull.GetShadowCasterBounds(li, out _)) return null;
+            var tex = f.shadowMap;
             if (tex == null) return null;
             var n = Mathf.Clamp(sd.mainLightShadowCascadesCount, 1, 4);
             var res = ShadowUtils.GetMaxTileResolutionInAtlas(sd.mainLightShadowmapWidth, sd.mainLightShadowmapHeight, n);
@@ -472,8 +579,13 @@ namespace Pot
             Array.Clear(shadowSpheres, 0, 16);
             for (var c = 0; c < n; c++)
             {
-                if (!ShadowUtils.ExtractDirectionalLightMatrix(ref rd.cullResults, ref sd, li, c, w, h, res, light.shadowNearPlane,
+#if UNITY_6000_0_OR_NEWER
+                if (!ShadowUtils.ExtractDirectionalLightMatrix(ref f.cull, sd, li, c, w, h, res, light.shadowNearPlane,
                         out var sphere, out var slice)) return null;
+#else
+                if (!ShadowUtils.ExtractDirectionalLightMatrix(ref f.cull, ref sd, li, c, w, h, res, light.shadowNearPlane,
+                        out var sphere, out var slice)) return null;
+#endif
                 var m = slice.shadowTransform;
                 for (var i = 0; i < 16; i++) shadowMats[c * 16 + i] = m[i];
                 shadowSpheres[c * 4] = sphere.x; shadowSpheres[c * 4 + 1] = sphere.y;
@@ -481,7 +593,7 @@ namespace Pot
             }
             builtins["pot_ShadowMatrix"] = shadowMats;
             builtins["pot_ShadowSpheres"] = shadowSpheres;
-            SetVec("pot_ShadowParams", light.shadowStrength, n, rd.cameraData.maxShadowDistance, SystemInfo.usesReversedZBuffer ? 1 : 0);
+            SetVec("pot_ShadowParams", light.shadowStrength, n, f.maxShadowDistance, SystemInfo.usesReversedZBuffer ? 1 : 0);
             shadowTex = tex;
             return tex;
         }
@@ -501,9 +613,9 @@ namespace Pot
         static readonly float[] pickScore = new float[MaxLights];
 
         /// <summary>本帧可见的附加光源（URP 剔除结果，除主光外的点光、聚光），参数与 URP 的 InitializeLightConstants 一致</summary>
-        static void LightBuiltins(ref RenderingData rd)
+        static void LightBuiltins(FrameIn f)
         {
-            var cam = rd.cameraData.camera;
+            var cam = f.camera;
             if (lightFrame == Time.frameCount && lightCam == cam) return;
             lightFrame = Time.frameCount;
             lightCam = cam;
@@ -512,10 +624,10 @@ namespace Pot
             builtins["pot_LightColor"] = lightColor;
             builtins["pot_LightSpot"] = lightSpot;
             builtins["pot_LightAtten"] = lightAtten;
-            var vls = rd.lightData.visibleLights;
+            var vls = f.visibleLights;
             for (var i = 0; i < vls.Length; i++)
             {
-                if (i == rd.lightData.mainLightIndex) continue;
+                if (i == f.mainLightIndex) continue;
                 var vl = vls[i];
                 if (vl.lightType != LightType.Point && vl.lightType != LightType.Spot) continue;
                 var c = vl.finalColor;
@@ -641,9 +753,9 @@ namespace Pot
             return size;
         }
 
-        static int Pack(int queue, ref CameraData cameraData, ref RenderingData renderingData)
+        static int Pack(int queue, FrameIn f)
         {
-            var cam = cameraData.camera;
+            var cam = f.camera;
             drawList.Clear();
             drawDist.Clear();
             GeometryUtility.CalculateFrustumPlanes(cam, planes);
@@ -677,10 +789,10 @@ namespace Pot
                 drawList.AddRange(sorted);
             }
 
-            var flipped = cameraData.IsCameraProjectionMatrixFlipped();
+            var flipped = f.flipped;
             FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
-            var shadowMap = ShadowBuiltins(ref renderingData);
-            LightBuiltins(ref renderingData);
+            var shadowMap = ShadowBuiltins(f);
+            LightBuiltins(f);
             var frameFlags = (flipped ? F_FrontCCW : 0) | (SystemInfo.usesReversedZBuffer ? F_ReversedZ : 0);
             var env = PotRender.EnvTexture;
 
@@ -1011,33 +1123,70 @@ namespace Pot
 
         class PostPass : ScriptableRenderPass
         {
+            readonly FrameIn frameIn = new FrameIn();
+
             public PostPass()
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
                 ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
+#if UNITY_6000_0_OR_NEWER
+            class PassData
+            {
+                public FrameIn input;
+                public TextureHandle color, depth, shadow;
+            }
+
+            public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+            {
+                if (post == null) return;
+                var res = frameData.Get<UniversalResourceData>();
+                using var builder = renderGraph.AddUnsafePass<PassData>("PotGfx.Post", out var d);
+                FillFrameIn(frameIn, frameData);
+                d.input = frameIn;
+                d.color = res.activeColorTexture;
+                d.depth = res.cameraDepthTexture;
+                d.shadow = res.mainShadowsTexture;
+                builder.UseTexture(d.color, AccessFlags.ReadWrite);
+                if (d.depth.IsValid()) builder.UseTexture(d.depth);
+                if (d.shadow.IsValid()) builder.UseTexture(d.shadow);
+                builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
+                builder.SetRenderFunc((PassData p, UnsafeGraphContext ctx) =>
+                {
+                    var chain = post;
+                    if (chain == null) return;
+                    var f = p.input;
+                    f.color = p.color;
+                    f.depth = p.depth.IsValid() ? (Texture)p.depth : null;
+                    f.shadowMap = p.shadow.IsValid() ? (Texture)p.shadow : null;
+                    RunPost(chain, CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd), f);
+                });
+            }
+#else
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
                 var chain = post;
                 if (chain == null) return;
+                FillFrameIn(frameIn, ref renderingData);
                 var cmd = CommandBufferPool.Get("PotGfx.Post");
-                RunPost(chain, cmd, ref renderingData);
+                RunPost(chain, cmd, frameIn);
                 context.ExecuteCommandBuffer(cmd);
                 CommandBufferPool.Release(cmd);
             }
+#endif
         }
 
-        static void RunPost(PostChain chain, CommandBuffer cmd, ref RenderingData rd)
+        static void RunPost(PostChain chain, CommandBuffer cmd, FrameIn f)
         {
-            ref var cd = ref rd.cameraData;
-            var cam = cd.camera;
-            var color = cd.renderer.cameraColorTargetHandle;
-            var desc = cd.cameraTargetDescriptor;
+            var cam = f.camera;
+            var color = f.color;
+            var desc = f.desc;
             int W = Mathf.Max(1, desc.width), H = Mathf.Max(1, desc.height);
             bool created;
             postScene = PostAlloc(postScene, W, H, GraphicsFormat.R16G16B16A16_SFloat, FilterMode.Bilinear, "pot_post_scene", out created);
-            cmd.Blit(color.nameID, postScene);
+            cmd.Blit(color, postScene);
 
             foreach (var t in chain.targets.Values)
             {
@@ -1060,9 +1209,9 @@ namespace Pot
                 }
             }
 
-            var flipped = cd.IsCameraProjectionMatrixFlipped();
+            var flipped = f.flipped;
             FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
-            var shadowMap = ShadowBuiltins(ref rd);
+            var shadowMap = ShadowBuiltins(f);
             SetMat("pot_Model", Matrix4x4.identity);
             SetMat("pot_ModelInv", Matrix4x4.identity);
             var nm = Builtin("pot_NormalMatrix", 9);
@@ -1070,7 +1219,7 @@ namespace Pot
             var lc = Builtin("pot_LightCount", 4);
             var savedLights = lc[0];
             lc[0] = 0;
-            var depth = Shader.GetGlobalTexture(depthTexId);
+            var depth = f.depth;
             Binding shared;
             bakes.TryGetValue(chain.cfg.shared, out shared);
             var quad = BakeQuad();
@@ -1123,7 +1272,7 @@ namespace Pot
                 if (len <= 0) continue;
                 var slot = PotGfx_Submit(frame.GetBuffer(), len);
                 if (outRt != null) cmd.SetRenderTarget(outRt);
-                else cmd.SetRenderTarget(color.nameID, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store);
+                else cmd.SetRenderTarget(color, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store);
                 cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), evt, (IntPtr)slot);
                 if (outT != null && outT.cfg.history != 0) outT.cur = 1 - outT.cur;
             }
