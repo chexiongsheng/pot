@@ -82,7 +82,7 @@ jobs:
         uses: RageAgainstThePixel/unity-setup@v3
         with:
           unity-version: ${{ env.UNITY_VERSION }}
-          build-targets: WebGL
+          build-targets: StandaloneWindows64, WebGL
           modules: webgl
           cache-installation: true
           version-file: None
@@ -101,6 +101,21 @@ jobs:
           choco install vcredist2010 -y --no-progress
           if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
 
+      # 诊断用：先出一个 Win64 包（Mono，Windows 编辑器自带，无需额外模块），
+      # 用来区分是授权整体失效，还是只有 WebGL 构建拿不到授权。失败不阻断后续步骤
+      - name: Build Win64 (license probe)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          node js/devserver/cli.js release games/hello --platform win64 --unity $env:UNITY_EDITOR_PATH --out (Join-Path $env:RUNNER_TEMP 'win64')
+          $code = $LASTEXITCODE
+          $log = 'games/hello/.pot/release/unity-win64.log'
+          if (Test-Path $log) {
+            Write-Host '----- unity-win64.log: Licensing -----'
+            Select-String -Path $log -Pattern 'Licens|entitlement|token' | Select-Object -First 60 | ForEach-Object { $_.Line }
+          }
+          exit $code
+
       # 不加 -nographics（内置着色器导入需要图形设备），release.js 已按此调用
       - name: Build WebGL demos
         shell: pwsh
@@ -110,14 +125,20 @@ jobs:
           $argv = @('tools/build-pages.js', '--out', 'site', '--unity', $env:UNITY_EDITOR_PATH)
           if ($env:GAMES) { $argv += @('--games', $env:GAMES) }
           node @argv
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $code = $LASTEXITCODE
+          $log = 'games/hello/.pot/release/unity-webgl.log'
+          if ($code -ne 0 -and (Test-Path $log)) {
+            Write-Host '----- unity-webgl.log: Licensing -----'
+            Select-String -Path $log -Pattern 'Licens|entitlement|token' | Select-Object -First 60 | ForEach-Object { $_.Line }
+          }
+          if ($code -ne 0) { exit $code }
 
       - name: Upload Unity logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: unity-webgl-logs
-          path: games/*/.pot/release/unity-webgl.log
+          name: unity-logs
+          path: games/*/.pot/release/unity-*.log
           if-no-files-found: warn
 
       - uses: actions/upload-pages-artifact@v3
