@@ -45,3 +45,25 @@ if (Test-Path $jsenv) {
         Write-Host "patched $jsenv (PuertsIl2cpp.TypeUtils -> Puerts.TypeUtils)"
     }
 }
+
+# Patch: Puerts 3.0.3 puerts.jslib only knows the old Emscripten of Unity 2022
+# (updateGlobalBufferAndViews, preamble UTF16ToString ...). Unity 6 fails at runtime with
+# "updateGlobalBufferAndViews is not defined". Overlay the compatible copy kept in
+# tools/puerts-patches (works on both). Only applied to the version it was made for.
+$patchRoot = Join-Path $PSScriptRoot 'puerts-patches'
+$webglPkg = Join-Path $dest 'webgl/package.json'
+if ((Test-Path $webglPkg) -and (Test-Path $patchRoot)) {
+    $json = Get-Content -Raw -Encoding UTF8 $webglPkg
+    $webglVersion = if ($json -match '"version"\s*:\s*"([^"]+)"') { $Matches[1] } else { '?' }
+    if ($webglVersion -eq '3.0.3') {
+        $base = Join-Path $patchRoot 'webgl'
+        foreach ($file in Get-ChildItem -Recurse -File $base) {
+            $rel = $file.FullName.Substring($base.Length + 1)
+            $to = Join-Path (Join-Path $dest 'webgl') $rel
+            Copy-Item -Force $file.FullName $to
+            Write-Host "patched $to"
+        }
+    } else {
+        Write-Warning "puerts webgl $webglVersion != 3.0.3, skipped tools/puerts-patches (check Unity 6 compatibility)"
+    }
+}
