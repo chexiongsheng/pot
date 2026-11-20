@@ -6,17 +6,14 @@ Runner 的运行时着色器能力：游戏包里的 GLSL ES 3.10 源码在 Runn
 GLSL ES 310 --glslang--> SPIR-V --SPIRV-Cross--> HLSL SM5.0 / GLSL 300 es --D3DCompile--> D3D11
 ```
 
-## 依赖（不入库，放在 `third_party/`）
+## 依赖（由 CMake 自动下载，无需手动 clone）
 
-| 库 | 版本 | 目录 |
+| 库 | 版本 | 下载方式 |
 | --- | --- | --- |
-| glslang | 15.0.0 | `third_party/glslang` |
-| SPIRV-Cross | vulkan-sdk-1.4.304.0 | `third_party/SPIRV-Cross` |
+| glslang | 15.0.0 | CMake `FetchContent` 自动拉取 |
+| SPIRV-Cross | vulkan-sdk-1.4.304.0 | CMake `FetchContent` 自动拉取 |
 
-```powershell
-git clone --depth 1 -b 15.0.0 https://github.com/KhronosGroup/glslang third_party/glslang
-git clone --depth 1 -b vulkan-sdk-1.4.304.0 https://github.com/KhronosGroup/SPIRV-Cross third_party/SPIRV-Cross
-```
+首次配置时 CMake 会自动下载到 build 目录（默认 `<build>/_deps/`），无需在 `third_party/` 手动放置。需要能访问 GitHub；如需离线/内网，可自行改用本地镜像地址。
 
 ## 构建（Windows x64，VS 2022）
 

@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 project(pot_gfx CXX C)
 
 # pot_gfx：Runner 运行时着色器能力（GLSL ES 3.00 → SPIR-V → 目标平台着色器 → 驱动编译 → 原生绘制）
-# 依赖源码放在 third_party/（不入库，见 native/pot_gfx/README.md 的固定版本）
+# 依赖由 CMake FetchContent 自动下载（见 native/pot_gfx/README.md 的固定版本）
+
+include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +23,14 @@ set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
 set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-add_subdirectory(${POT_ROOT}/third_party/glslang ${CMAKE_BINARY_DIR}/glslang EXCLUDE_FROM_ALL)
+
+FetchContent_Declare(
+    glslang
+    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+    GIT_TAG        15.0.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(glslang)
 
 # ---- SPIRV-Cross：反射 + HLSL/GLSL/MSL 后端 ----
 set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
@@ -36,7 +45,14 @@ set(SPIRV_CROSS_ENABLE_GLSL ON CACHE BOOL "" FORCE)
 set(SPIRV_CROSS_ENABLE_HLSL ON CACHE BOOL "" FORCE)
 set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
 set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
-add_subdirectory(${POT_ROOT}/third_party/SPIRV-Cross ${CMAKE_BINARY_DIR}/spirv-cross EXCLUDE_FROM_ALL)
+
+FetchContent_Declare(
+    spirv_cross
+    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Cross.git
+    GIT_TAG        vulkan-sdk-1.4.304.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(spirv_cross)
 
 add_library(pot_gfx SHARED
     src/compiler.cpp
@@ -53,7 +69,7 @@ if(ANDROID)
     target_sources(pot_gfx PRIVATE src/backend_gles3.cpp)
     target_link_libraries(pot_gfx PRIVATE GLESv3)
 endif()
-target_include_directories(pot_gfx PRIVATE ${UNITY_PLUGIN_API} ${POT_ROOT}/third_party/glslang ${POT_ROOT}/third_party/SPIRV-Cross)
+target_include_directories(pot_gfx PRIVATE ${UNITY_PLUGIN_API} ${glslang_SOURCE_DIR} ${spirv_cross_SOURCE_DIR})
 target_link_libraries(pot_gfx PRIVATE glslang glslang-default-resource-limits SPIRV spirv-cross-core spirv-cross-glsl spirv-cross-hlsl)
 if(WIN32)
     target_link_libraries(pot_gfx PRIVATE d3d11 d3dcompiler dxguid)
@@ -64,7 +80,7 @@ if(MSVC)
 endif()
 
 add_executable(pot_shaderc src/shaderc.cpp src/compiler.cpp src/reflect.cpp)
-target_include_directories(pot_shaderc PRIVATE ${POT_ROOT}/third_party/glslang ${POT_ROOT}/third_party/SPIRV-Cross)
+target_include_directories(pot_shaderc PRIVATE ${glslang_SOURCE_DIR} ${spirv_cross_SOURCE_DIR})
 target_link_libraries(pot_shaderc PRIVATE glslang glslang-default-resource-limits SPIRV spirv-cross-core spirv-cross-glsl spirv-cross-hlsl)
 if(WIN32)
     target_link_libraries(pot_shaderc PRIVATE d3dcompiler)
