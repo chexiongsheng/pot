@@ -82,7 +82,7 @@ jobs:
         uses: RageAgainstThePixel/unity-setup@v3
         with:
           unity-version: ${{ env.UNITY_VERSION }}
-          build-targets: StandaloneWindows64, WebGL
+          build-targets: WebGL
           modules: webgl
           cache-installation: true
           version-file: None
@@ -100,27 +100,6 @@ jobs:
         run: |
           choco install vcredist2010 -y --no-progress
           if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
-
-      # 诊断用：先出一个 Win64 包（Mono，Windows 编辑器自带，无需额外模块），
-      # 用来区分是授权整体失效，还是只有 WebGL 构建拿不到授权。失败不阻断后续步骤
-      - name: Build Win64 (license probe)
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $client = Join-Path $env:APPDATA 'UnityHub\external-modules\licensingClient\Unity.Licensing.Client.exe'
-          if (Test-Path $client) {
-            Write-Host '----- showEntitlements -----'
-            & $client --showEntitlements
-          }
-          Get-ChildItem 'C:\ProgramData\Unity' -Filter *.ulf -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "ulf: $($_.FullName) $($_.Length) bytes $($_.LastWriteTime)" }
-          node js/devserver/cli.js release games/hello --platform win64 --unity $env:UNITY_EDITOR_PATH --out (Join-Path $env:RUNNER_TEMP 'win64')
-          $code = $LASTEXITCODE
-          $log = 'games/hello/.pot/release/unity-win64.log'
-          if ($code -ne 0 -and (Test-Path $log)) {
-            Write-Host '----- unity-win64.log: tail -----'
-            Get-Content $log -Tail 80
-          }
-          exit $code
 
       # 不加 -nographics（内置着色器导入需要图形设备），release.js 已按此调用
       - name: Build WebGL demos
