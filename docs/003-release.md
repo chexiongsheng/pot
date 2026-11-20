@@ -29,6 +29,25 @@ node js/devserver/cli.js release games/jimao --platform win64,android,webgl `
 
 Unity 的完整日志在 `<游戏目录>/.pot/release/unity-<平台>.log`，脚本同时转发关键构建行。编译失败、产物缺失或 Puerts WebGL 后处理缺失都会返回非零退出码。
 
+## Runner 构建
+
+```powershell
+node js/devserver/cli.js runner --platform win64          # → release/runner/win64/PotRunner.exe
+node js/devserver/cli.js runner --platform win64,android --out D:\build\runner
+```
+
+使用 `runner/` 工程（`RunnerBuild.BuildWin64` / `BuildAndroid`），日志在 `release/runner/unity-<平台>.log`。
+
+## 原生库 pot_gfx
+
+`pot_gfx.dll` 不入库。`release` 和 `runner` 出包前会检查 `packages/com.pot.core/Plugins` 下对应平台的库，缺失时自动从 `native/pot_gfx` 构建：
+
+- `win64`：CMake + Visual Studio C++ 编译 `pot_gfx.dll`（首次会通过 FetchContent 下载 glslang、SPIRV-Cross，较慢）。
+- `webgl`：用 `sync-webgl.js` 同步源码到 `Plugins/WebGL/pot_gfx`。
+- `android`：暂无 pot_gfx，不检查。
+
+只检查是否存在，不比较新旧。修改了 `native/pot_gfx/src` 后手动重建：`node js/devserver/cli.js native --platform win64 --force`。
+
 ## manifest 发布配置
 
 ```json

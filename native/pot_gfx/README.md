@@ -17,6 +17,14 @@ GLSL ES 310 --glslang--> SPIR-V --SPIRV-Cross--> HLSL SM5.0 / GLSL 300 es --D3DC
 
 ## 构建（Windows x64，VS 2022）
 
+`pot_gfx.dll` 不入库。`pot release` / `pot runner` 出包前缺少时会自动构建；也可手动执行（`--force` 强制重建）：
+
+```powershell
+node js/devserver/cli.js native --platform win64 --force
+```
+
+或直接用 CMake：
+
 ```powershell
 cmake -S native/pot_gfx -B native/pot_gfx/build -G "Visual Studio 17 2022" -A x64 -DUNITY_PLUGIN_API="D:/Program Files/Unity/Hub/Editor/2022.3.62f1c1/Editor/Data/PluginAPI"
 cmake --build native/pot_gfx/build --config Release --target pot_gfx pot_shaderc

@@ -3,7 +3,8 @@
  * - resolveRelease：manifest.json → 出包配置（名称、公司、包名、版本、versionCode、图标、方向、窗口、产物文件名）
  * - stageGame：TS 编译为 bundle.cjs（buildRelease）→ <stage>/game/**，再写 <stage>/release.json 与图标
  * - findUnity：--unity / 环境变量 POT_UNITY / 按 player 工程的 Unity 版本在 Hub 安装目录里找
- * - releaseGame：暂存 → Unity -batchmode -executeMethod Pot.Build.PotBuild.Build → 汇报产物与日志
+ * - releaseGame：检查原生库（native.js）→ 暂存 → Unity -batchmode -executeMethod Pot.Build.PotBuild.Build → 汇报产物与日志
+ * - releaseRunner：检查原生库 → Unity -batchmode -executeMethod RunnerBuild.BuildWin64|BuildAndroid（runner/ 工程）
  *
  * manifest.json 中与发布相关的字段（都可省略）：
  *   name / id / version          产品名 / 包名缺省来源 / 版本
@@ -23,6 +24,7 @@ const os = require('os')
 const { spawn } = require('child_process')
 const { buildRelease } = require('./builder')
 const { stageFont } = require('./font')
+const { ensureNative } = require('./native')
 
 const REPO = path.resolve(__dirname, '../..')
 const DEFAULT_PROJECT = path.join(REPO, 'player')
@@ -224,6 +226,7 @@ async function releaseGame(gameDir, options = {}) {
     throw new Error(`工程 ${project} 正被 Unity 编辑器打开。请先关闭编辑器，或在编辑器里用菜单 pot/Build Game... 出包`)
   }
   const say = options.quiet ? () => {} : (text) => console.log(text)
+  ensureNative(platform, { unity, quiet: options.quiet })
 
   const work = path.join(gameDir, '.pot/release')
   const stageDir = path.join(work, 'stage')
@@ -241,27 +244,11 @@ async function releaseGame(gameDir, options = {}) {
   const log = path.resolve(options.log ?? path.join(work, `unity-${platform}.log`))
   fs.rmSync(log, { force: true })
 
-  const args = [
-    '-batchmode', '-quit',
-    '-projectPath', project,
-    '-buildTarget', PLATFORMS[platform].unity,
-    '-executeMethod', 'Pot.Build.PotBuild.Build',
-    `-potStage=${stageDir}`,
-    `-potTarget=${PLATFORMS[platform].unity}`,
-    `-potOut=${output}`,
-    '-logFile', log,
-  ]
   say(`[2/3] Unity 出包（${PLATFORMS[platform].unity}），日志 ${log}`)
-  say(`      ${unity}`)
-  const stop = tailLog(log, (line) => {
-    line = line.replace(LOG_PREFIX, '').trim()
-    if (LOG_PATTERNS.test(line) && !/^at /.test(line) && !/^Start importing /.test(line)) say(`      ${line.slice(0, 300)}`)
+  const code = await runUnity({
+    unity, project, platform, log, say,
+    args: ['-executeMethod', 'Pot.Build.PotBuild.Build', `-potStage=${stageDir}`, `-potTarget=${PLATFORMS[platform].unity}`, `-potOut=${output}`],
   })
-  const code = await new Promise((resolve, reject) => {
-    const child = spawn(unity, args, { stdio: 'ignore', windowsHide: true })
-    child.on('error', reject)
-    child.on('exit', (c) => resolve(c ?? 1))
-  }).finally(stop)
 
   const seconds = Math.round((Date.now() - started) / 1000)
   const exists = platform === 'webgl' ? fs.existsSync(path.join(output, 'index.html')) : fs.existsSync(output)
@@ -285,6 +272,60 @@ async function releaseGame(gameDir, options = {}) {
   return result
 }
 
+/** batchmode 调用 Unity（-batchmode -quit -projectPath -buildTarget ... -logFile），转发关键日志行，返回退出码 */
+async function runUnity({ unity, project, platform, args, log, say }) {
+  say(`      ${unity}`)
+  const stop = tailLog(log, (line) => {
+    line = line.replace(LOG_PREFIX, '').trim()
+    if (LOG_PATTERNS.test(line) && !/^at /.test(line) && !/^Start importing /.test(line)) say(`      ${line.slice(0, 300)}`)
+  })
+  const full = ['-batchmode', '-quit', '-projectPath', project, '-buildTarget', PLATFORMS[platform].unity, ...args, '-logFile', log]
+  return new Promise((resolve, reject) => {
+    const child = spawn(unity, full, { stdio: 'ignore', windowsHide: true })
+    child.on('error', reject)
+    child.on('exit', (c) => resolve(c ?? 1))
+  }).finally(stop)
+}
+
+/** Runner 支持的平台 → RunnerBuild 入口 */
+const RUNNER_METHODS = { win64: 'RunnerBuild.BuildWin64', android: 'RunnerBuild.BuildAndroid' }
+
+/**
+ * 构建 Runner（runner/ 工程）。options：{ platform, unity, out, quiet, log }
+ * 产物：win64 → <out>/PotRunner.exe；android → <out>/PotRunner.apk
+ * 返回 { ok, platform, output, log, seconds, errors? }
+ */
+async function releaseRunner(options = {}) {
+  const started = Date.now()
+  const platform = normalizePlatform(options.platform ?? 'win64')
+  if (!RUNNER_METHODS[platform]) throw new Error(`Runner 不支持平台 ${platform}（可选 win64 | android）`)
+  const project = path.join(REPO, 'runner')
+  const unity = findUnity(options.unity, project)
+  if (projectLocked(project)) throw new Error(`工程 ${project} 正被 Unity 编辑器打开，请先关闭编辑器，或在编辑器里用菜单 pot/Build Runner`)
+  const say = options.quiet ? () => {} : (text) => console.log(text)
+  ensureNative(platform, { unity, quiet: options.quiet })
+
+  const outDir = path.resolve(options.out ?? path.join(REPO, 'release/runner', platform))
+  const output = path.join(outDir, `PotRunner${PLATFORMS[platform].ext}`)
+  fs.mkdirSync(outDir, { recursive: true })
+  const log = path.resolve(options.log ?? path.join(REPO, 'release/runner', `unity-${platform}.log`))
+  fs.mkdirSync(path.dirname(log), { recursive: true })
+  fs.rmSync(log, { force: true })
+
+  say(`[1/2] Unity 构建 Runner（${PLATFORMS[platform].unity}），日志 ${log}`)
+  const code = await runUnity({ unity, project, platform, log, say, args: ['-executeMethod', RUNNER_METHODS[platform], `-potOut=${output}`] })
+  const seconds = Math.round((Date.now() - started) / 1000)
+  const ok = code === 0 && fs.existsSync(output)
+  const result = { ok, platform, output, log, seconds }
+  if (ok) removeDoNotShip(outDir)
+  else {
+    result.exitCode = code
+    result.errors = collectErrors(log)
+  }
+  say(ok ? `[2/2] 完成：${output}（${seconds} 秒）` : `[2/2] 失败（exit ${code}），详见 ${log}`)
+  return result
+}
+
 /** 删掉 Unity 生成在输出目录里、明确标注不要发布的调试目录 */
 function removeDoNotShip(dir) {
   if (!fs.existsSync(dir)) return
@@ -295,4 +336,4 @@ function removeDoNotShip(dir) {
   }
 }
 
-module.exports = { resolveRelease, stageGame, findUnity, releaseGame, toPackageId, toVersionCode, normalizePlatform, PLATFORMS }
+module.exports = { resolveRelease, stageGame, findUnity, releaseGame, releaseRunner, toPackageId, toVersionCode, normalizePlatform, PLATFORMS }
