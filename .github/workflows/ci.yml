@@ -111,6 +111,8 @@ jobs:
       - name: Sync pot_gfx sources (WebGL)
         shell: pwsh
         run: node js/devserver/cli.js native --platform webgl --unity $env:UNITY_EDITOR_PATH
+
+      - name: Setup Unity
         uses: RageAgainstThePixel/unity-setup@v3
         with:
           unity-version: ${{ env.UNITY_VERSION }}
