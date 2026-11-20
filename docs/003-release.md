@@ -101,3 +101,9 @@ node js/devserver/cli.js runner --platform win64,android --out D:\build\runner
 - WebGL 产物必须通过 HTTP/HTTPS 打开，不能双击 `index.html` 使用 `file://`。默认 gzip 压缩并启用解压回退，普通静态服务器即可托管；配置 `Content-Encoding: gzip` 可减少下载前的浏览器解压工作。
 - 原生 `pot_gfx` 运行时着色器后端支持 D3D11（win64）与 GLES3（WebGL2）。WebGL 插件以源码形式放在 `Plugins/WebGL/pot_gfx`，由 Unity 的 emscripten 一起编译；改了 `native/pot_gfx/src` 后要执行 `node native/pot_gfx/sync-webgl.js` 再出包。其他平台 `ctx.gfx.supported` 为 `false`，游戏需自备回退。
 - 各平台图形、输入、音频和文件系统能力仍受 Unity/Web 平台限制。构建成功不等于所有游戏功能都已在目标设备验证，发布前应在真实设备上试玩。
+
+## GitHub Pages 演示站点
+
+CI 用 `tools/build-pages.js` 把 `games/` 下所有游戏打成 WebGL 并汇总成静态站点。各游戏的引擎文件（`*.wasm.unityweb`、`*.framework.js.unityweb`、`*.loader.js`）只取决于 Unity 版本和 player 工程，逐字节相同，脚本按内容哈希把它们移到 `_shared/`，并改写各游戏 `index.html` 的 `loaderUrl`/`frameworkUrl`/`codeUrl`。打开过一个游戏后再开另一个，约 9 MB 的引擎走浏览器缓存，只需下载游戏自己的 `.data`（hello 约 5 MB，jimao 约 5.6 MB）。
+
+GitHub Pages 不会给 `.unityweb` 加 `Content-Encoding`，由 Unity 加载器在浏览器里解压（`decompressionFallback`），控制台里的 “You can reduce startup time…” 提示可以忽略。首次打开 jimao 共约 14.6 MB，国内网络访问 GitHub Pages 可能很慢（实测有 20 KB/s 左右），进度条停住多半是还在下载，不是出错。

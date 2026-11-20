@@ -38,6 +38,51 @@ function listGames(filter) {
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
+/**
+ * 各游戏的 WebGL 产物里，引擎部分（wasm、framework、loader）只取决于 Unity 版本与 player 工程，所有游戏逐字节相同，
+ * 只有 .data 是游戏自己的。把它们按内容哈希移到 <out>/_shared/，各游戏 index.html 改为引用共享文件：
+ * 玩过一个游戏后再开另一个，约 9 MB 的引擎直接走浏览器缓存，只需下载游戏自己的 data。
+ * 返回 { files, savedBytes }。只改 Unity 模板生成的 index.html 中的 loaderUrl / frameworkUrl / codeUrl。
+ */
+function shareEngine(out, dirs) {
+  const crypto = require('crypto')
+  const shared = path.join(out, '_shared')
+  const KINDS = [
+    { key: 'loaderUrl', re: /\.loader\.js$/ },
+    { key: 'frameworkUrl', re: /\.framework\.js(\.unityweb|\.gz|\.br)?$/ },
+    { key: 'codeUrl', re: /\.wasm(\.unityweb|\.gz|\.br)?$/ },
+  ]
+  const seen = new Map()
+  let savedBytes = 0
+  for (const dir of dirs) {
+    const gameOut = path.join(out, dir)
+    const indexPath = path.join(gameOut, 'index.html')
+    const buildDir = path.join(gameOut, 'Build')
+    if (!fs.existsSync(indexPath) || !fs.existsSync(buildDir)) continue
+    let html = fs.readFileSync(indexPath, 'utf8')
+    for (const file of fs.readdirSync(buildDir)) {
+      const kind = KINDS.find((k) => k.re.test(file))
+      if (!kind) continue
+      const src = path.join(buildDir, file)
+      const data = fs.readFileSync(src)
+      const hash = crypto.createHash('sha256').update(data).digest('hex').slice(0, 16)
+      const suffix = file.slice(file.indexOf('.'))
+      const name = `${hash}${suffix}`
+      // 模板里写的是 buildUrl + "/<file>"（loaderUrl 同理），整段替换为相对游戏目录的共享路径
+      const pattern = new RegExp(`(${kind.key}\\s*[:=]\\s*)buildUrl\\s*\\+\\s*"/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`)
+      if (!pattern.test(html)) continue
+      html = html.replace(pattern, `$1"../_shared/${name}"`)
+      fs.mkdirSync(shared, { recursive: true })
+      if (seen.has(name)) savedBytes += data.length
+      else fs.copyFileSync(src, path.join(shared, name))
+      seen.set(name, (seen.get(name) ?? 0) + 1)
+      fs.rmSync(src)
+    }
+    fs.writeFileSync(indexPath, html)
+  }
+  return { files: seen, savedBytes }
+}
+
 function renderIndex(entries) {
   const cards = entries
     .map((e) => {
@@ -121,6 +166,10 @@ async function main() {
     entries.push(entry)
   }
 
+  const okDirs = entries.filter((e) => e.ok).map((e) => e.dir)
+  const share = shareEngine(out, okDirs)
+  if (share.files.size) console.log(`\n共享引擎文件 ${share.files.size} 个（_shared/），跨游戏重复的 ${(share.savedBytes / 1048576).toFixed(1)} MB 只保留一份`)
+
   fs.writeFileSync(path.join(out, 'index.html'), renderIndex(entries))
   fs.writeFileSync(path.join(out, '.nojekyll'), '')
 
@@ -133,7 +182,9 @@ async function main() {
   if (okCount === 0) process.exitCode = 1
 }
 
-main().catch((error) => {
+module.exports = { shareEngine }
+
+if (require.main === module) main().catch((error) => {
   console.error(error?.stack ?? error)
   process.exitCode = 1
 })
