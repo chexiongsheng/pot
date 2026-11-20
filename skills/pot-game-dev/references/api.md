@@ -173,6 +173,8 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 
 即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap,spacing})`、`measure(str,size,bold,spacing?)`、`hit(x,y,w,h)`、`width`/`height`。颜色写法同上（支持 `rgba()`）。`spacing` 为字距（em，同 CSS letter-spacing，每个字后都加、含最后一个）：运行时逐字排版并缓存单字宽度，`align` 居中/右对齐时自动补回末尾字距，`wrap` 时在 `w` 内断行（英文优先在空格处断）；`measure` 传同样的 `spacing` 得到含末尾字距的宽度。没有渐变、字重档位：渐变用窄条带矩形近似。
 
+布局辅助（只算矩形，不绘制）：`ui.flow(x, y, { dir: 'row'|'column', gap, align: 'start'|'center'|'end' })` 增量排布，尺寸边画边知道时用，`f.next(w, h)` 返回这一项的矩形并前移游标，`f.x`/`f.y` 为下一项位置，`f.width`/`f.height` 为已排外框（`align: 'center'` 时起点 y 是行的中线）；`ui.layout(sizes, { x, y, w, h }, { dir, gap, justify: 'start'|'center'|'end'|'between', align: 'start'|'center'|'end'|'stretch' })` 已知各项尺寸时在容器内分布，返回矩形数组。
+
 ## 定时器
 
 `ctx.timeout(cb, ms)`、`ctx.interval(cb, ms)` 返回取消函数；`await ctx.timeout(ms)` 在单元卸载时 reject。`ctx.throttle`/`ctx.debounce` 同 cordis。全部走游戏时间：暂停、时间缩放、热重载冻结都会生效。
