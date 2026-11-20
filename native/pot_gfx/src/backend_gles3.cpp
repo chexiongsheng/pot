@@ -494,8 +494,9 @@ private:
             glEnable(GL_CULL_FACE);
             glCullFace(cull == 0 ? GL_BACK : GL_FRONT);
         }
-        // D3D 在 y 向下的渲染目标空间判定绕序，GL 在 y 向上的窗口空间判定：同一个三角形绕序相反
-        glFrontFace((flags & F_FrontCCW) ? GL_CW : GL_CCW);
+        // Unity 网格正面为顺时针（Unity 自己在 GL 上也用 glFrontFace(GL_CW)）。GL 不翻转渲染目标，
+        // C# 在 GL 上不会置 F_FrontCCW；若置了（翻转投影）则与 D3D 一样改为逆时针
+        glFrontFace((flags & F_FrontCCW) ? GL_CCW : GL_CW);
         if (flags & F_NoDepthTest) {
             glDisable(GL_DEPTH_TEST);
         } else {

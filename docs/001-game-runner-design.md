@@ -179,7 +179,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 关闭视锥剔除 `frustumCull: false` | 雨 | 顶点着色器重算位置的效果（雨、粒子）不再时有时无 |
 | ✅ | 自定义后处理链 `gfx.post` | 后处理 | 全屏 pass 链、按比例或固定尺寸目标、`history` 双缓冲、内置 `scene` / `depth` |
 | ✅ | three 方言 `gfx.standard` / `dialect: 'three'` | 枪模、场景材质 | three r180 的 meshphysical 原文与 ShaderChunk 直接编译，支持 `onBeforeCompile` 补丁（`threeChunks`）；光照、阴影、雾、环境改读 pot 内置。枪模 Bf 与场景 sl 材质 h3 已换回原版原文，D3D11 上 60fps |
-| ✅ | `pot_gfx` GLES3 / WebGL2 后端 | WebGL 版 | 源码直通驱动（不经 glslang），`glGetActiveUniform` 反射；程序化材质、three 方言、`gfx.bake`、`gfx.post` 在 WebGL 上均已生效。注意：Unity GL 的 `SetRenderTarget` 惰性生效，post 的输出目标由后端自行绑定 FBO；`gl_FragCoord` 原点随后端不同（D3D 左上、GL 左下）；Android GLES 尚未实测（需在渲染线程编译）；Metal、Vulkan 未做 |
+| ✅ | `pot_gfx` GLES3 / WebGL2 后端 | WebGL 版 | 源码直通驱动（不经 glslang），`glGetActiveUniform` 反射；程序化材质、three 方言、`gfx.bake`、`gfx.post` 在 WebGL 上均已生效。注意：Unity GL 的 `SetRenderTarget` 惰性生效，post 的输出目标由后端自行绑定 FBO；`gl_FragCoord` 原点随后端不同（D3D 左上、GL 左下）；GL 下正面绕序为 `GL_CW`（与 Unity 一致，写反会剔掉地面和集装箱外侧面）；Android GLES 尚未实测（需在渲染线程编译）；Metal、Vulkan 未做 |
 | ✅ | 发布包内置中文字体子集 | WebGL 菜单、HUD | `pot release` 按游戏文件里出现过的字符从 Noto Sans SC / 思源黑体（OFL，可再分发）裁子集随包，jimao 634 字 172 KB；运行时 UI、文字贴图、Canvas 优先用它，缺字回退系统字体。UI 文字按参考字“国”的包围盒和参考行高 1.32em 竖直对齐，换字体布局不变 |
 | ✅ | 平台缺能力显式化 | WebGL / Android | 启动日志写明运行时着色器后端（`d3d11` / `gles3` / 不可用）；不可用时 C# 与 JS 各警告一次并说明原因（`ctx.gfx.unsupported`）；打包时按目标平台输出 `[pot] 平台能力` 警告，并把 Win64 固定为 D3D11、WebGL 固定为 WebGL2 |
 | ❌ | Android 包不含 `pot_gfx` | Android 版 | GLES3 后端代码已有，但没有构建 Android 的 .so；Android 包 `ctx.gfx` 不可用，画面走回退 |
