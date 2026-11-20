@@ -43,6 +43,106 @@ export interface RectOptions {
   alpha?: number
 }
 
+export interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface FlowOptions {
+  /** 主轴方向，默认 row（从左到右）；column 为从上到下 */
+  dir?: 'row' | 'column'
+  /** 相邻两项的间距 */
+  gap?: number
+  /** 交叉轴对齐：起点坐标是该轴的 start（默认）/ center / end 线 */
+  align?: 'start' | 'center' | 'end'
+}
+
+export interface LayoutOptions {
+  dir?: 'row' | 'column'
+  gap?: number
+  /** 主轴分布：start（默认）、center、end、between（两端对齐，间距均分，至少为 gap） */
+  justify?: 'start' | 'center' | 'end' | 'between'
+  /** 交叉轴对齐：start（默认）、center、end、stretch（拉满容器） */
+  align?: 'start' | 'center' | 'end' | 'stretch'
+}
+
+/**
+ * 增量排布（尺寸边画边知道时用）：next(w, h) 返回这一项的矩形并把游标前移 w（或 h）+ gap。
+ * x/y 为下一项的位置，width/height 为已排内容的外框（不含末尾 gap）。
+ */
+export class Flow {
+  /** 下一项的主轴起点（row 为 x，column 为 y）与交叉轴锚点 */
+  x: number
+  y: number
+  width = 0
+  height = 0
+  private _count = 0
+  constructor(private _x0: number, private _y0: number, private _o: FlowOptions = {}) {
+    this.x = _x0
+    this.y = _y0
+  }
+
+  next(w: number, h: number): Rect {
+    const row = (this._o.dir ?? 'row') === 'row'
+    const gap = this._o.gap ?? 0
+    const align = this._o.align ?? 'start'
+    const cross = row ? h : w
+    const off = align === 'center' ? -cross / 2 : align === 'end' ? -cross : 0
+    const r: Rect = row ? { x: this.x, y: this._y0 + off, w, h } : { x: this._x0 + off, y: this.y, w, h }
+    if (row) {
+      this.width = this.x + w - this._x0
+      this.height = Math.max(this.height, h)
+      this.x += w + gap
+    } else {
+      this.height = this.y + h - this._y0
+      this.width = Math.max(this.width, w)
+      this.y += h + gap
+    }
+    this._count++
+    return r
+  }
+
+  /** 已排的项数 */
+  get count() {
+    return this._count
+  }
+}
+
+/** 已知各项尺寸时，在容器内按主轴分布与交叉轴对齐算出每项矩形（不绘制） */
+export function layoutRects(sizes: ArrayLike<[number, number] | { w: number; h: number }>, box: Rect, options: LayoutOptions = {}): Rect[] {
+  const row = (options.dir ?? 'row') === 'row'
+  const gap = options.gap ?? 0
+  const items = Array.from(sizes, (s) => (Array.isArray(s) ? { w: s[0], h: s[1] } : { w: s.w, h: s.h }))
+  const mainBox = row ? box.w : box.h
+  const crossBox = row ? box.h : box.w
+  const mains = items.map((s) => (row ? s.w : s.h))
+  const total = mains.reduce((a, b) => a + b, 0)
+  const justify = options.justify ?? 'start'
+  let space = gap
+  let start = 0
+  const used = total + gap * Math.max(0, items.length - 1)
+  if (justify === 'between' && items.length > 1) space = Math.max(gap, (mainBox - total) / (items.length - 1))
+  else if (justify === 'center') start = (mainBox - used) / 2
+  else if (justify === 'end') start = mainBox - used
+  else if (justify === 'between') start = (mainBox - used) / 2
+  const align = options.align ?? 'start'
+  const out: Rect[] = []
+  let at = start
+  for (let i = 0; i < items.length; i++) {
+    const s = items[i]
+    let cross = row ? s.h : s.w
+    let off = 0
+    if (align === 'stretch') cross = crossBox
+    else if (align === 'center') off = (crossBox - cross) / 2
+    else if (align === 'end') off = crossBox - cross
+    out.push(row ? { x: box.x + at, y: box.y + off, w: s.w, h: cross } : { x: box.x + off, y: box.y + at, w: cross, h: s.h })
+    at += mains[i] + space
+  }
+  return out
+}
+
 const n = (v: number) => String(Math.round(v * 10) / 10)
 
 export class UIService extends Service {
@@ -217,6 +317,16 @@ export class UIService extends Service {
   hit(x: number, y: number, w: number, h: number) {
     const [mx, my] = this._host.engine.mouse()
     return mx >= x && mx <= x + w && my >= y && my <= y + h
+  }
+
+  /** 增量行/列排布（各项尺寸边画边知道时用）：const f = ui.flow(x, y, { gap: 10 }); const r = f.next(w, h) */
+  flow(x: number, y: number, options: FlowOptions = {}) {
+    return new Flow(x, y, options)
+  }
+
+  /** 已知各项尺寸时在容器内排布：返回每项矩形（justify 主轴分布、align 交叉轴对齐） */
+  layout(sizes: ArrayLike<[number, number] | { w: number; h: number }>, box: Rect, options: LayoutOptions = {}) {
+    return layoutRects(sizes, box, options)
   }
 
   /** 运行时在每个游戏帧末调用 */

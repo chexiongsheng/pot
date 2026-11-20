@@ -40,6 +40,7 @@ var pot = (() => {
     EventsService: () => EventsService,
     Fiber: () => Fiber,
     FiberState: () => FiberState,
+    Flow: () => Flow,
     GfxService: () => GfxService,
     Inject: () => Inject,
     InputService: () => InputService,
@@ -91,6 +92,7 @@ var pot = (() => {
     isConstructor: () => isConstructor,
     isObject: () => isObject,
     joinPrototype: () => joinPrototype,
+    layoutRects: () => layoutRects,
     mapErrors: () => mapErrors,
     markFiber: () => markFiber,
     parseColor: () => parseColor,
@@ -4305,6 +4307,75 @@ var pot = (() => {
   // runtime/src/ui.ts
   var RS = "";
   var FS = "";
+  var Flow = class {
+    constructor(_x0, _y0, _o = {}) {
+      __publicField(this, "_x0", _x0);
+      __publicField(this, "_y0", _y0);
+      __publicField(this, "_o", _o);
+      /** 下一项的主轴起点（row 为 x，column 为 y）与交叉轴锚点 */
+      __publicField(this, "x");
+      __publicField(this, "y");
+      __publicField(this, "width", 0);
+      __publicField(this, "height", 0);
+      __publicField(this, "_count", 0);
+      this.x = _x0;
+      this.y = _y0;
+    }
+    next(w, h) {
+      const row = (this._o.dir ?? "row") === "row";
+      const gap = this._o.gap ?? 0;
+      const align = this._o.align ?? "start";
+      const cross = row ? h : w;
+      const off = align === "center" ? -cross / 2 : align === "end" ? -cross : 0;
+      const r = row ? { x: this.x, y: this._y0 + off, w, h } : { x: this._x0 + off, y: this.y, w, h };
+      if (row) {
+        this.width = this.x + w - this._x0;
+        this.height = Math.max(this.height, h);
+        this.x += w + gap;
+      } else {
+        this.height = this.y + h - this._y0;
+        this.width = Math.max(this.width, w);
+        this.y += h + gap;
+      }
+      this._count++;
+      return r;
+    }
+    /** 已排的项数 */
+    get count() {
+      return this._count;
+    }
+  };
+  function layoutRects(sizes, box, options = {}) {
+    const row = (options.dir ?? "row") === "row";
+    const gap = options.gap ?? 0;
+    const items = Array.from(sizes, (s) => Array.isArray(s) ? { w: s[0], h: s[1] } : { w: s.w, h: s.h });
+    const mainBox = row ? box.w : box.h;
+    const crossBox = row ? box.h : box.w;
+    const mains = items.map((s) => row ? s.w : s.h);
+    const total = mains.reduce((a, b) => a + b, 0);
+    const justify = options.justify ?? "start";
+    let space = gap;
+    let start = 0;
+    const used = total + gap * Math.max(0, items.length - 1);
+    if (justify === "between" && items.length > 1) space = Math.max(gap, (mainBox - total) / (items.length - 1));
+    else if (justify === "center") start = (mainBox - used) / 2;
+    else if (justify === "end") start = mainBox - used;
+    else if (justify === "between") start = (mainBox - used) / 2;
+    const align = options.align ?? "start";
+    const out = [];
+    let at = start;
+    for (let i = 0; i < items.length; i++) {
+      const s = items[i];
+      let cross = row ? s.h : s.w;
+      let off = 0;
+      if (align === "stretch") cross = crossBox;
+      else if (align === "center") off = (crossBox - cross) / 2;
+      else if (align === "end") off = crossBox - cross;
+      out.push(row ? { x: box.x + at, y: box.y + off, w: s.w, h: cross } : { x: box.x + off, y: box.y + at, w: cross, h: s.h });
+      at += mains[i] + space;
+    }
+    return out;
+  }
   var n = (v) => String(Math.round(v * 10) / 10);
   var UIService = class extends Service {
     constructor(ctx, _host) {
@@ -4462,6 +4533,14 @@ var pot = (() => {
     hit(x, y, w, h) {
       const [mx, my] = this._host.engine.mouse();
       return mx >= x && mx <= x + w && my >= y && my <= y + h;
+    }
+    /** 增量行/列排布（各项尺寸边画边知道时用）：const f = ui.flow(x, y, { gap: 10 }); const r = f.next(w, h) */
+    flow(x, y, options = {}) {
+      return new Flow(x, y, options);
+    }
+    /** 已知各项尺寸时在容器内排布：返回每项矩形（justify 主轴分布、align 交叉轴对齐） */
+    layout(sizes, box, options = {}) {
+      return layoutRects(sizes, box, options);
     }
     /** 运行时在每个游戏帧末调用 */
     flush() {

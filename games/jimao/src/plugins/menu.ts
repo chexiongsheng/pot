@@ -90,10 +90,11 @@ export function apply(ctx: Context) {
   }
 
   /** 原版 m-btn：主按钮 signal 底 ink 字 18px 字距 .3em 高 52；次按钮半透明 ink 底 + bone .42 边框 15px 字距 .22em 高 46 */
+  const btnStyle = (primary: boolean): Spaced => (primary ? { size: 18, bold: true, spacing: 0.3, color: C.ink } : { size: 15, bold: true, spacing: 0.22, color: C.bone })
+  const btnSize = (label: string, primary: boolean): [number, number] => [Math.round(spacedWidth(label, btnStyle(primary)) + (primary ? 64 : 48)), primary ? 52 : 46]
   function mbtn(id: string, label: string, x: number, cy: number, primary = false) {
-    const o: Spaced = primary ? { size: 18, bold: true, spacing: 0.3, color: C.ink } : { size: 15, bold: true, spacing: 0.22, color: C.bone }
-    const h = primary ? 52 : 46
-    const w = Math.round(spacedWidth(label, o) + (primary ? 64 : 48))
+    const o = btnStyle(primary)
+    const [w, h] = btnSize(label, primary)
     const y = cy - h / 2
     const over = ui.hit(x, y, w, h)
     if (over && hover !== id) { hover = id; ctx.audio.play(sfx('ui'), { volume: 0.2, pitch: 1.4 }) }
@@ -106,23 +107,24 @@ export function apply(ctx: Context) {
     spaced(label, x + (primary ? 32 : 24) + (o.spacing! * o.size) / 2, cy, { ...o, valign: 'middle' })
     return { w, click: over && input.pressed('mouse0') }
   }
-  /** 一行按钮，返回被点中的 id */
+  /** 一行按钮（间距 10，按中线对齐），返回被点中的 id */
   function row(items: [string, string, boolean?][], x: number, cy: number) {
     let hit = ''
+    const f = ui.flow(x, cy, { gap: 10, align: 'center' })
     for (const [id, label, primary] of items) {
-      const r = mbtn(id, label, x, cy, primary)
-      if (r.click) hit = id
-      x += r.w + 10
+      const [w, h] = btnSize(label, !!primary)
+      if (mbtn(id, label, f.next(w, h).x, cy, primary).click) hit = id
     }
     return hit
   }
 
-  /** 统计格：小号 steel 标签 + 大号数值 */
+  /** 统计格：小号 steel 标签 + 大号数值，每格至少 150 宽 */
   function stats(items: [string, string, string?][], x: number, y: number, a: number) {
+    const f = ui.flow(x, y)
     for (const [k, v, color] of items) {
-      spaced(k, x, y, { size: 11, spacing: 0.2, color: C.steel, alpha: a, bold: true })
-      const w = spaced(v, x, y + 20, { size: 26, bold: true, color: color ?? C.bone, alpha: a })
-      x += Math.max(150, w + 48)
+      spaced(k, f.x, y, { size: 11, spacing: 0.2, color: C.steel, alpha: a, bold: true })
+      const w = spaced(v, f.x, y + 20, { size: 26, bold: true, color: color ?? C.bone, alpha: a })
+      f.next(Math.max(150, w + 48), 54)
     }
   }
 
