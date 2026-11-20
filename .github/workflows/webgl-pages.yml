@@ -1,0 +1,143 @@
+name: webgl pages
+
+# 把 games/ 下所有游戏打成 WebGL，部署到 GitHub Pages。
+# 需要的 secrets：UNITY_USERNAME、UNITY_PASSWORD（Personal 授权）。
+# 仓库 Settings → Pages → Build and deployment → Source 需选 "GitHub Actions"。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - games/**
+      - packages/**
+      - player/**
+      - js/**
+      - tools/build-pages.js
+      - tools/install-puerts.ps1
+      - .github/workflows/webgl-pages.yml
+  workflow_dispatch:
+    inputs:
+      games:
+        description: '只构建这些游戏（games 下的目录名，逗号分隔；留空为全部）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: webgl-pages
+  cancel-in-progress: true
+
+env:
+  PUERTS_VERSION: 3.0.3
+  # 工程是 2022.3.62f1c1（中国版）。62f1 带 Unity 安全公告，unity-setup@v3 会拦截，用官方补丁版 62f3
+  UNITY_VERSION: 2022.3.62f3
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # third_party/puerts 不入库，从 Puerts 官方 Release 下载 core / v8 / webgl 后用仓库脚本安装（含 JsEnv.cs 补丁）
+      - name: Install Puerts
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:RUNNER_TEMP 'puerts'
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          foreach ($n in 'Core', 'V8', 'Webgl') {
+            $file = Join-Path $env:RUNNER_TEMP "PuerTS_$n.tar.gz"
+            curl.exe -fsSL --retry 3 -o $file "https://github.com/Tencent/puerts/releases/download/Unity_v$env:PUERTS_VERSION/PuerTS_${n}_$env:PUERTS_VERSION.tar.gz"
+            if ($LASTEXITCODE -ne 0) { throw "download PuerTS_$n failed" }
+            tar -xzf $file -C $src
+            if ($LASTEXITCODE -ne 0) { throw "extract PuerTS_$n failed" }
+          }
+          Get-ChildItem $src | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
+          & ./tools/install-puerts.ps1 -Source $src
+
+      # WebGL 拿不到系统字体，发布包要内置中文字体子集（OFL，可再分发）
+      - name: Download Noto Sans SC
+        shell: pwsh
+        run: |
+          $font = Join-Path $env:RUNNER_TEMP 'NotoSansSC-Regular.otf'
+          curl.exe -fsSL --retry 3 -o $font https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
+          if ($LASTEXITCODE -ne 0) { throw 'download font failed' }
+          "POT_FONT=$font" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build JS runtime
+        shell: pwsh
+        working-directory: js
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/build.js
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: player/Library
+          key: library-webgl-${{ env.UNITY_VERSION }}-${{ hashFiles('player/Packages/manifest.json', 'player/Packages/packages-lock.json', 'player/ProjectSettings/**') }}
+          restore-keys: |
+            library-webgl-${{ env.UNITY_VERSION }}-
+
+      - name: Setup Unity
+        uses: RageAgainstThePixel/unity-setup@v3
+        with:
+          unity-version: ${{ env.UNITY_VERSION }}
+          build-targets: WebGL
+          modules: webgl
+          cache-installation: true
+
+      - uses: RageAgainstThePixel/activate-unity-license@v3
+        with:
+          license: 'Personal'
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+
+      # Unity 2022.3 Editor 的 OpenRL.dll 依赖 VC++ 2010 运行时，windows-2022 镜像里没有，
+      # 缺失时 Unity.exe 以 0xC0000135 直接退出
+      - name: Install VC++ 2010 Redistributable
+        shell: pwsh
+        run: |
+          choco install vcredist2010 -y --no-progress
+          if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
+
+      # 不加 -nographics（内置着色器导入需要图形设备），release.js 已按此调用
+      - name: Build WebGL demos
+        shell: pwsh
+        env:
+          GAMES: ${{ github.event_name == 'workflow_dispatch' && inputs.games || '' }}
+        run: |
+          $argv = @('tools/build-pages.js', '--out', 'site', '--unity', $env:UNITY_EDITOR_PATH)
+          if ($env:GAMES) { $argv += @('--games', $env:GAMES) }
+          node @argv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Unity logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-webgl-logs
+          path: games/*/.pot/release/unity-webgl.log
+          if-no-files-found: warn
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

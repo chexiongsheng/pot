@@ -37,6 +37,7 @@ games/*/.pot/
 runner/Assets/PotGame/
 runner/Builds/
 release/
+site/
 
 # OS
 .DS_Store
