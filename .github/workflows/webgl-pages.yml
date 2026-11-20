@@ -107,12 +107,18 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
+          $client = Join-Path $env:APPDATA 'UnityHub\external-modules\licensingClient\Unity.Licensing.Client.exe'
+          if (Test-Path $client) {
+            Write-Host '----- showEntitlements -----'
+            & $client --showEntitlements
+          }
+          Get-ChildItem 'C:\ProgramData\Unity' -Filter *.ulf -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "ulf: $($_.FullName) $($_.Length) bytes $($_.LastWriteTime)" }
           node js/devserver/cli.js release games/hello --platform win64 --unity $env:UNITY_EDITOR_PATH --out (Join-Path $env:RUNNER_TEMP 'win64')
           $code = $LASTEXITCODE
           $log = 'games/hello/.pot/release/unity-win64.log'
-          if (Test-Path $log) {
-            Write-Host '----- unity-win64.log: Licensing -----'
-            Select-String -Path $log -Pattern 'Licens|entitlement|token' | Select-Object -First 60 | ForEach-Object { $_.Line }
+          if ($code -ne 0 -and (Test-Path $log)) {
+            Write-Host '----- unity-win64.log: tail -----'
+            Get-Content $log -Tail 80
           }
           exit $code
 
@@ -128,8 +134,8 @@ jobs:
           $code = $LASTEXITCODE
           $log = 'games/hello/.pot/release/unity-webgl.log'
           if ($code -ne 0 -and (Test-Path $log)) {
-            Write-Host '----- unity-webgl.log: Licensing -----'
-            Select-String -Path $log -Pattern 'Licens|entitlement|token' | Select-Object -First 60 | ForEach-Object { $_.Line }
+            Write-Host '----- unity-webgl.log: tail -----'
+            Get-Content $log -Tail 80
           }
           if ($code -ne 0) { exit $code }
 
