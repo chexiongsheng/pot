@@ -16,7 +16,7 @@
 |---|---|
 | `spawn({ shape, name, parent, position, rotation, scale, color, active, collider, layer, visible, bones })` | shape：cube/sphere/capsule/cylinder/plane/quad/empty/`mesh:名字`。返回 `Entity`，随单元卸载自动销毁。`collider: false` 去掉自带碰撞体；`visible: false` 只留碰撞体不渲染（命中盒、触发区）；`bones` 见下方蒙皮 |
 | `setTransforms(ids, data, { count, position, rotation, scale, space })` | 批量设置变换，一次跨语言调用。`data` 每个实体 10 个数：位置 xyz、四元数 xyzw、缩放 xyz（Unity 坐标系）。`ids` 传建好后复用的 `Int32Array`（实体 id）则不产生分配，也可传实体数组。默认三项都写、世界空间；缩放始终是本地缩放。同一批里父节点要排在子节点前面。返回实际写入的个数 |
-| `light({ type, intensity, color, range, position, rotation })` | type：directional/point/spot |
+| `light({ type, intensity, color, range, position, rotation, units, distance })` | type：directional/point/spot。`units: 'three'` 时强度按 three.js 物理单位（坎德拉 / 勒克斯）传，运行时按 1/π 换算成 URP 强度，之后 `entity.intensity(v)` 也按同一单位；`distance`（three 的 PointLight.distance）> 0 时作为 range，0 时 URP 仍需有限 `range`（默认 10）。移植 three 场景时直接抄原版数值 |
 | `camera` | 主相机 Entity，不能销毁；每次热重载都要重新设置位置 |
 | `background(color)` | 纯色背景 |
 | `find(name)` / `list(unit?)` | 查找 pot 创建的对象 |

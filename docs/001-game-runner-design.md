@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 34 |
+| ✅ 已完成 | 35 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 21 |
+| ❌ 未完成 | 20 |
 
 #### 渲染与着色器（gfx）
 
@@ -208,7 +208,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ⚠️ | 蒙皮网格 | 机器狗 | 已支持：`scene.mesh` 带 `boneIndices` / `boneWeights` / `bindPoses`，`spawn({ shape: 'mesh:x', bones })` 建成蒙皮网格；三平面贴图按静止姿态采样。机器狗每只的网格渲染器从约 30 个降到 4 个（[hound.ts](games/jimao/src/lib/hound.ts)）。剩余出入：每顶点多根骨骼的软权重只有单元测试，没在实机上验证过；蒙皮实体不能用运行时着色器（gfx），所以飞鸥仍是刚性分件；蒙皮实体没有碰撞体，命中体另挂在骨骼下 |
 | ✅ | 只碰撞不渲染的实体 `visible: false` | 机器狗 | `spawn({ visible: false, collider: true })` 或 `entity.visible(false)`：只关渲染，碰撞体与子节点照常工作，运行时着色器那条绘制路径也跟着不画。机器狗头、身、腿三个命中体已改用，原来是画一层全黑的叠加材质 |
 | ❌ | 半透明材质双面 | 飞鸥 | `lit-fade`/`unlit-fade` 只渲染正面，原版旋翼残影盘是 DoubleSide，现在正反各建一片；建议 `MaterialOptions.cull` |
-| ❌ | 点光源物理单位选项 | 远景 | three 强度/π 与 distance 的换算写在游戏里 |
+| ✅ | 点光源物理单位选项 | 远景 | `scene.light({ units: 'three', intensity, distance })`：强度按 three 物理单位（坎德拉 / 勒克斯）传，运行时按 1/π 换算，`entity.intensity()` 沿用同一单位；`distance` > 0 当作 range。jimao 原版点光源改为直接传原版数值，手写的 /π 删除 |
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
 | ❌ | gfx 深度偏移 `polygonOffset` | 弹孔 | 贴花现靠沿法线外推 4 mm 防 z-fighting，远处或掠射角仍可能闪 |

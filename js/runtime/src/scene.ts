@@ -113,9 +113,19 @@ export interface MeshOptions {
 export interface LightOptions {
   type?: 'directional' | 'point' | 'spot'
   name?: string
+  /** 强度；单位由 units 决定 */
   intensity?: number
   color?: Color
+  /** 照射范围（米，URP 灯光必须有限）；默认 10 */
   range?: number
+  /**
+   * 强度单位。unity（默认）：URP 的强度，直接使用。
+   * three：three.js r155+ 物理单位（点光/聚光为坎德拉、平行光为勒克斯）。three 的漫反射除以 π 而 URP 不除，
+   * 运行时按 1/π 换算；之后 entity.intensity(v) 也按同一单位解释，移植时直接抄原版数值即可。
+   */
+  units?: 'unity' | 'three'
+  /** three 的 PointLight.distance（0 表示不截断）。units 为 three 且没给 range 时，distance > 0 当作 range */
+  distance?: number
   position?: Vec3
   rotation?: Vec3
   parent?: Entity
@@ -614,9 +624,9 @@ export class Entity {
     return this
   }
 
-  /** 灯光强度（仅灯光对象） */
+  /** 灯光强度（仅灯光对象）；单位与创建时的 units 一致 */
   intensity(value: number) {
-    this._engine.lightIntensity(this.id, value)
+    this._engine.lightIntensity(this.id, value * (this._scene.lightScale.get(this.id) ?? 1))
     return this
   }
 
@@ -631,6 +641,8 @@ export class SceneService extends Service {
   readonly objects = new Map<number, ObjectInfo>()
   /** 蒙皮实体的 id */
   readonly skinned = new Set<number>()
+  /** 灯光 id → 强度换算系数（units: 'three' 为 1/π） */
+  readonly lightScale = new Map<number, number>()
 
   constructor(ctx: Context, readonly host: Host) {
     super(ctx, 'scene')
@@ -670,6 +682,7 @@ export class SceneService extends Service {
       return () => {
         this.objects.delete(id)
         this.skinned.delete(id)
+        this.lightScale.delete(id)
         engine.destroy(id)
       }
     }, `scene.spawn(${name})`)
@@ -726,7 +739,12 @@ export class SceneService extends Service {
     const entity = this.spawn({ shape: 'empty', name: options.name ?? `${options.type ?? 'directional'} light`, parent: options.parent, position: options.position, rotation: options.rotation })
     const [r, g, b] = parseColor(options.color ?? [1, 1, 1])
     const engine = this.host.engine
-    engine.light(entity.id, options.type ?? 'directional', options.intensity ?? 1, r, g, b, options.range ?? 10)
+    const three = options.units === 'three'
+    if (options.units !== undefined && options.units !== 'unity' && !three) throw new Error(`scene.light：未知的 units "${options.units}"，可用 unity / three`)
+    const scale = three ? 1 / Math.PI : 1
+    if (scale !== 1) this.lightScale.set(entity.id, scale)
+    const range = options.range ?? (three && options.distance && options.distance > 0 ? options.distance : 10)
+    engine.light(entity.id, options.type ?? 'directional', (options.intensity ?? 1) * scale, r, g, b, range)
     if (options.spotAngle !== undefined || options.shadows !== undefined) {
       const shadows = options.shadows === undefined ? -1 : options.shadows === 'none' ? 0 : options.shadows === 'hard' ? 1 : 2
       engine.lightOptions(entity.id, options.spotAngle ?? 0, shadows)

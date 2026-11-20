@@ -3991,9 +3991,9 @@ var pot = (() => {
       this._engine.layer(this.id, layer);
       return this;
     }
-    /** 灯光强度（仅灯光对象） */
+    /** 灯光强度（仅灯光对象）；单位与创建时的 units 一致 */
     intensity(value) {
-      this._engine.lightIntensity(this.id, value);
+      this._engine.lightIntensity(this.id, value * (this._scene.lightScale.get(this.id) ?? 1));
       return this;
     }
     destroy() {
@@ -4009,6 +4009,8 @@ var pot = (() => {
       __publicField(this, "objects", /* @__PURE__ */ new Map());
       /** 蒙皮实体的 id */
       __publicField(this, "skinned", /* @__PURE__ */ new Set());
+      /** 灯光 id → 强度换算系数（units: 'three' 为 1/π） */
+      __publicField(this, "lightScale", /* @__PURE__ */ new Map());
     }
     /** 主相机（不归任何插件所有，不能销毁） */
     get camera() {
@@ -4042,6 +4044,7 @@ var pot = (() => {
         return () => {
           this.objects.delete(id);
           this.skinned.delete(id);
+          this.lightScale.delete(id);
           engine.destroy(id);
         };
       }, `scene.spawn(${name})`);
@@ -4096,7 +4099,12 @@ var pot = (() => {
       const entity = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, parent: options.parent, position: options.position, rotation: options.rotation });
       const [r, g, b] = parseColor(options.color ?? [1, 1, 1]);
       const engine = this.host.engine;
-      engine.light(entity.id, options.type ?? "directional", options.intensity ?? 1, r, g, b, options.range ?? 10);
+      const three = options.units === "three";
+      if (options.units !== void 0 && options.units !== "unity" && !three) throw new Error(`scene.light：未知的 units "${options.units}"，可用 unity / three`);
+      const scale = three ? 1 / Math.PI : 1;
+      if (scale !== 1) this.lightScale.set(entity.id, scale);
+      const range = options.range ?? (three && options.distance && options.distance > 0 ? options.distance : 10);
+      engine.light(entity.id, options.type ?? "directional", (options.intensity ?? 1) * scale, r, g, b, range);
       if (options.spotAngle !== void 0 || options.shadows !== void 0) {
         const shadows = options.shadows === void 0 ? -1 : options.shadows === "none" ? 0 : options.shadows === "hard" ? 1 : 2;
         engine.lightOptions(entity.id, options.spotAngle ?? 0, shadows);

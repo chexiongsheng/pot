@@ -252,12 +252,12 @@ export async function apply(ctx: Context) {
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
   }
   await step('布置灯光', 0.67)
-  // 原版点光源（three 物理单位坎德拉；URP 漫反射不除以 π，强度按 1/π 换算）
+  // 原版点光源：three 物理单位（坎德拉）直接传，由 Runner 换算；distance 为 0（不截断）时 URP 仍需有限范围，取 15 米
   const origLights = orig.lights.map((l) => {
     l.updateWorldMatrix(true, false)
     const p = toUnityPos({ x: l.matrixWorld.elements[12], y: l.matrixWorld.elements[13], z: l.matrixWorld.elements[14] })
     const c = hdr(l.color)
-    const ent = scene.light({ type: 'point', name: 'orig-light', position: p, intensity: (l.intensity * c.intensity) / Math.PI, range: l.distance || 15, color: c.color })
+    const ent = scene.light({ type: 'point', name: 'orig-light', position: p, units: 'three', intensity: l.intensity * c.intensity, distance: l.distance, range: l.distance > 0 ? undefined : 15, color: c.color })
     return { l, ent, last: l.intensity }
   })
   // 变了的动态网格收集起来一次下发（原版每帧改几十个矩阵）
@@ -284,7 +284,7 @@ export async function apply(ctx: Context) {
     for (const o of origLights) {
       if (o.l.intensity !== o.last) {
         o.last = o.l.intensity
-        o.ent.intensity((o.l.intensity * hdr(o.l.color).intensity) / Math.PI)
+        o.ent.intensity(o.l.intensity * hdr(o.l.color).intensity)
       }
     }
   }
