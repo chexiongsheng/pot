@@ -97,6 +97,7 @@ var pot = (() => {
     parseCssColor: () => parseCssColor,
     parseFont: () => parseFont,
     preprocess: () => preprocess,
+    rayPlane: () => rayPlane,
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
     symbols: () => symbols,
@@ -3787,6 +3788,23 @@ var pot = (() => {
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   }
   var colorCache = /* @__PURE__ */ new Map();
+  function rayPlane(o, d, plane) {
+    const n2 = plane.normal ?? [0, 1, 0];
+    const p = plane.point ?? [0, plane.y ?? 0, 0];
+    const denom = n2[0] * d[0] + n2[1] * d[1] + n2[2] * d[2];
+    if (Math.abs(denom) < 1e-9) return;
+    if (denom > 0 && !plane.twoSided) return;
+    const t = (n2[0] * (p[0] - o[0]) + n2[1] * (p[1] - o[1]) + n2[2] * (p[2] - o[2])) / denom;
+    if (!(t > 0)) return;
+    const r = plane.region;
+    if (r) {
+      const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t;
+      if (r.minX !== void 0 && x < r.minX || r.maxX !== void 0 && x > r.maxX) return;
+      if (r.minY !== void 0 && y < r.minY || r.maxY !== void 0 && y > r.maxY) return;
+      if (r.minZ !== void 0 && z < r.minZ || r.maxZ !== void 0 && z > r.maxZ) return;
+    }
+    return t;
+  }
   function parseColor(color) {
     if (typeof color === "string") {
       let c = colorCache.get(color);
@@ -4219,11 +4237,26 @@ var pot = (() => {
         lifeJitter: options.lifeJitter
       }));
     }
-    /** 射线检测（命中图元自带的碰撞体）。direction 不必归一化 */
+    /** 射线检测（命中图元自带的碰撞体，以及 options.planes 中的无限平面）。direction 不必归一化 */
     raycast(origin, direction, options = {}) {
       const hit = this.host.engine.raycast(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], options.maxDistance ?? 0, options.mask ?? 0);
-      if (!hit) return null;
-      return { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : void 0 };
+      let best = hit ? { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : void 0 } : null;
+      const planes = options.planes;
+      if (!planes?.length) return best;
+      const len = Math.hypot(direction[0], direction[1], direction[2]);
+      if (!(len > 0)) return best;
+      const d = [direction[0] / len, direction[1] / len, direction[2] / len];
+      const max = options.maxDistance && options.maxDistance > 0 ? options.maxDistance : Infinity;
+      for (let i = 0; i < planes.length; i++) {
+        const t = rayPlane(origin, d, planes[i]);
+        if (t === void 0 || t > max || best && best.distance <= t) continue;
+        const pl = planes[i];
+        const nl = pl.normal ? Math.hypot(pl.normal[0], pl.normal[1], pl.normal[2]) || 1 : 1;
+        let n2 = pl.normal ? [pl.normal[0] / nl, pl.normal[1] / nl, pl.normal[2] / nl] : [0, 1, 0];
+        if (n2[0] * d[0] + n2[1] * d[1] + n2[2] * d[2] > 0) n2 = [-n2[0], -n2[1], -n2[2]];
+        best = { id: -1, point: [origin[0] + d[0] * t, origin[1] + d[1] * t, origin[2] + d[2] * t], normal: n2, distance: t, plane: i, tag: pl.tag };
+      }
+      return best;
     }
     find(name) {
       for (const info of this.objects.values()) {

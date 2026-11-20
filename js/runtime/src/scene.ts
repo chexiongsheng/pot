@@ -128,15 +128,38 @@ export interface RaycastOptions {
   maxDistance?: number
   /** 层掩码（1 << layer 的组合）；默认为 Unity 默认射线层集合 */
   mask?: number
+  /**
+   * 额外参与求交的无限平面（不需要碰撞体，如地坪、海面）。与碰撞体命中一起取最近的一个。
+   * 平面命中的 id 为 -1、entity 为空，`plane` 为下标、`tag` 为平面的 tag。
+   */
+  planes?: RayPlane[]
+}
+
+/**
+ * 射线用的无限平面：`{ y }` 为水平面，或 `{ point, normal }` 任意平面；默认只从法线一侧命中（twoSided 为双面）。
+ * region 限定命中点所在的世界坐标范围（如只在码头内的地坪），超出范围视为没有平面。
+ */
+export interface RayPlane {
+  y?: number
+  point?: Vec3
+  /** 默认 [0, 1, 0]，不必归一化 */
+  normal?: Vec3
+  twoSided?: boolean
+  region?: { minX?: number; maxX?: number; minY?: number; maxY?: number; minZ?: number; maxZ?: number }
+  /** 命中时原样带回（如 'ground'、'water'） */
+  tag?: string
 }
 
 export interface RaycastHit {
-  /** 命中对象 id；命中非 pot 对象时为 -1 */
+  /** 命中对象 id；命中非 pot 对象或平面时为 -1 */
   id: number
   entity?: Entity
   point: Vec3
   normal: Vec3
   distance: number
+  /** 命中 options.planes 中的平面时为其下标 */
+  plane?: number
+  tag?: string
 }
 
 export interface ViewOptions {
@@ -399,6 +422,25 @@ function srgbToLinear(v: number) {
 }
 
 const colorCache = new Map<string, [number, number, number, number]>()
+
+/** 射线（d 已归一化）与平面求交，返回距离；平行、背面（非双面）、在身后或超出 region 时返回 undefined */
+export function rayPlane(o: Vec3, d: Vec3, plane: RayPlane): number | undefined {
+  const n = plane.normal ?? [0, 1, 0]
+  const p = plane.point ?? [0, plane.y ?? 0, 0]
+  const denom = n[0] * d[0] + n[1] * d[1] + n[2] * d[2]
+  if (Math.abs(denom) < 1e-9) return
+  if (denom > 0 && !plane.twoSided) return
+  const t = (n[0] * (p[0] - o[0]) + n[1] * (p[1] - o[1]) + n[2] * (p[2] - o[2])) / denom
+  if (!(t > 0)) return
+  const r = plane.region
+  if (r) {
+    const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t
+    if ((r.minX !== undefined && x < r.minX) || (r.maxX !== undefined && x > r.maxX)) return
+    if ((r.minY !== undefined && y < r.minY) || (r.maxY !== undefined && y > r.maxY)) return
+    if ((r.minZ !== undefined && z < r.minZ) || (r.maxZ !== undefined && z > r.maxZ)) return
+  }
+  return t
+}
 
 /** Color → sRGB 0..1 的 [r, g, b, a]；字符串规则见 color.ts，无法解析时抛出 TypeError */
 export function parseColor(color: Color): [number, number, number, number] {
@@ -876,11 +918,26 @@ export class SceneService extends Service {
     }))
   }
 
-  /** 射线检测（命中图元自带的碰撞体）。direction 不必归一化 */
+  /** 射线检测（命中图元自带的碰撞体，以及 options.planes 中的无限平面）。direction 不必归一化 */
   raycast(origin: Vec3, direction: Vec3, options: RaycastOptions = {}): RaycastHit | null {
     const hit = this.host.engine.raycast(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], options.maxDistance ?? 0, options.mask ?? 0)
-    if (!hit) return null
-    return { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : undefined }
+    let best: RaycastHit | null = hit ? { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : undefined } : null
+    const planes = options.planes
+    if (!planes?.length) return best
+    const len = Math.hypot(direction[0], direction[1], direction[2])
+    if (!(len > 0)) return best
+    const d: Vec3 = [direction[0] / len, direction[1] / len, direction[2] / len]
+    const max = options.maxDistance && options.maxDistance > 0 ? options.maxDistance : Infinity
+    for (let i = 0; i < planes.length; i++) {
+      const t = rayPlane(origin, d, planes[i])
+      if (t === undefined || t > max || (best && best.distance <= t)) continue
+      const pl = planes[i]
+      const nl = pl.normal ? Math.hypot(pl.normal[0], pl.normal[1], pl.normal[2]) || 1 : 1
+      let n: Vec3 = pl.normal ? [pl.normal[0] / nl, pl.normal[1] / nl, pl.normal[2] / nl] : [0, 1, 0]
+      if (n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0) n = [-n[0], -n[1], -n[2]]
+      best = { id: -1, point: [origin[0] + d[0] * t, origin[1] + d[1] * t, origin[2] + d[2] * t], normal: n, distance: t, plane: i, tag: pl.tag }
+    }
+    return best
   }
 
   find(name: string): Entity | undefined {

@@ -53,15 +53,16 @@ export function apply(ctx: Context) {
   const fx = createFx(ctx, { mask: 1 << LEVEL_LAYER })
   if (fx) ctx.logger('jimao').info(`粒子图集生成 ${fx.atlasMs} ms`)
   const interior = origLevel().data?.interiorBoxes ?? []
-  /** 原版 physics.raycast：碰撞体之外，向下的射线还与地面 y=0（x≤30）或海面 y=-1.6（码头外，记为水面）求交 */
+  /** 原版 physics.raycast：碰撞体之外，射线还与地面 y=0（x≤30）或海面 y=-1.6（码头外，记为水面）求交 */
   type Hit = { id: number; point: Vec3; normal: Vec3; distance: number; surface?: string }
+  const GROUND_PLANES = [
+    { y: 0, region: { maxX: 30 }, tag: 'ground' },
+    { y: -1.6, region: { minX: 30 }, tag: 'water' },
+  ]
   const bulletRay = (o: Vec3, d: Vec3): Hit | undefined => {
-    const hit = scene.raycast(o, d, { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER) }) ?? undefined
-    if (d[1] >= -1e-6) return hit
-    let t = -o[1] / d[1], surface: string | undefined
-    if (o[0] + d[0] * t > 30) { t = (-1.6 - o[1]) / d[1]; surface = 'water' }
-    if (t <= 0 || t >= W.range || (hit && hit.distance <= t)) return hit
-    return { id: -1, point: [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t], normal: [0, 1, 0], distance: t, surface }
+    const hit = scene.raycast(o, d, { maxDistance: W.range, mask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER), planes: GROUND_PLANES })
+    if (!hit) return undefined
+    return hit.tag === 'water' ? { ...hit, surface: 'water' } : hit
   }
   /** 原版 impact 的表面判定：碰撞盒材质；朝上、贴地且落在积水遮罩里的命中按水面处理 */
   const surfaceOf = (pt: Vec3, n: Vec3, preset?: string) => {

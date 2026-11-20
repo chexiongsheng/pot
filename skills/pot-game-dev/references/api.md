@@ -16,6 +16,7 @@
 | `camera` | 主相机 Entity，不能销毁；每次热重载都要重新设置位置 |
 | `background(color)` | 纯色背景 |
 | `find(name)` / `list(unit?)` | 查找 pot 创建的对象 |
+| `raycast(origin, dir, { maxDistance, mask, planes })` | 射线命中碰撞体，返回 `{ id, entity, point, normal, distance }` 或 null；`dir` 不必归一化。`planes` 加入无碰撞体的无限平面一起取最近：`{ y }` 或 `{ point, normal }`，`region`（`minX/maxX/minY/maxY/minZ/maxZ`）限定范围，`twoSided` 双面，命中时 `id` 为 -1，带回 `plane` 下标与 `tag` |
 
 `Entity`：`position`/`rotation`（欧拉角，度）/`scale` 读写都是一次跨语言调用，热点循环里先缓存，成批的改用 `scene.setTransforms`；`move(dx,dy,dz)`、`lookAt(vec|entity)`、`color(c)`、`active(bool)`、`visible(bool)`（只开关渲染，碰撞体与子节点不受影响）、`destroy()`、`alive`。
 

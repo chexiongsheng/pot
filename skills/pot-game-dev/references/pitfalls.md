@@ -181,7 +181,7 @@
 
 ## 射线打地面"未命中"
 
-地坪若用 `collider: false` 的大平面（如 jimao 的 apron），`scene.raycast` 打不到地面。按需在射线后再与地面平面求交，取较近者。
+地坪若用 `collider: false` 的大平面（如 jimao 的 apron），`scene.raycast` 打不到地面。给射线传 `planes`，例如 `scene.raycast(o, d, { planes: [{ y: 0, region: { maxX: 30 }, tag: 'ground' }, { y: -1.6, region: { minX: 30 }, tag: 'water' }] })`，与碰撞体命中一起取最近，平面命中带回 `tag`（见 jimao 的 `weapon.ts`）。
 
 ## 积水算了涟漪法线，倒影却纹丝不动
 
