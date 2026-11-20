@@ -7,6 +7,7 @@ import { Context, Service } from 'cordis'
 import type { Host, Vec3 } from './host'
 import { unitOf } from './units'
 import { Canvas } from './canvas'
+import { parseColorString } from './color'
 
 declare module 'cordis' {
   interface Context {
@@ -397,13 +398,18 @@ function srgbToLinear(v: number) {
   return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
 }
 
+const colorCache = new Map<string, [number, number, number, number]>()
+
+/** Color → sRGB 0..1 的 [r, g, b, a]；字符串规则见 color.ts，无法解析时抛出 TypeError */
 export function parseColor(color: Color): [number, number, number, number] {
   if (typeof color === 'string') {
-    const hex = color.replace('#', '')
-    const full = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex
-    const n = parseInt(full.slice(0, 6), 16)
-    const a = full.length >= 8 ? parseInt(full.slice(6, 8), 16) / 255 : 1
-    return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255, a]
+    let c = colorCache.get(color)
+    if (!c) {
+      c = parseColorString(color)
+      if (colorCache.size > 2048) colorCache.clear()
+      colorCache.set(color, c)
+    }
+    return [c[0], c[1], c[2], c[3]]
   }
   return [color[0], color[1], color[2], color[3] ?? 1]
 }

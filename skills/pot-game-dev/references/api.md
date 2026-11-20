@@ -19,7 +19,7 @@
 
 `Entity`：`position`/`rotation`（欧拉角，度）/`scale` 读写都是一次跨语言调用，热点循环里先缓存，成批的改用 `scene.setTransforms`；`move(dx,dy,dz)`、`lookAt(vec|entity)`、`color(c)`、`active(bool)`、`visible(bool)`（只开关渲染，碰撞体与子节点不受影响）、`destroy()`、`alive`。
 
-颜色可用 `'#rgb'`、`'#rrggbb'`、`'#rrggbbaa'` 或 `[r,g,b,a?]`（0 到 1）。
+颜色可用 CSS 写法：`'#rgb'`、`'#rgba'`、`'#rrggbb'`、`'#rrggbbaa'`、`'rgb(255, 128, 0)'`、`'rgba(14,13,12,0.4)'`、`'rgb(255 0 0 / 50%)'`、`'hsl(120, 100%, 50%)'`/`hsla()`、常用颜色名（`white`、`transparent` 等），或 `[r,g,b,a?]`（0 到 1）。scene、ui、uniform 与 Canvas 的 `fillStyle` 共用同一套解析；写错时抛出“无法解析颜色”（Canvas 与浏览器一样忽略无效值）。
 
 ### 材质与渲染（URP，Linear 色彩空间）
 

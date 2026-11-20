@@ -2471,65 +2471,92 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/canvas.ts
-  var TAU = Math.PI * 2;
+  // runtime/src/color.ts
   var NAMED = {
+    transparent: "#00000000",
     black: "#000000",
     white: "#ffffff",
     red: "#ff0000",
-    green: "#008000",
     lime: "#00ff00",
+    green: "#008000",
     blue: "#0000ff",
     yellow: "#ffff00",
-    orange: "#ffa500",
+    cyan: "#00ffff",
+    aqua: "#00ffff",
+    magenta: "#ff00ff",
+    fuchsia: "#ff00ff",
     gray: "#808080",
     grey: "#808080",
     silver: "#c0c0c0",
-    cyan: "#00ffff",
-    magenta: "#ff00ff",
-    purple: "#800080",
-    navy: "#000080",
     maroon: "#800000",
-    transparent: "#00000000"
+    olive: "#808000",
+    navy: "#000080",
+    purple: "#800080",
+    teal: "#008080",
+    orange: "#ffa500"
   };
-  function hue(p, q, t) {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
+  function clamp01(v) {
+    return v < 0 ? 0 : v > 1 ? 1 : v;
   }
+  function cssNumber(text, scale, source) {
+    const s = text.trim();
+    const v = s.endsWith("%") ? parseFloat(s) / 100 : parseFloat(s) / scale;
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?%?$/i.test(s) || !Number.isFinite(v)) throw new TypeError(`无法解析颜色 "${source}"：分量 "${s}" 不是数字`);
+    return clamp01(v);
+  }
+  function hue(text, source) {
+    const m = /^([+-]?(?:\d+\.?\d*|\.\d+))(deg|turn|rad)?$/i.exec(text.trim());
+    if (!m) throw new TypeError(`无法解析颜色 "${source}"：色相 "${text.trim()}" 不是角度`);
+    const v = parseFloat(m[1]);
+    const unit = (m[2] ?? "deg").toLowerCase();
+    const deg = unit === "turn" ? v * 360 : unit === "rad" ? v * 180 / Math.PI : v;
+    return (deg % 360 + 360) % 360;
+  }
+  function hslToRgb(h, s, l) {
+    const k = (n2) => (n2 + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n2) => l - a * Math.max(-1, Math.min(k(n2) - 3, 9 - k(n2), 1));
+    return [f(0), f(8), f(4)];
+  }
+  function parseColorString(color) {
+    const source = color;
+    const text = color.trim().toLowerCase();
+    if (text in NAMED) return parseColorString(NAMED[text]);
+    const hex = text.startsWith("#") ? text.slice(1) : /^[0-9a-f]{3,8}$/.test(text) ? text : null;
+    if (hex !== null) {
+      if (!/^[0-9a-f]+$/.test(hex) || ![3, 4, 6, 8].includes(hex.length)) throw new TypeError(`无法解析颜色 "${source}"：十六进制应为 3、4、6 或 8 位`);
+      const full = hex.length <= 4 ? hex.split("").map((c) => c + c).join("") : hex;
+      const n2 = parseInt(full.slice(0, 6), 16);
+      const a = full.length === 8 ? parseInt(full.slice(6, 8), 16) / 255 : 1;
+      return [(n2 >> 16 & 255) / 255, (n2 >> 8 & 255) / 255, (n2 & 255) / 255, a];
+    }
+    const fn = /^(rgba?|hsla?)\(\s*(.*?)\s*\)$/.exec(text);
+    if (fn) {
+      const [body, alphaText] = fn[2].includes("/") ? fn[2].split("/") : [fn[2], void 0];
+      const parts = body.includes(",") ? body.split(",") : body.trim().split(/\s+/);
+      let alpha = alphaText;
+      if (alpha === void 0 && parts.length === 4) alpha = parts.pop();
+      if (parts.length !== 3) throw new TypeError(`无法解析颜色 "${source}"：需要 3 个分量（另可带 alpha）`);
+      const a = alpha === void 0 ? 1 : cssNumber(alpha, 1, source);
+      if (fn[1].startsWith("rgb")) return [cssNumber(parts[0], 255, source), cssNumber(parts[1], 255, source), cssNumber(parts[2], 255, source), a];
+      const pct = (p) => {
+        if (!p.trim().endsWith("%") && !/^[+-]?[\d.]+$/.test(p.trim())) throw new TypeError(`无法解析颜色 "${source}"：饱和度与亮度应为百分比`);
+        return clamp01(parseFloat(p) / 100);
+      };
+      const [r, g, b] = hslToRgb(hue(parts[0], source), pct(parts[1]), pct(parts[2]));
+      return [r, g, b, a];
+    }
+    throw new TypeError(`无法解析颜色 "${source}"：支持 #rgb/#rgba/#rrggbb/#rrggbbaa、rgb()/rgba()、hsl()/hsla() 和常用颜色名`);
+  }
+
+  // runtime/src/canvas.ts
+  var TAU = Math.PI * 2;
   function parseCssColor(input) {
-    let s = String(input).trim().toLowerCase();
-    if (NAMED[s]) s = NAMED[s];
-    if (s[0] === "#") {
-      const h = s.slice(1);
-      if (!/^[0-9a-f]+$/.test(h)) return null;
-      const x = h.length === 3 || h.length === 4 ? h.split("").map((c) => c + c).join("") : h;
-      if (x.length !== 6 && x.length !== 8) return null;
-      const v = (i) => parseInt(x.slice(i, i + 2), 16) / 255;
-      return [v(0), v(2), v(4), x.length === 8 ? v(6) : 1];
+    try {
+      return parseColorString(String(input));
+    } catch {
+      return null;
     }
-    const m = /^(rgba?|hsla?)\(([^)]*)\)$/.exec(s);
-    if (!m) return null;
-    const parts = m[2].split(/[\s,/]+/).filter(Boolean);
-    if (parts.length < 3) return null;
-    const num = (t, scale) => t.endsWith("%") ? parseFloat(t) / 100 : parseFloat(t) / scale;
-    const a = parts.length > 3 ? Math.min(1, Math.max(0, num(parts[3], 1))) : 1;
-    if (m[1].startsWith("rgb")) {
-      const c = parts.slice(0, 3).map((t) => Math.min(1, Math.max(0, num(t, 255))));
-      if (c.some(Number.isNaN) || Number.isNaN(a)) return null;
-      return [c[0], c[1], c[2], a];
-    }
-    const hh = (parseFloat(parts[0]) / 360 % 1 + 1) % 1;
-    const ss = Math.min(1, Math.max(0, parseFloat(parts[1]) / 100));
-    const ll = Math.min(1, Math.max(0, parseFloat(parts[2]) / 100));
-    if ([hh, ss, ll, a].some(Number.isNaN)) return null;
-    if (ss === 0) return [ll, ll, ll, a];
-    const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss;
-    const p = 2 * ll - q;
-    return [hue(p, q, hh + 1 / 3), hue(p, q, hh), hue(p, q, hh - 1 / 3), a];
   }
   var CanvasGradient = class {
     constructor(kind, args) {
@@ -3759,13 +3786,16 @@ var pot = (() => {
   function srgbToLinear(v) {
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   }
+  var colorCache = /* @__PURE__ */ new Map();
   function parseColor(color) {
     if (typeof color === "string") {
-      const hex = color.replace("#", "");
-      const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
-      const n2 = parseInt(full.slice(0, 6), 16);
-      const a = full.length >= 8 ? parseInt(full.slice(6, 8), 16) / 255 : 1;
-      return [(n2 >> 16 & 255) / 255, (n2 >> 8 & 255) / 255, (n2 & 255) / 255, a];
+      let c = colorCache.get(color);
+      if (!c) {
+        c = parseColorString(color);
+        if (colorCache.size > 2048) colorCache.clear();
+        colorCache.set(color, c);
+      }
+      return [c[0], c[1], c[2], c[3]];
     }
     return [color[0], color[1], color[2], color[3] ?? 1];
   }

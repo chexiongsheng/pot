@@ -15,6 +15,7 @@
  * - 不支持：pattern、shadow、filter、strokeText
  */
 import type { Host } from './host'
+import { parseColorString } from './color'
 
 export interface ImageDataLike {
   width: number
@@ -45,52 +46,13 @@ type Poly = number[]
 
 const TAU = Math.PI * 2
 
-const NAMED: Record<string, string> = {
-  black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000', lime: '#00ff00', blue: '#0000ff',
-  yellow: '#ffff00', orange: '#ffa500', gray: '#808080', grey: '#808080', silver: '#c0c0c0', cyan: '#00ffff',
-  magenta: '#ff00ff', purple: '#800080', navy: '#000080', maroon: '#800000', transparent: '#00000000',
-}
-
-function hue(p: number, q: number, t: number) {
-  if (t < 0) t += 1
-  if (t > 1) t -= 1
-  if (t < 1 / 6) return p + (q - p) * 6 * t
-  if (t < 1 / 2) return q
-  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6
-  return p
-}
-
-/** 解析 CSS 颜色（#hex、rgb()/rgba()、hsl()/hsla()、常用颜色名），返回非预乘 0 到 1；无法解析返回 null */
+/** 解析 CSS 颜色（规则同 scene 的 Color 字符串），返回非预乘 0 到 1；无法解析返回 null（与浏览器一样忽略无效的 fillStyle） */
 export function parseCssColor(input: string): RGBA | null {
-  let s = String(input).trim().toLowerCase()
-  if (NAMED[s]) s = NAMED[s]
-  if (s[0] === '#') {
-    const h = s.slice(1)
-    if (!/^[0-9a-f]+$/.test(h)) return null
-    const x = h.length === 3 || h.length === 4 ? h.split('').map((c) => c + c).join('') : h
-    if (x.length !== 6 && x.length !== 8) return null
-    const v = (i: number) => parseInt(x.slice(i, i + 2), 16) / 255
-    return [v(0), v(2), v(4), x.length === 8 ? v(6) : 1]
+  try {
+    return parseColorString(String(input))
+  } catch {
+    return null
   }
-  const m = /^(rgba?|hsla?)\(([^)]*)\)$/.exec(s)
-  if (!m) return null
-  const parts = m[2].split(/[\s,/]+/).filter(Boolean)
-  if (parts.length < 3) return null
-  const num = (t: string, scale: number) => (t.endsWith('%') ? parseFloat(t) / 100 : parseFloat(t) / scale)
-  const a = parts.length > 3 ? Math.min(1, Math.max(0, num(parts[3], 1))) : 1
-  if (m[1].startsWith('rgb')) {
-    const c = parts.slice(0, 3).map((t) => Math.min(1, Math.max(0, num(t, 255))))
-    if (c.some(Number.isNaN) || Number.isNaN(a)) return null
-    return [c[0], c[1], c[2], a]
-  }
-  const hh = (((parseFloat(parts[0]) / 360) % 1) + 1) % 1
-  const ss = Math.min(1, Math.max(0, parseFloat(parts[1]) / 100))
-  const ll = Math.min(1, Math.max(0, parseFloat(parts[2]) / 100))
-  if ([hh, ss, ll, a].some(Number.isNaN)) return null
-  if (ss === 0) return [ll, ll, ll, a]
-  const q = ll < 0.5 ? ll * (1 + ss) : ll + ss - ll * ss
-  const p = 2 * ll - q
-  return [hue(p, q, hh + 1 / 3), hue(p, q, hh), hue(p, q, hh - 1 / 3), a]
 }
 
 /** 渐变（ctx.createLinearGradient / createRadialGradient 返回） */
