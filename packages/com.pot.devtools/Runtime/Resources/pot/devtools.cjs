@@ -1124,12 +1124,14 @@ var __potDevtools = (() => {
   __export(index_exports, {
     SourceLoader: () => SourceLoader,
     attach: () => attach,
+    bindingNames: () => bindingNames,
     changed: () => changed,
     checkLeaks: () => checkLeaks,
     createLoader: () => createLoader,
     handle: () => handle,
     normalizePath: () => normalizePath,
     reload: () => reload,
+    splitMultiExports: () => splitMultiExports,
     toPlain: () => toPlain,
     transpile: () => transpile,
     unitNameOf: () => unitNameOf
@@ -21766,6 +21768,256 @@ ${namesToRegister.map(
     return { tokenProcessor, scopes, nameManager, importProcessor, helperManager };
   }
 
+  // devtools/src/multi-export.ts
+  var ID = /[A-Za-z0-9_$\u00a0-\uffff]/;
+  var REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
+  var CONT_BEFORE = ",=+-*/%&|^<>?:.!~([";
+  var CONT_AFTER = ",.=+-*/%&|^?:)]([`";
+  function skipTemplate(code, i) {
+    let k = i + 1;
+    while (k < code.length) {
+      const c = code[k];
+      if (c === "\\") k += 2;
+      else if (c === "`") return k + 1;
+      else if (c === "$" && code[k + 1] === "{") k = skipExpr(code, k + 2);
+      else k++;
+    }
+    return k;
+  }
+  function skipExpr(code, i) {
+    let depth = 1;
+    let k = i;
+    let last = "(";
+    while (k < code.length) {
+      const j = skipLiteral(code, k, last);
+      if (j > k) {
+        if (!isComment(code, k)) last = "a";
+        k = j;
+        continue;
+      }
+      const c = code[k];
+      if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) return k + 1;
+      if (!/\s/.test(c)) last = c;
+      k++;
+    }
+    return k;
+  }
+  function isComment(code, i) {
+    return code[i] === "/" && (code[i + 1] === "/" || code[i + 1] === "*");
+  }
+  function skipLiteral(code, i, last) {
+    const c = code[i];
+    if (c === "/" && code[i + 1] === "/") {
+      const e = code.indexOf("\n", i);
+      return e < 0 ? code.length : e;
+    }
+    if (c === "/" && code[i + 1] === "*") {
+      const e = code.indexOf("*/", i + 2);
+      return e < 0 ? code.length : e + 2;
+    }
+    if (c === '"' || c === "'") {
+      let k = i + 1;
+      while (k < code.length && code[k] !== c && code[k] !== "\n") k += code[k] === "\\" ? 2 : 1;
+      return k + 1;
+    }
+    if (c === "`") return skipTemplate(code, i);
+    if (c === "/" && (last === "" || REGEX_AFTER.includes(last))) {
+      let k = i + 1;
+      let cls = false;
+      while (k < code.length && code[k] !== "\n") {
+        const d = code[k];
+        if (d === "\\") {
+          k += 2;
+          continue;
+        }
+        if (d === "[") cls = true;
+        else if (d === "]") cls = false;
+        else if (d === "/" && !cls) break;
+        k++;
+      }
+      k++;
+      while (k < code.length && ID.test(code[k])) k++;
+      return k;
+    }
+    return i;
+  }
+  function skipTrivia(code, i) {
+    for (; ; ) {
+      while (i < code.length && /\s/.test(code[i])) i++;
+      if (!isComment(code, i)) return i;
+      i = skipLiteral(code, i, "");
+    }
+  }
+  function readWord2(code, i) {
+    let k = i;
+    while (k < code.length && ID.test(code[k])) k++;
+    return code.slice(i, k);
+  }
+  function splitTop(s, sep) {
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    let last = "";
+    for (let k = 0; k < s.length; ) {
+      const j = skipLiteral(s, k, last);
+      if (j > k) {
+        last = "a";
+        k = j;
+        continue;
+      }
+      const c = s[k];
+      if ("([{".includes(c)) depth++;
+      else if (")]}".includes(c)) depth--;
+      else if (c === sep && depth === 0) {
+        parts.push(s.slice(start, k));
+        start = k + 1;
+      }
+      if (!/\s/.test(c)) last = c;
+      k++;
+    }
+    parts.push(s.slice(start));
+    return parts;
+  }
+  function stripDefault(s) {
+    const parts = splitTop(s, "=");
+    return parts[0].trim();
+  }
+  function bindingNames(pattern) {
+    const s = stripDefault(pattern);
+    if (!s) return [];
+    if (s.startsWith("...")) return bindingNames(s.slice(3));
+    if (s.startsWith("{") && s.endsWith("}")) {
+      const out = [];
+      for (const el of splitTop(s.slice(1, -1), ",")) {
+        const e = el.trim();
+        if (!e) continue;
+        if (e.startsWith("...")) {
+          out.push(...bindingNames(e.slice(3)));
+          continue;
+        }
+        const kv = splitTop(e, ":");
+        out.push(...bindingNames(kv.length > 1 ? kv.slice(1).join(":") : kv[0]));
+      }
+      return out;
+    }
+    if (s.startsWith("[") && s.endsWith("]")) {
+      const out = [];
+      for (const el of splitTop(s.slice(1, -1), ",")) out.push(...bindingNames(el));
+      return out;
+    }
+    const name = readWord2(s, 0);
+    return name ? [name] : [];
+  }
+  function parseDeclaration(code, p) {
+    const lefts = [];
+    let depth = 0;
+    let angle = 0;
+    let inType = false;
+    let seenEq = false;
+    let declStart = p;
+    let leftEnd = -1;
+    let last = "";
+    let k = p;
+    const closeDeclarator = (at) => {
+      lefts.push(code.slice(declStart, leftEnd >= 0 ? leftEnd : at));
+      declStart = at + 1;
+      leftEnd = -1;
+      seenEq = false;
+      inType = false;
+      angle = 0;
+    };
+    while (k < code.length) {
+      const j = skipLiteral(code, k, last);
+      if (j > k) {
+        if (!isComment(code, k)) last = "a";
+        k = j;
+        continue;
+      }
+      const c = code[k];
+      if ("([{".includes(c)) depth++;
+      else if (")]}".includes(c)) {
+        if (depth === 0) break;
+        depth--;
+      } else if (depth === 0) {
+        if (c === ";") {
+          closeDeclarator(k);
+          return { end: k + 1, semicolon: true, names: lefts.flatMap(bindingNames), count: lefts.length };
+        }
+        if (c === ":" && !seenEq && !inType) {
+          inType = true;
+          if (leftEnd < 0) leftEnd = k;
+        } else if (inType && c === "<") angle++;
+        else if (inType && c === ">" && code[k - 1] !== "=") angle = Math.max(0, angle - 1);
+        else if (c === "=" && !seenEq && code[k + 1] !== "=" && code[k + 1] !== ">" && !"=!<>".includes(code[k - 1])) {
+          seenEq = true;
+          inType = false;
+          angle = 0;
+          if (leftEnd < 0) leftEnd = k;
+        } else if (c === "," && angle === 0) {
+          closeDeclarator(k);
+          last = ",";
+          k++;
+          continue;
+        } else if (c === "\n") {
+          const next2 = skipTrivia(code, k);
+          const cont = inType || CONT_BEFORE.includes(last) || next2 < code.length && CONT_AFTER.includes(code[next2]);
+          if (!cont) break;
+        }
+      }
+      if (!/\s/.test(c)) last = c;
+      k++;
+    }
+    closeDeclarator(k);
+    return { end: k, semicolon: false, names: lefts.flatMap(bindingNames), count: lefts.length };
+  }
+  function splitMultiExports(code) {
+    if (!/export\s+(const|let|var)\b[\s\S]*?,/.test(code)) return code;
+    let out = "";
+    let copied = 0;
+    let depth = 0;
+    let last = "";
+    let k = 0;
+    while (k < code.length) {
+      const j = skipLiteral(code, k, last);
+      if (j > k) {
+        if (!isComment(code, k)) last = "a";
+        k = j;
+        continue;
+      }
+      const c = code[k];
+      if (ID.test(c) && (k === 0 || !ID.test(code[k - 1]))) {
+        const word = readWord2(code, k);
+        if (word === "export" && depth === 0) {
+          const kwAt = skipTrivia(code, k + word.length);
+          const kw = readWord2(code, kwAt);
+          if (kw === "const" || kw === "let" || kw === "var") {
+            const after = skipTrivia(code, kwAt + kw.length);
+            if (readWord2(code, after) !== "enum") {
+              const decl = parseDeclaration(code, kwAt + kw.length);
+              if (decl.count > 1 && decl.names.length) {
+                const clause = `${decl.semicolon ? "" : ";"}export { ${decl.names.join(", ")} };`;
+                out += code.slice(copied, k) + " ".repeat(word.length) + code.slice(k + word.length, decl.end) + clause;
+                copied = decl.end;
+                k = decl.end;
+                last = ";";
+                continue;
+              }
+            }
+          }
+        }
+        last = word[word.length - 1];
+        k += word.length;
+        continue;
+      }
+      if ("([{".includes(c)) depth++;
+      else if (")]}".includes(c)) depth = Math.max(0, depth - 1);
+      if (!/\s/.test(c)) last = c;
+      k++;
+    }
+    return copied === 0 ? code : out + code.slice(copied);
+  }
+
   // devtools/src/loader.ts
   var import_core3 = __toESM(require_pot());
   var UNIT_DIR = "src/plugins/";
@@ -21801,7 +22053,7 @@ ${namesToRegister.map(
     }
     const transforms = path.endsWith(".ts") || path.endsWith(".tsx") ? ["typescript", "imports"] : ["imports"];
     try {
-      return transform(code, { transforms, disableESTransforms: true, filePath: path, production: true }).code;
+      return transform(splitMultiExports(code), { transforms, disableESTransforms: true, filePath: path, production: true }).code;
     } catch (error) {
       const loc = error?.loc ? `:${error.loc.line}:${error.loc.column + 1}` : "";
       throw new SyntaxError(`${path}${loc} ${error?.message ?? error}`);

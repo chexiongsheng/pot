@@ -9,6 +9,7 @@
  * - 依赖图：invalidate(paths) 返回受影响的单元，供热重载使用。
  */
 import { transform } from 'sucrase'
+import { splitMultiExports } from './multi-export'
 import { compileModule, hash } from '@pot/core'
 import type { Host, UnitLoader, UnitSource } from '@pot/core'
 
@@ -59,7 +60,7 @@ export function transpile(code: string, path: string) {
   }
   const transforms: any[] = path.endsWith('.ts') || path.endsWith('.tsx') ? ['typescript', 'imports'] : ['imports']
   try {
-    return transform(code, { transforms, disableESTransforms: true, filePath: path, production: true }).code
+    return transform(splitMultiExports(code), { transforms, disableESTransforms: true, filePath: path, production: true }).code
   } catch (error: any) {
     const loc = error?.loc ? `:${error.loc.line}:${error.loc.column + 1}` : ''
     throw new SyntaxError(`${path}${loc} ${error?.message ?? error}`)

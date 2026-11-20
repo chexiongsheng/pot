@@ -172,7 +172,7 @@
 
 ## 热重载报 `ReferenceError: X is not defined`（导出常量）
 
-现象：`export const A = 1, B = 2, C = 4` 只有第一个能用，其余在运行时未定义，tsc 不报错。做法：一条 `export const` 只声明一个变量。把原本模块内的 `const a = …, b = …` 改成导出时最容易踩（jimao 的 hound.ts 颜色常量就是这样报 `vm is not defined`）。
+现象：`export const A = 1, B = 2, C = 4` 只有第一个能用，其余在运行时未定义，tsc 不报错。原因是开发期转译器 sucrase 的缺陷，devtools 现已在转译前自动改写，正常写即可。若仍遇到（例如用的是旧 Runner），先确认 Runner 带的是新版 `devtools.cjs`，或临时拆成每条 `export const` 只声明一个变量。
 
 ## 自建粒子：把实例数据塞进普通顶点属性
 
