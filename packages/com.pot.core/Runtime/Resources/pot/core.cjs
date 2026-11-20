@@ -2158,7 +2158,7 @@ var pot = (() => {
           throw new Error(`state key "${key}" 已被单元 "${existing.owner}" 定义，单元 "${owner}" 不能重复定义；请改名或通过 state.get 读取`);
         }
         existing.defined = true;
-        if (existing.version === version) return existing.value;
+        if (existing.version === version) return this._validate(key, existing, options);
         let next;
         if (options.migrate) {
           try {
@@ -2172,14 +2172,42 @@ var pot = (() => {
         } else {
           this.ctx.logger("state").warn('state "%s" 版本 v%d → v%d 且未提供 migrate，已重新初始化', key, existing.version, version);
         }
-        if (next === void 0) next = this._init(key, options);
-        existing.value = next;
         existing.version = version;
-        return next;
+        if (next === void 0) {
+          existing.value = this._init(key, options);
+          return existing.value;
+        }
+        existing.value = next;
+        return this._validate(key, existing, options);
       }
       const value = this._init(key, options);
       this._entries.set(key, { value, owner, version, defined: true });
       return value;
+    }
+    /** 校验沿用下来的数据；不通过时用 init 重新初始化（尽量原地写回） */
+    _validate(key, entry, options) {
+      if (!options.validate) return entry.value;
+      let reason;
+      try {
+        const result = options.validate(entry.value);
+        if (result === false) reason = "校验未通过";
+        else if (typeof result === "string") reason = result;
+      } catch (error) {
+        reason = `校验出错：${error?.message ?? error}`;
+      }
+      if (reason === void 0) {
+        try {
+          assertSerializable(entry.value, key);
+          return entry.value;
+        } catch (error) {
+          reason = `校验修正后不可序列化：${error?.message ?? error}`;
+        }
+      }
+      this.ctx.logger("state").warn('state "%s" 沿用的数据无效（%s），已重新初始化', key, reason);
+      const fresh = this._init(key, options);
+      if (sameShape(entry.value, fresh)) assignInPlace(entry.value, fresh);
+      else entry.value = fresh;
+      return entry.value;
     }
     _init(key, options) {
       const value = options.init();

@@ -145,7 +145,7 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 
 | API | 说明 |
 |---|---|
-| `define(key, { version, init, migrate })` | 返回活对象。key 已存在且版本相同时返回同一个对象，这就是热重载保留状态的原因 |
+| `define(key, { version, init, migrate, validate })` | 返回活对象。key 已存在且版本相同时返回同一个对象，这就是热重载保留状态的原因。`validate(value)` 校验沿用下来的数据（读档、冷重启、热重载、migrate 结果，刚 init 的不校验）：返回 `true`/不返回为通过，可就地修正字段；返回 `false` 或原因字符串、或抛错，则用 `init` 重新初始化（原地写回）并告警 |
 | `get(key)` | 读取任意单元的 state（只读使用，写入归属单元自己） |
 | `set(key, value)` | 整体替换，会断开旧引用，少用 |
 | `keys()` / `reset(key?)` / `snapshot()` / `restore()` | 开发工具和存档用 |

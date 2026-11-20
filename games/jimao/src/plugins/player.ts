@@ -22,12 +22,10 @@ export function apply(ctx: Context) {
     coyote: 0, jumpBuffer: 0, lastHurt: -99, hurt: 0, bob: 0, speed: 0, sprinting: false,
     lastSafe: [...points.start.pos], shake: 0,
   })
-  const p = ctx.state.define<PlayerState>(PLAYER, { version: 1, init: fresh })
-  // 旧存档里可能留着穿墙出界的位置，读档时直接放回出生点
-  if (!world.contains(p.pos[0], p.pos[2])) {
-    p.pos = [...points.start.pos]; p.vel = [0, 0, 0]; p.yaw = points.start.yaw
-    p.lastSafe = [...points.start.pos]
-  }
+  // 旧存档里可能留着穿墙出界或已损坏的位置，读档时直接放回出生点
+  const valid = (s: PlayerState) => Array.isArray(s.pos) && s.pos.length === 3 && s.pos.every(Number.isFinite)
+    && world.contains(s.pos[0], s.pos[2]) || '位置不在关卡内'
+  const p = ctx.state.define<PlayerState>(PLAYER, { version: 1, init: fresh, validate: valid })
   const cam = ctx.scene.camera
   let lastStep = 0
 

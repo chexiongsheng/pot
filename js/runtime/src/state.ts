@@ -4,6 +4,7 @@
  * - 顶层值必须是对象或数组（这样才能返回同一个引用）
  * - 每个 key 归属定义它的单元；不同单元定义同一个 key 报错
  * - 版本变化时调 migrate，失败则 init 并告警
+ * - validate 校验沿用下来的数据（读档、冷重启、热重载），不通过则 init 并告警
  * - 冷重启时宿主保存 exportJSON()，新环境用 importJSON() 恢复
  */
 import { Context, Service } from 'cordis'
@@ -22,6 +23,14 @@ export interface StateOptions<T> {
   init: () => T
   /** 旧版本数据迁移；返回新数据。抛错则回退到 init */
   migrate?: (old: any, oldVersion: number) => T
+  /**
+   * 校验沿用下来的数据（读档恢复、冷重启、热重载、migrate 的结果；刚 init 的不校验）。
+   * - 返回 true / undefined：通过；可以在函数里就地修正个别字段后返回 true
+   * - 返回 false 或字符串（原因）：丢弃，用 init 重新初始化并告警
+   * - 抛错：同 false
+   * 重新初始化时尽量原地写回，其他单元已持有的引用仍然有效。
+   */
+  validate?: (value: T) => boolean | string | void
 }
 
 interface Entry {
@@ -58,7 +67,7 @@ export class StateService extends Service {
         throw new Error(`state key "${key}" 已被单元 "${existing.owner}" 定义，单元 "${owner}" 不能重复定义；请改名或通过 state.get 读取`)
       }
       existing.defined = true
-      if (existing.version === version) return existing.value
+      if (existing.version === version) return this._validate(key, existing, options)
       let next: any
       if (options.migrate) {
         try {
@@ -72,14 +81,43 @@ export class StateService extends Service {
       } else {
         this.ctx.logger('state').warn('state "%s" 版本 v%d → v%d 且未提供 migrate，已重新初始化', key, existing.version, version)
       }
-      if (next === undefined) next = this._init(key, options)
-      existing.value = next
       existing.version = version
-      return next
+      if (next === undefined) {
+        existing.value = this._init(key, options)
+        return existing.value
+      }
+      existing.value = next
+      return this._validate(key, existing, options)
     }
     const value = this._init(key, options)
     this._entries.set(key, { value, owner, version, defined: true })
     return value
+  }
+
+  /** 校验沿用下来的数据；不通过时用 init 重新初始化（尽量原地写回） */
+  private _validate<T>(key: string, entry: Entry, options: StateOptions<T>): T {
+    if (!options.validate) return entry.value
+    let reason: string | undefined
+    try {
+      const result = options.validate(entry.value)
+      if (result === false) reason = '校验未通过'
+      else if (typeof result === 'string') reason = result
+    } catch (error: any) {
+      reason = `校验出错：${error?.message ?? error}`
+    }
+    if (reason === undefined) {
+      try {
+        assertSerializable(entry.value, key)
+        return entry.value
+      } catch (error: any) {
+        reason = `校验修正后不可序列化：${error?.message ?? error}`
+      }
+    }
+    this.ctx.logger('state').warn('state "%s" 沿用的数据无效（%s），已重新初始化', key, reason)
+    const fresh = this._init(key, options)
+    if (sameShape(entry.value, fresh)) assignInPlace(entry.value, fresh)
+    else entry.value = fresh
+    return entry.value
   }
 
   private _init<T>(key: string, options: StateOptions<T>) {

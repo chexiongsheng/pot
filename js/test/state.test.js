@@ -95,3 +95,48 @@ test('cache：getOrCreate 命中、LRU 淘汰', async () => {
   assert.ok(cache.stats().bytes <= 300)
   assert.equal(cache.stats().count, 1)
 })
+
+test('validate：读档恢复的坏数据重新初始化并告警，原地写回；通过或就地修正的保留', async () => {
+  const { runtime, host } = await game({ a: `` })
+  const state = runtime.state
+  state.importJSON(JSON.stringify({
+    bad: { owner: '(host)', version: 1, value: { x: 999, hp: 5 } },
+    why: { owner: '(host)', version: 1, value: { x: -1 } },
+    boom: { owner: '(host)', version: 1, value: { x: 1 } },
+    ok: { owner: '(host)', version: 1, value: { x: 3, hp: 5 } },
+    fix: { owner: '(host)', version: 1, value: { x: 3, hp: -20 } },
+    mig: { owner: '(host)', version: 1, value: { pos: 999 } },
+  }))
+  const held = state.get('bad')
+  const inside = (v) => Math.abs(v.x) < 50
+  const bad = state.define('bad', { init: () => ({ x: 0, hp: 100 }), validate: inside })
+  assert.deepEqual(bad, { x: 0, hp: 100 })
+  assert.equal(bad, held, '原地写回，已持有的引用仍有效')
+  const why = state.define('why', { init: () => ({ x: 0 }), validate: (v) => (v.x >= 0 ? true : 'x 为负') })
+  assert.deepEqual(why, { x: 0 })
+  const boom = state.define('boom', { init: () => ({ x: 0 }), validate: (v) => v.missing.deep })
+  assert.deepEqual(boom, { x: 0 })
+  const ok = state.define('ok', { init: () => ({ x: 0, hp: 100 }), validate: inside })
+  assert.deepEqual(ok, { x: 3, hp: 5 })
+  const fix = state.define('fix', { init: () => ({ x: 0, hp: 100 }), validate: (v) => { v.hp = Math.max(0, v.hp); return true } })
+  assert.deepEqual(fix, { x: 3, hp: 0 })
+  const mig = state.define('mig', { version: 2, init: () => ({ x: 0 }), migrate: (o) => ({ x: o.pos }), validate: inside })
+  assert.deepEqual(mig, { x: 0 }, 'migrate 的结果也要校验')
+  const warns = host.logs.filter((l) => l.level === 'warn' && /沿用的数据无效/.test(l.text)).map((l) => l.text)
+  assert.equal(warns.length, 4)
+  assert.ok(warns.some((t) => /x 为负/.test(t)))
+  assert.ok(warns.some((t) => /校验出错/.test(t)))
+})
+
+test('validate：刚 init 的数据不校验；热重载时同样校验沿用的数据', async () => {
+  let calls = 0
+  const { runtime } = await game({ a: `` })
+  const state = runtime.state
+  const v = state.define('h', { init: () => ({ x: 0 }), validate: () => { calls++; return true } })
+  assert.equal(calls, 0)
+  v.x = 1e9
+  const again = state.define('h', { init: () => ({ x: 0 }), validate: (s) => { calls++; return s.x < 100 } })
+  assert.equal(calls, 1)
+  assert.equal(again, v)
+  assert.equal(again.x, 0)
+})
