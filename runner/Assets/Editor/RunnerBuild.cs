@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -43,6 +44,15 @@ public static class RunnerBuild
             PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "dev.pot.runner");
             // Runner 需要明文 ws:// 连接局域网 Dev Server
             PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
+            // IL2CPP（Win64 / Android）：JS 通过反射访问 CS.Pot.*，复制 link.xml 防裁剪
+            Pot.Build.PotBuild.CopyLinkXml();
+            AssetDatabase.Refresh();
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Standalone, ManagedStrippingLevel.Minimal);
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Minimal);
+            PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            AssetDatabase.SaveAssets();
 
             var output = Arg("potOut") ?? defaultOut;
             var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions

@@ -195,8 +195,7 @@ namespace Pot.Build
                 File.Copy(icon, IconPath, true);
             }
 
-            var link = Path.Combine(PackageRoot("com.pot.core"), "Runtime/link.xml");
-            if (File.Exists(link)) File.Copy(link, Path.Combine(GameRoot, "link.xml"), true);
+            CopyLinkXml();
             // 内置字体：Resources/pot-font.(ttf|otf)，运行时 PotFonts.Bundled 加载
             foreach (var ext in new[] { ".ttf", ".otf" })
             {
@@ -279,7 +278,9 @@ namespace Pot.Build
             PlayerSettings.defaultScreenHeight = config.height > 0 ? config.height : 720;
             PlayerSettings.resizableWindow = config.resizable;
             PlayerSettings.usePlayerLog = true;
-            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.Mono2x);
+            // Win64：IL2CPP（与 Android 一致；JS 走反射访问 CS.Pot.*，link.xml 防裁剪）
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Standalone, ManagedStrippingLevel.Minimal);
             // pot_gfx 的桌面后端是 D3D11
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64, new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 });
@@ -398,11 +399,20 @@ namespace Pot.Build
             }
         }
 
-        static string PackageRoot(string name)
+        public static string PackageRoot(string name)
         {
             var info = UnityEditor.PackageManager.PackageInfo.FindForAssetPath("Packages/" + name);
             if (info == null) throw new Exception("找不到包 " + name);
             return info.resolvedPath;
+        }
+
+        /// <summary>Unity 不读取包内的 link.xml：把 com.pot.core/Runtime/link.xml 复制到工程 Assets 下（IL2CPP 防裁剪）</summary>
+        public static void CopyLinkXml(string dir = GameRoot)
+        {
+            var link = Path.Combine(PackageRoot("com.pot.core"), "Runtime/link.xml");
+            if (!File.Exists(link)) return;
+            Directory.CreateDirectory(dir);
+            File.Copy(link, Path.Combine(dir, "link.xml"), true);
         }
 
         /// <summary>pot CLI：-potCli= / 环境变量 POT_CLI / 本包所在仓库的 js/devserver/cli.js</summary>

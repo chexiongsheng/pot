@@ -23,7 +23,7 @@ node js/devserver/cli.js release games/jimao --platform win64,android,webgl `
 
 默认产物在 `release/<游戏名>/<平台>/`：
 
-- `win64`：`jimao.exe` 及配套数据目录。
+- `win64`：`jimao.exe` 及配套数据目录（IL2CPP，含 `GameAssembly.dll`）。
 - `android`：`jimao-<版本>.apk`（ARM64、IL2CPP，最低 Android 7.0）。
 - `webgl`：可部署到静态 HTTP 服务器的目录，入口为 `index.html`。
 
@@ -77,7 +77,7 @@ Unity 的完整日志在 `<游戏目录>/.pot/release/unity-<平台>.log`，脚�
 
 ## 平台说明
 
-- Win64 使用 Mono；Android 使用 IL2CPP + ARM64；WebGL 使用 Puerts 的浏览器 JS 后端。
+- Win64 与 Android 都使用 IL2CPP（Android 为 ARM64），Runner 同样；WebGL 使用 Puerts 的浏览器 JS 后端。Win64 IL2CPP 需要 Unity Windows Build Support (IL2CPP) 模块和 Visual Studio C++ 工具链。
 - Android 需要 Unity Android Build Support、SDK/NDK/JDK；WebGL 需要 WebGL Build Support。未安装对应模块时 Unity 会在日志中报错。
 - WebGL 产物必须通过 HTTP/HTTPS 打开，不能双击 `index.html` 使用 `file://`。默认 gzip 压缩并启用解压回退，普通静态服务器即可托管；配置 `Content-Encoding: gzip` 可减少下载前的浏览器解压工作。
 - 原生 `pot_gfx` 运行时着色器后端支持 D3D11（win64）与 GLES3（WebGL2）。WebGL 插件以源码形式放在 `Plugins/WebGL/pot_gfx`，由 Unity 的 emscripten 一起编译；改了 `native/pot_gfx/src` 后要执行 `node native/pot_gfx/sync-webgl.js` 再出包。其他平台 `ctx.gfx.supported` 为 `false`，游戏需自备回退。
