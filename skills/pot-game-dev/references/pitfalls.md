@@ -147,8 +147,9 @@
 - 做法：调试时用 `eval` 改 state（如 phase、yaw、health）再截图。
 
 ### 帧率突然只有约 4fps，CPU 和显卡都不忙
-- 原因：同时开了两个 Runner 连同一个 Dev Server。Dev Server 只保留一个连接，两边互相顶替、反复重连，`logs` 里不断出现"新的 Runner 连接，替换旧连接"。和游戏内容、敌人数量无关。
-- 做法：启动前先 `Stop-Process -Name PotRunner`，确认 `Get-Process PotRunner` 只有一个。排查性能前先看这一条，再去怀疑代码。
+- 原因：同时开了两个 Runner 连同一个 Dev Server。旧版 Dev Server 只保留一个连接，两边互相顶替、反复重连，`logs` 里不断出现"新的 Runner 连接，替换旧连接"。和游戏内容、敌人数量无关。
+- 现状：新版 Dev Server 会拒绝第二个 Runner（日志“已拒绝第二个 Runner 连接”，`pot status` 的 `rejected`），后开的 Runner 状态栏显示“Dev 被另一个 Runner 占用”，不再互相顶替；要让新 Runner 接手，在它的 F1 面板点“连接”。
+- 做法：仍建议启动前先 `Stop-Process -Name PotRunner`，确认 `Get-Process PotRunner` 只有一个，否则 CLI 命令发给的是先开的那个。
 
 ### PowerShell 改含中文的文件后乱码
 - 原因：Windows PowerShell 5 的 `Set-Content`/`Get-Content` 默认不是 UTF-8。

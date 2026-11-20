@@ -185,6 +185,56 @@ test('Dev Server：/files 静态文件与递归清单，拒绝越界访问', asy
   assert.equal((await get(server.port, '/files/hello/.pot/junk.txt')).status, 403)
 })
 
+/** 只连接、记录关闭码的最小 Runner（ws 客户端会自动回 pong） */
+function bareRunner(port, device, query = '') {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/runner${query}`)
+    const r = { ws, closed: null }
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ type: 'hello', platform: 'node', unity: 'fake', device, game: null }))
+      resolve(r)
+    })
+    ws.on('close', (code, reason) => { r.closed = { code, reason: reason.toString() } })
+    ws.on('error', reject)
+  })
+}
+
+test('Dev Server：已有 Runner 在线时拒绝第二个（4409），旧的不受影响；takeover 与失效连接可接管', async (t) => {
+  const { BUSY_CODE } = require('../devserver/server')
+  const server = new DevServer({ root: os.tmpdir(), port: 0, host: '127.0.0.1', quiet: true })
+  await server.start()
+  t.after(() => server.close())
+
+  const a = await bareRunner(server.port, 'A')
+  await until(() => server.status().runner.device === 'A')
+  const b = await bareRunner(server.port, 'B')
+  await until(() => b.closed)
+  assert.equal(b.closed.code, BUSY_CODE)
+  assert.equal(b.closed.reason, 'runner-busy')
+  assert.equal(a.closed, null, '旧连接不受影响')
+  assert.equal(server.status().runner.device, 'A')
+  assert.equal(server.status().rejected.count, 1)
+  assert.equal(server.status().rejected.device, 'node B')
+  assert.ok(server.logs.some((l) => /已拒绝第二个 Runner 连接/.test(l.text)))
+
+  // 手动接管：旧的收到 4409 runner-replaced
+  const c = await bareRunner(server.port, 'C', '?takeover=1')
+  await until(() => a.closed && server.status().runner.device === 'C')
+  assert.equal(a.closed.code, BUSY_CODE)
+  assert.equal(a.closed.reason, 'runner-replaced')
+  assert.equal(c.closed, null)
+
+  // 旧连接失效（不回 pong）：新连接接管
+  c.ws.pause()
+  c.ws._receiver.removeAllListeners('ping')
+  c.ws.pong = () => {}
+  const d = await bareRunner(server.port, 'D')
+  await until(() => server.status().runner.device === 'D', 5000)
+  assert.equal(d.closed, null)
+  d.ws.close()
+  await until(() => !server.status().runner.connected)
+})
+
 test('发布构建：bundle.cjs 在没有源码加载器（发布包）时运行，共享模块只有一份', async () => {
   const { buildRelease } = require('../devserver/builder')
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-release-'))

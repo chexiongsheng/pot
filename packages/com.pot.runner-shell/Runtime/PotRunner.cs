@@ -234,7 +234,7 @@ namespace Pot.Runner
             {
                 case PotDevClient.ConnectionState.Connected: return "Dev 已连接";
                 case PotDevClient.ConnectionState.Connecting: return "Dev 连接中";
-                default: return "Dev 未连接";
+                default: return client.Busy ? "Dev 被另一个 Runner 占用（F1 可接管）" : "Dev 未连接";
             }
         }
 
@@ -403,7 +403,7 @@ namespace Pot.Runner
                 address = NormalizeServer(address);
                 PlayerPrefs.SetString(ServerKey, address);
                 PlayerPrefs.Save();
-                client.Connect(address);
+                client.Connect(address, true);
             }
             if (GUILayout.Button("断开", GUILayout.Height(28))) client.Disconnect();
             GUILayout.EndHorizontal();

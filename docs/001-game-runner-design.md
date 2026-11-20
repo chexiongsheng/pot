@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 27 |
+| ✅ 已完成 | 28 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 28 |
+| ❌ 未完成 | 27 |
 
 #### 渲染与着色器（gfx）
 
@@ -227,7 +227,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ❌ | 固定步长 `fixedUpdate` | 穿墙 | 后台约 4 fps 时 dt≈0.25 s 会跨过空气墙；jimao 用子步兜底 |
 | ❌ | `state.define` 的 `validate` | 穿墙 | 存档会原样恢复越界、卡墙等坏状态 |
 | ✅ | 跨热重载缓存网格 `scene.mesh(name, fn, { key })` | 远景 | key 相同时直接复用 Runner 里的网格，生成函数也不调用；`key: true` 由运行时按内容算哈希。同时着色器程序在源码没变时不再重新编译。world 单元热重载实测从约 6.3 秒降到 0.17 到 0.26 秒。更正原诊断：那 6 秒里网格重建只占约 1 秒，约 4.5 秒花在材质与着色器上 |
-| ❌ | Dev Server 不拒绝第二个 Runner | 性能排查 | 两个 Runner 连同一端口会互相顶替连接并反复重连，画面掉到约 4 fps，日志里只有"新的 Runner 连接，替换旧连接"；建议拒绝后来者，或被顶替的一方停止重连并在画面上提示 |
+| ✅ | Dev Server 不拒绝第二个 Runner | 性能排查 | 原来两个 Runner 连同一端口会互相顶替并反复重连，画面掉到约 4 fps。现在新连接到来时先 ping 旧 Runner：1.5 秒内有 pong 就以关闭码 4409 拒绝新连接，旧的不受影响，日志写明被拒设备，`pot status` 的 `rejected` 有计数；旧连接已失效则改用新连接。Runner 收到 4409 后停止自动重连，状态栏显示“Dev 被另一个 Runner 占用（F1 可接管）”；在 F1 面板手动点“连接”会带 `?takeover=1` 强制接管，被接管的一方同样停止重连 |
 | ✅ | 加载器支持 `export const a = 1, b = 2` | 水花、飞鸥 | sucrase 的 imports 转换会把它转成 `const a = 1; exports.a = a, b = 2`，后面的变量变成对未声明变量赋值。devtools 转译前先把顶层多变量 export 改写为“声明 + `export { a, b }`”（只把 `export` 换成等长空格并在同一行追加子句，行列号不变），支持 let/var、类型标注与泛型、跨行、解构、模板与正则字面量（[multi-export.ts](js/devtools/src/multi-export.ts)）；发布构建走 esbuild 本来就正确 |
 | ✅ | 启动加载进度与让帧 `ctx.loading` | 启动卡顿 | 启动是一长串同步 JS，窗口不刷新像卡死。单元 apply 可写成 async，在阶段间 `await ctx.loading.step('文字', 进度)`：回报进度给 Runner 外壳画加载界面（标题、进度条、阶段文字、已用秒数），本帧连续执行超过 50 ms 时让出一帧。没报进度的游戏也会显示"加载 单元名"和不确定进度条。jimao 启动期间窗口始终有响应 |
 | ✅ | 着色器编译缓存 | 启动卡顿 | 原生插件按（后端、编译器版本、vs、fs）哈希把反射信息与 DXBC 存到 `persistentDataPath/cache/shaders`，命中时跳过 glslang、SPIRV-Cross 和 D3DCompile。jimao 冷启动 9.8 秒（40 个程序全部编译），第二次打开 3.8 秒（命中 40/40）。启动日志打印耗时与命中数 |

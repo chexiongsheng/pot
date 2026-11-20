@@ -47,6 +47,43 @@ function isInside(root, target) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
+/** 拒绝第二个 Runner / 被接管时的 WebSocket 关闭码；Runner 收到后停止自动重连 */
+const BUSY_CODE = 4409
+/** 判断旧 Runner 是否存活的 ping 超时 */
+const LIVENESS_MS = 1500
+
+/** ping 一次，timeout 内收到 pong 视为存活 */
+function isAlive(socket, timeout) {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (v) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      socket.off('pong', onPong)
+      socket.off('close', onClose)
+      resolve(v)
+    }
+    const onPong = () => finish(true)
+    const onClose = () => finish(false)
+    const timer = setTimeout(() => finish(false), timeout)
+    socket.on('pong', onPong)
+    socket.on('close', onClose)
+    try { socket.ping() } catch { finish(false) }
+  })
+}
+
+/** 从尚未处理的消息里取出 hello 的设备描述 */
+function deviceOf(queued) {
+  for (const raw of queued) {
+    try {
+      const msg = JSON.parse(raw.toString())
+      if (msg.type === 'hello') return `${msg.platform ?? ''} ${msg.device ?? ''}`.trim()
+    } catch {}
+  }
+  return ''
+}
+
 class DevServer {
   constructor(options = {}) {
     this.root = path.resolve(options.root ?? process.cwd())
@@ -124,6 +161,62 @@ class DevServer {
     return res
   }
 
+  /**
+   * 新的 Runner 连接。同一时刻只服务一个 Runner：
+   * - 已有 Runner 且还活着（ping 在 LIVENESS_MS 内有 pong）→ 拒绝新连接（关闭码 4409），旧连接不受影响。
+   *   新 Runner 收到 4409 后停止自动重连并在面板上提示，避免两个 Runner 互相顶替、反复重连（画面掉到约 4 fps）。
+   * - 旧连接已失效（进程被杀、网络断开但 TCP 未关）→ 断开旧的，接受新的。
+   * - 连接地址带 ?takeover=1（面板里手动点“连接”）→ 直接接管，旧 Runner 收到 4409 后同样停止重连。
+   */
+  async _onConnection(socket, req) {
+    const queued = []
+    const early = (raw) => queued.push(raw)
+    socket.on('message', early)
+    const takeover = /[?&]takeover=1\b/.test(req?.url ?? '')
+    const old = this.runner
+    if (old && old !== socket && old.readyState === 1 && !takeover) {
+      const alive = await isAlive(old, LIVENESS_MS)
+      if (socket.readyState !== 1) return
+      if (alive && this.runner === old) {
+        this.rejected = { count: (this.rejected?.count ?? 0) + 1, ts: Date.now(), device: deviceOf(queued) }
+        const who = this.runnerInfo ? `${this.runnerInfo.platform ?? ''} ${this.runnerInfo.device ?? ''}`.trim() : '已连接的 Runner'
+        if (this.rejected.count === 1 || Date.now() - (this._lastRejectLog ?? 0) > 10000) {
+          this._lastRejectLog = Date.now()
+          this.log('warn', `已拒绝第二个 Runner 连接（${this.rejected.device || '未知设备'}）：${who} 仍在线。同一时刻只服务一个 Runner；要换用新 Runner，先关掉旧的，或在新 Runner 的 F1 面板里点“连接”接管`)
+        }
+        socket.close(BUSY_CODE, 'runner-busy')
+        return
+      }
+    }
+    if (this.runner && this.runner !== socket) {
+      const prev = this.runner
+      this.log('warn', takeover ? '新的 Runner 请求接管，断开旧连接' : '旧的 Runner 连接已无响应，改用新连接')
+      this._dropRunner(prev, '被新的 Runner 接管')
+      try { takeover ? prev.close(BUSY_CODE, 'runner-replaced') : prev.terminate() } catch {}
+    }
+    this.runner = socket
+    socket.off('message', early)
+    socket.on('message', (raw) => this._onRunnerMessage(raw))
+    for (const raw of queued) this._onRunnerMessage(raw)
+    socket.on('close', () => {
+      if (this.runner !== socket) return
+      this._dropRunner(socket, 'Runner 连接已断开')
+      this.log('warn', 'Runner 已断开')
+    })
+  }
+
+  _dropRunner(socket, reason) {
+    if (this.runner !== socket) return
+    this.runner = null
+    this.runnerInfo = null
+    this.game = null
+    for (const [id, p] of this.pending) {
+      clearTimeout(p.timer)
+      p.resolve({ ok: false, error: reason })
+      this.pending.delete(id)
+    }
+  }
+
   _onRunnerMessage(raw) {
     let msg
     try {
@@ -166,6 +259,7 @@ class DevServer {
       root: this.root,
       port: this.port,
       runner: this.runner ? { connected: true, ...info } : { connected: false },
+      rejected: this.rejected ?? null,
       game: this.game,
       lastReload: this.lastReload,
     }
@@ -242,26 +336,7 @@ class DevServer {
   async start() {
     this.http = http.createServer((req, res) => this._http(req, res))
     this.wss = new WebSocketServer({ server: this.http, path: '/runner', maxPayload: 64 * 1024 * 1024 })
-    this.wss.on('connection', (socket) => {
-      if (this.runner && this.runner !== socket) {
-        this.log('warn', '新的 Runner 连接，替换旧连接')
-        try { this.runner.close() } catch {}
-      }
-      this.runner = socket
-      socket.on('message', (raw) => this._onRunnerMessage(raw))
-      socket.on('close', () => {
-        if (this.runner !== socket) return
-        this.runner = null
-        this.runnerInfo = null
-        this.game = null
-        for (const [id, p] of this.pending) {
-          clearTimeout(p.timer)
-          p.resolve({ ok: false, error: 'Runner 连接已断开' })
-          this.pending.delete(id)
-        }
-        this.log('warn', 'Runner 已断开')
-      })
-    })
+    this.wss.on('connection', (socket, req) => this._onConnection(socket, req))
     await new Promise((resolve, reject) => {
       this.http.once('error', reject)
       this.http.listen(this.port, this.host, resolve)
@@ -278,4 +353,4 @@ class DevServer {
   }
 }
 
-module.exports = { DevServer, JS_SIDE, RUNNER_SIDE, listFiles }
+module.exports = { DevServer, JS_SIDE, RUNNER_SIDE, BUSY_CODE, listFiles }

@@ -71,6 +71,13 @@ namespace Pot.Dev
         public int Commands { get; private set; }
         public bool AutoReconnect = true;
 
+        /// <summary>Dev Server 拒绝（已有 Runner）或被接管时的关闭码，与 js/devserver/server.js 的 BUSY_CODE 一致</summary>
+        public const int BusyCode = 4409;
+
+        /// <summary>因已有 Runner 被拒或被接管而停止了自动重连</summary>
+        public bool Busy { get { return busy; } }
+
+        volatile bool busy;
         volatile ConnectionState state = ConnectionState.Disconnected;
         ClientWebSocket socket;
         CancellationTokenSource cts;
@@ -130,13 +137,21 @@ namespace Pot.Dev
 
         // ---------------- 连接 ----------------
 
-        public void Connect(string url)
+        /// <summary>
+        /// 连接 Dev Server。takeover=true（面板里手动点“连接”）时，即使已有别的 Runner 在线也接管；
+        /// 后台自动连接用 false，Dev Server 已被占用时会被拒绝并停止重连。
+        /// </summary>
+        public void Connect(string url, bool takeover = false)
         {
             Disconnect();
             Url = url;
             AutoReconnect = true;
+            busy = false;
+            takeoverNext = takeover;
             StartConnect();
         }
+
+        bool takeoverNext;
 
         public void Disconnect()
         {
@@ -167,6 +182,11 @@ namespace Pot.Dev
                 + ",\"device\":" + Json.Quote(SystemInfo.deviceModel)
                 + ",\"game\":" + CurrentGame() + "}";
             var url = Url;
+            if (takeoverNext)
+            {
+                url += (url.Contains("?") ? "&" : "?") + "takeover=1";
+                takeoverNext = false;
+            }
             Task.Run(() => RunAsync(ws, url, hello, token));
         }
 
@@ -220,7 +240,15 @@ namespace Pot.Dev
                 var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), token).ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    LastError = "Dev Server 关闭了连接";
+                    if (ws.CloseStatus.HasValue && (int)ws.CloseStatus.Value == BusyCode)
+                    {
+                        // 同一 Dev Server 已有别的 Runner：停止自动重连，否则两边会互相顶替、反复重连
+                        busy = true;
+                        LastError = ws.CloseStatusDescription == "runner-replaced"
+                            ? "已被另一个 Runner 接管，停止自动重连（点“连接”可接管回来）"
+                            : "Dev Server 已被另一个 Runner 占用，停止自动重连（点“连接”可强制接管）";
+                    }
+                    else LastError = "Dev Server 关闭了连接";
                     break;
                 }
                 stream.Write(buffer, 0, result.Count);
@@ -284,6 +312,12 @@ namespace Pot.Dev
 
         void Update()
         {
+            if (busy && AutoReconnect)
+            {
+                AutoReconnect = false;
+                reconnectAt = -1;
+                Debug.LogWarning("[pot] " + LastError);
+            }
             if (state == ConnectionState.Disconnected && AutoReconnect && !string.IsNullOrEmpty(Url))
             {
                 if (reconnectAt < 0) reconnectAt = Time.realtimeSinceStartup + 2f;
