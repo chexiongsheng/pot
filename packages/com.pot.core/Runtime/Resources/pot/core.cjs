@@ -1932,6 +1932,19 @@ var pot = (() => {
       /** 宿主帧数，任何情况下都走 */
       __publicField(this, "hostFrame", 0);
       __publicField(this, "scale", 1);
+      /** fixed-update 的步长（秒，游戏时间） */
+      __publicField(this, "fixedStep", 1 / 60);
+      /** 每帧最多触发的 fixed-update 次数（防止卡顿后越补越慢） */
+      __publicField(this, "maxFixedSteps", 8);
+      /** 已完成的固定步累计的游戏时间（秒） */
+      __publicField(this, "fixedTime", 0);
+      /** 固定步总数 */
+      __publicField(this, "fixedFrame", 0);
+      /** 因超过 maxFixedSteps 被丢弃的游戏时间（秒，累计） */
+      __publicField(this, "fixedDropped", 0);
+      /** 未满一步的剩余时间占步长的比例（0 到 1），渲染插值用：pos = lerp(prev, curr, fixedAlpha) */
+      __publicField(this, "fixedAlpha", 0);
+      __publicField(this, "_fixedAcc", 0);
       __publicField(this, "_freeze", 0);
       __publicField(this, "_paused", false);
       __publicField(this, "_steps", 0);
@@ -1985,7 +1998,27 @@ var pot = (() => {
       this.time += scaled;
       this.frame++;
       this._runDue();
+      this._runFixed(scaled);
       this.ctx.emit("update", scaled, this.time);
+    }
+    _runFixed(dt) {
+      const step = this.fixedStep > 0 ? this.fixedStep : 1 / 60;
+      const max = Math.max(1, this.maxFixedSteps | 0);
+      this._fixedAcc += dt;
+      let n2 = 0;
+      while (this._fixedAcc >= step * (1 - 1e-6) && n2 < max) {
+        this._fixedAcc = Math.max(0, this._fixedAcc - step);
+        this.fixedTime += step;
+        this.fixedFrame++;
+        n2++;
+        this.ctx.emit("fixed-update", step, this.fixedTime);
+      }
+      if (this._fixedAcc >= step) {
+        const drop = this._fixedAcc - this._fixedAcc % step;
+        this.fixedDropped += drop;
+        this._fixedAcc -= drop;
+      }
+      this.fixedAlpha = Math.min(1, this._fixedAcc / step);
     }
     /** 宿主帧计数等待（冻结/暂停时也会推进） */
     waitFrames(frames = 1) {

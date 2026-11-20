@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 31 |
+| ✅ 已完成 | 32 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 24 |
+| ❌ 未完成 | 23 |
 
 #### 渲染与着色器（gfx）
 
@@ -224,7 +224,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 |---|---|---|---|
 | ✅ | `physics.addBox` 接受 `{x,y,z}` | 穿墙 | 原来 557 个碰撞盒有 452 个是 NaN |
 | ❌ | 动态碰撞与 MeshCollider | 远景 | 中继、闸杆等会动的网格挡不住射线，大块静态网格只能用盒子近似 |
-| ❌ | 固定步长 `fixedUpdate` | 穿墙 | 后台约 4 fps 时 dt≈0.25 s 会跨过空气墙；jimao 用子步兜底 |
+| ✅ | 固定步长 `fixedUpdate` | 穿墙 | `ctx.on('fixed-update', (step, fixedTime) => …)`：按 `clock.fixedStep`（默认 1/60 秒）切分游戏时间，在 `update` 前触发；低帧率一帧补多步（`maxFixedSteps` 默认 8，超出计入 `fixedDropped`），`fixedAlpha` 供渲染插值，暂停、冻结、`scale` 与 `update` 一致。jimao 的玩家移动仍用子步（移到固定步需要相机插值，留待实机验证后再改） |
 | ✅ | `state.define` 的 `validate` | 穿墙 | `define(key, { init, validate })`：对沿用下来的数据（读档、冷重启、热重载、migrate 结果）调用，返回 `false`/原因字符串或抛错时用 `init` 重新初始化并告警，尽量原地写回保持引用；可在函数里就地修正字段。jimao 的玩家位置校验已改用它（越界或非有限数回出生点） |
 | ✅ | 跨热重载缓存网格 `scene.mesh(name, fn, { key })` | 远景 | key 相同时直接复用 Runner 里的网格，生成函数也不调用；`key: true` 由运行时按内容算哈希。同时着色器程序在源码没变时不再重新编译。world 单元热重载实测从约 6.3 秒降到 0.17 到 0.26 秒。更正原诊断：那 6 秒里网格重建只占约 1 秒，约 4.5 秒花在材质与着色器上 |
 | ✅ | Dev Server 不拒绝第二个 Runner | 性能排查 | 原来两个 Runner 连同一端口会互相顶替并反复重连，画面掉到约 4 fps。现在新连接到来时先 ping 旧 Runner：1.5 秒内有 pong 就以关闭码 4409 拒绝新连接，旧的不受影响，日志写明被拒设备，`pot status` 的 `rejected` 有计数；旧连接已失效则改用新连接。Runner 收到 4409 后停止自动重连，状态栏显示“Dev 被另一个 Runner 占用（F1 可接管）”；在 F1 面板手动点“连接”会带 `?takeover=1` 强制接管，被接管的一方同样停止重连 |

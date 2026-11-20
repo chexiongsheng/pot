@@ -6,6 +6,10 @@
 
 每个游戏帧触发。`dt` 为缩放后的秒数（单帧最大 0.1 秒），`time` 为游戏时间。暂停、热重载冻结时不触发。
 
+## ctx.on('fixed-update', (step, fixedTime) => {})
+
+固定步长，在同一帧的 `update` 之前触发。`step` 恒为 `ctx.clock.fixedStep`（默认 1/60 秒，可改）；帧率低时一帧补多步（最多 `clock.maxFixedSteps`，默认 8，超出的时间丢弃并累加到 `clock.fixedDropped`），帧率高时有的帧不触发。移动、碰撞、物理积分这类“步长大了会穿墙”的逻辑放这里，渲染跟随放 `update`，需要平滑时用 `clock.fixedAlpha`（未满一步的比例）在上一步与当前步之间插值。暂停、冻结、`scale` 与 `update` 一致。
+
 ## ctx.scene
 
 | API | 说明 |
