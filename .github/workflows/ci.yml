@@ -42,7 +42,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PUERTS_VERSION: 3.0.3
+  PUERTS_VERSION: 3.0.4
   UNITY_VERSION: 6000.6.8f1
   VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
   GAMES: ${{ github.event_name == 'workflow_dispatch' && inputs.games || '' }}
