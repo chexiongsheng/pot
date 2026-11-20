@@ -1,0 +1,186 @@
+name: build
+
+# 构建 Runner 与 games/ 下所有游戏（目前只有 Win64，IL2CPP）。
+# - push 到 master：只构建，产物作为 artifact 上传
+# - 手动运行：version 留空只构建；填了版本号（如 0.2.0）则额外发布 GitHub Release v<version>
+# 需要的 secrets：UNITY_USERNAME、UNITY_PASSWORD（Personal 授权）。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - games/**
+      - packages/**
+      - player/**
+      - runner/**
+      - native/**
+      - js/**
+      - tools/install-puerts.ps1
+      - .github/workflows/build.yml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 0.2.0）。留空只构建；填写则发布 Release v<版本号>'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+env:
+  PUERTS_VERSION: 3.0.3
+  UNITY_VERSION: 6000.6.8f1
+  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+
+jobs:
+  win64:
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version
+        if: ${{ env.VERSION != '' }}
+        shell: pwsh
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') { throw "版本号格式不对：$env:VERSION（应为 1.2.3 或 1.2.3-beta.1）" }
+          gh release view "v$env:VERSION" 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release v$env:VERSION 已存在" }
+          exit 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # third_party/puerts 不入库，从 Puerts 官方 Release 下载后用仓库脚本安装（含 JsEnv.cs 补丁）
+      - name: Install Puerts
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:RUNNER_TEMP 'puerts'
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          foreach ($n in 'Core', 'V8', 'Webgl') {
+            $file = Join-Path $env:RUNNER_TEMP "PuerTS_$n.tar.gz"
+            curl.exe -fsSL --retry 3 -o $file "https://github.com/Tencent/puerts/releases/download/Unity_v$env:PUERTS_VERSION/PuerTS_${n}_$env:PUERTS_VERSION.tar.gz"
+            if ($LASTEXITCODE -ne 0) { throw "download PuerTS_$n failed" }
+            tar -xzf $file -C $src
+            if ($LASTEXITCODE -ne 0) { throw "extract PuerTS_$n failed" }
+          }
+          & ./tools/install-puerts.ps1 -Source $src
+
+      # 发布包内置中文字体子集（OFL，可再分发）
+      - name: Download Noto Sans SC
+        shell: pwsh
+        run: |
+          $font = Join-Path $env:RUNNER_TEMP 'NotoSansSC-Regular.otf'
+          curl.exe -fsSL --retry 3 -o $font https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
+          if ($LASTEXITCODE -ne 0) { throw 'download font failed' }
+          "POT_FONT=$font" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build JS runtime
+        shell: pwsh
+        working-directory: js
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/build.js
+
+      # pot_gfx.dll 不入库：按 native 源码 hash 缓存，未命中时由 pot CLI 出包前自动 CMake 编译
+      - name: Cache pot_gfx.dll
+        uses: actions/cache@v4
+        with:
+          path: packages/com.pot.core/Plugins/Windows/x86_64/pot_gfx.dll
+          key: pot-gfx-win64-${{ hashFiles('native/pot_gfx/src/**', 'native/pot_gfx/CMakeLists.txt') }}
+
+      - name: Setup Unity
+        uses: RageAgainstThePixel/unity-setup@v3
+        with:
+          unity-version: ${{ env.UNITY_VERSION }}
+          build-targets: StandaloneWindows64
+          modules: windows-il2cpp
+          cache-installation: true
+          version-file: None
+
+      - uses: RageAgainstThePixel/activate-unity-license@v3
+        with:
+          license: 'Personal'
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+
+      # Unity Editor 的 OpenRL.dll 依赖 VC++ 2010 运行时，windows-2022 镜像里没有
+      - name: Install VC++ 2010 Redistributable
+        shell: pwsh
+        run: |
+          choco install vcredist2010 -y --no-progress
+          if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
+
+      - name: Build pot_gfx (if missing)
+        shell: pwsh
+        run: node js/devserver/cli.js native --platform win64 --unity $env:UNITY_EDITOR_PATH
+
+      - name: Build Runner
+        shell: pwsh
+        run: |
+          node js/devserver/cli.js runner --platform win64 --unity $env:UNITY_EDITOR_PATH --out out/runner
+          $code = $LASTEXITCODE
+          $log = 'release/runner/unity-win64.log'
+          if ($code -ne 0 -and (Test-Path $log)) { Write-Host '----- unity-win64.log: tail -----'; Get-Content $log -Tail 80 }
+          exit $code
+
+      - name: Build games
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($dir in Get-ChildItem games -Directory) {
+            if (-not (Test-Path (Join-Path $dir.FullName 'manifest.json'))) { continue }
+            Write-Host "===== $($dir.Name) ====="
+            node js/devserver/cli.js release "games/$($dir.Name)" --platform win64 --unity $env:UNITY_EDITOR_PATH --out "out/games/$($dir.Name)"
+            if ($LASTEXITCODE -ne 0) {
+              $failed += $dir.Name
+              $log = "games/$($dir.Name)/.pot/release/unity-win64.log"
+              if (Test-Path $log) { Write-Host "----- ${log} tail -----"; Get-Content $log -Tail 80 }
+            }
+          }
+          if ($failed.Count) { throw "构建失败：$($failed -join ', ')" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $suffix = if ($env:VERSION) { "-$env:VERSION" } else { '' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path out/runner/* -DestinationPath "dist/PotRunner$suffix-win64.zip"
+          foreach ($dir in Get-ChildItem out/games -Directory) {
+            Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist/$($dir.Name)$suffix-win64.zip"
+          }
+          Get-ChildItem dist | ForEach-Object { Write-Host ("{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: pot-win64
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload Unity logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-logs-win64
+          path: |
+            release/runner/unity-*.log
+            games/*/.pot/release/unity-*.log
+          if-no-files-found: warn
+
+      - name: Publish release
+        if: ${{ env.VERSION != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = (Get-ChildItem dist -Filter *.zip).FullName
+          gh release create "v$env:VERSION" @files --title "pot v$env:VERSION" --target $env:GITHUB_SHA --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
