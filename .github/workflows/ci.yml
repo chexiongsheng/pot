@@ -1,9 +1,11 @@
-name: build
+name: build & publish
 
-# 构建 Runner 与 games/ 下所有游戏（目前只有 Win64，IL2CPP）。
-# - push 到 master：只构建，产物作为 artifact 上传
-# - 手动运行：version 留空只构建；填了版本号（如 0.2.0）则额外发布 GitHub Release v<version>
-# 需要的 secrets：UNITY_USERNAME、UNITY_PASSWORD（Personal 授权）。
+# 一个 job、一台机器、只激活一次 Unity 授权（Personal 授权同时只能在一台机器上激活），依次完成：
+#   1. Win64（IL2CPP）：构建 Runner 与 games/ 下各游戏，打 zip 作为 artifact
+#   2. WebGL：构建各游戏的 WebGL，汇总成静态站点部署到 GitHub Pages
+#   3. 手动运行且填了版本号：发布 GitHub Release v<版本号>（附 Runner 与各游戏的 Win64 zip）
+# 需要的 secrets：UNITY_USERNAME、UNITY_PASSWORD。
+# 仓库 Settings → Pages → Build and deployment → Source 需选 "GitHub Actions"。
 
 on:
   push:
@@ -15,50 +17,61 @@ on:
       - runner/**
       - native/**
       - js/**
+      - tools/build-pages.js
       - tools/install-puerts.ps1
-      - .github/workflows/build.yml
+      - .github/workflows/ci.yml
   workflow_dispatch:
     inputs:
       version:
         description: '版本号（如 0.2.0）。留空只构建；填写则发布 Release v<版本号>'
         required: false
         default: ''
+      games:
+        description: '只构建这些游戏（games 下的目录名，逗号分隔；留空为全部）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
+# 全局串行：同一时间只有一个运行占用 Unity 授权。不取消进行中的运行（可能正在发 Release），新的运行排队
 concurrency:
-  group: build-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: unity-license
+  cancel-in-progress: false
 
 env:
   PUERTS_VERSION: 3.0.3
   UNITY_VERSION: 6000.6.8f1
   VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+  GAMES: ${{ github.event_name == 'workflow_dispatch' && inputs.games || '' }}
 
 jobs:
-  win64:
+  build:
     runs-on: windows-2022
-    timeout-minutes: 240
+    timeout-minutes: 340
+    outputs:
+      pages: ${{ steps.webgl.outcome }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Check version
         if: ${{ env.VERSION != '' }}
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:VERSION -notmatch '^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$') { throw "版本号格式不对：$env:VERSION（应为 1.2.3 或 1.2.3-beta.1）" }
           gh release view "v$env:VERSION" 2>$null
           if ($LASTEXITCODE -eq 0) { throw "Release v$env:VERSION 已存在" }
           exit 0
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      # third_party/puerts 不入库，从 Puerts 官方 Release 下载后用仓库脚本安装（含 JsEnv.cs 补丁）
+      # third_party/puerts 不入库，从 Puerts 官方 Release 下载 core / v8 / webgl 后用仓库脚本安装（含 JsEnv.cs 补丁）
       - name: Install Puerts
         shell: pwsh
         run: |
@@ -73,7 +86,7 @@ jobs:
           }
           & ./tools/install-puerts.ps1 -Source $src
 
-      # 发布包内置中文字体子集（OFL，可再分发）
+      # 发布包内置中文字体子集（OFL，可再分发；WebGL 拿不到系统字体）
       - name: Download Noto Sans SC
         shell: pwsh
         run: |
@@ -89,7 +102,7 @@ jobs:
           npm ci --no-audit --no-fund
           node scripts/build.js
 
-      # pot_gfx.dll 不入库：按 native 源码 hash 缓存，未命中时由 pot CLI 出包前自动 CMake 编译
+      # pot_gfx.dll 不入库：按 native 源码 hash 缓存，未命中时由 pot CLI 用 CMake 编译
       - name: Cache pot_gfx.dll
         uses: actions/cache@v4
         with:
@@ -100,11 +113,12 @@ jobs:
         uses: RageAgainstThePixel/unity-setup@v3
         with:
           unity-version: ${{ env.UNITY_VERSION }}
-          build-targets: StandaloneWindows64
-          modules: windows-il2cpp
+          build-targets: StandaloneWindows64, WebGL
+          modules: windows-il2cpp, webgl
           cache-installation: true
           version-file: None
 
+      # 只激活这一次；job 结束时 action 的 post 步骤会归还授权
       - uses: RageAgainstThePixel/activate-unity-license@v3
         with:
           license: 'Personal'
@@ -120,9 +134,12 @@ jobs:
 
       - name: Build pot_gfx (if missing)
         shell: pwsh
-        run: node js/devserver/cli.js native --platform win64 --unity $env:UNITY_EDITOR_PATH
+        run: node js/devserver/cli.js native --platform win64,webgl --unity $env:UNITY_EDITOR_PATH
 
-      - name: Build Runner
+      # ---------- Win64 ----------
+      # 不加 -nographics（内置着色器导入需要图形设备），release.js 已按此调用
+      - name: Build Runner (Win64)
+        id: runner
         shell: pwsh
         run: |
           node js/devserver/cli.js runner --platform win64 --unity $env:UNITY_EDITOR_PATH --out out/runner
@@ -131,12 +148,16 @@ jobs:
           if ($code -ne 0 -and (Test-Path $log)) { Write-Host '----- unity-win64.log: tail -----'; Get-Content $log -Tail 80 }
           exit $code
 
-      - name: Build games
+      - name: Build games (Win64)
+        id: games
+        if: ${{ !cancelled() && steps.runner.outcome != 'skipped' }}
         shell: pwsh
         run: |
+          $wanted = if ($env:GAMES) { $env:GAMES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } } else { $null }
           $failed = @()
           foreach ($dir in Get-ChildItem games -Directory) {
             if (-not (Test-Path (Join-Path $dir.FullName 'manifest.json'))) { continue }
+            if ($wanted -and $wanted -notcontains $dir.Name) { continue }
             Write-Host "===== $($dir.Name) ====="
             node js/devserver/cli.js release "games/$($dir.Name)" --platform win64 --unity $env:UNITY_EDITOR_PATH --out "out/games/$($dir.Name)"
             if ($LASTEXITCODE -ne 0) {
@@ -145,20 +166,48 @@ jobs:
               if (Test-Path $log) { Write-Host "----- ${log} tail -----"; Get-Content $log -Tail 80 }
             }
           }
-          if ($failed.Count) { throw "构建失败：$($failed -join ', ')" }
+          if ($failed.Count) { throw "Win64 构建失败：$($failed -join ', ')" }
 
-      - name: Package
+      # ---------- WebGL → Pages ----------
+      # Win64 失败不影响 WebGL 构建与 Pages 部署
+      - name: Build WebGL demos
+        id: webgl
+        if: ${{ !cancelled() && steps.runner.outcome != 'skipped' }}
+        shell: pwsh
+        run: |
+          $argv = @('tools/build-pages.js', '--out', 'site', '--unity', $env:UNITY_EDITOR_PATH)
+          if ($env:GAMES) { $argv += @('--games', $env:GAMES) }
+          node @argv
+          $code = $LASTEXITCODE
+          $log = 'games/hello/.pot/release/unity-webgl.log'
+          if ($code -ne 0 -and (Test-Path $log)) { Write-Host '----- unity-webgl.log: tail -----'; Get-Content $log -Tail 80 }
+          exit $code
+
+      - name: Upload Pages artifact
+        if: ${{ !cancelled() && steps.webgl.outcome == 'success' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      # ---------- 打包 / 上传 / 发布 ----------
+      - name: Package Win64
+        id: package
+        if: ${{ !cancelled() && steps.runner.outcome == 'success' }}
         shell: pwsh
         run: |
           $suffix = if ($env:VERSION) { "-$env:VERSION" } else { '' }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path out/runner/* -DestinationPath "dist/PotRunner$suffix-win64.zip"
-          foreach ($dir in Get-ChildItem out/games -Directory) {
-            Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist/$($dir.Name)$suffix-win64.zip"
+          if (Test-Path out/games) {
+            foreach ($dir in Get-ChildItem out/games -Directory) {
+              if (-not (Get-ChildItem $dir.FullName -Filter *.exe)) { continue }
+              Compress-Archive -Path "$($dir.FullName)/*" -DestinationPath "dist/$($dir.Name)$suffix-win64.zip"
+            }
           }
           Get-ChildItem dist | ForEach-Object { Write-Host ("{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
 
-      - name: Upload builds
+      - name: Upload Win64 builds
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: pot-win64
@@ -169,14 +218,15 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: unity-logs-win64
+          name: unity-logs
           path: |
             release/runner/unity-*.log
             games/*/.pot/release/unity-*.log
           if-no-files-found: warn
 
+      # 只有前面全部成功（含 Win64 与 WebGL）才发 Release
       - name: Publish release
-        if: ${{ env.VERSION != '' }}
+        if: ${{ success() && env.VERSION != '' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -184,3 +234,14 @@ jobs:
           $files = (Get-ChildItem dist -Filter *.zip).FullName
           gh release create "v$env:VERSION" @files --title "pot v$env:VERSION" --target $env:GITHUB_SHA --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+
+  deploy:
+    needs: build
+    if: ${{ !cancelled() && needs.build.outputs.pages == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
