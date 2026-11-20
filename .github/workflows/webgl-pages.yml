@@ -85,6 +85,7 @@ jobs:
           build-targets: WebGL
           modules: webgl
           cache-installation: true
+          version-file: None
 
       - uses: RageAgainstThePixel/activate-unity-license@v3
         with:
