@@ -56,37 +56,14 @@ export function apply(ctx: Context) {
   const input = ctx.input
   let hover = ''
 
-  // ---- 字距：ui.text 没有 letterSpacing，按字绘制并缓存单字宽度 ----
-  const widths = new Map<string, number>()
-  function charW(ch: string, size: number, bold: boolean) {
-    const k = `${size}|${bold ? 1 : 0}|${ch}`
-    let w = widths.get(k)
-    if (w === undefined) {
-      w = ch === ' ' ? size * 0.3 : ui.measure(ch, size, bold).width
-      if (widths.size > 4096) widths.clear()
-      widths.set(k, w)
-    }
-    return w
-  }
+  // ---- 字距（CSS letter-spacing，单位 em）：ui.text / ui.measure 的 spacing ----
   function spacedWidth(s: string, o: Spaced) {
-    const size = Math.round(o.size), sp = (o.spacing ?? 0) * size
-    let w = 0
-    for (const ch of s) w += charW(ch, size, !!o.bold) + sp
-    return w
+    return ui.measure(s, Math.round(o.size), !!o.bold, o.spacing ?? 0).width
   }
   /** 带字距的文字，(x, y) 为左端，返回宽度（含末尾字距，同 CSS） */
   function spaced(s: string, x: number, y: number, o: Spaced) {
-    const size = Math.round(o.size), sp = (o.spacing ?? 0) * size, bold = !!o.bold
-    if (!sp) {
-      ui.text(s, x, y, { size, bold, color: o.color, alpha: o.alpha, shadow: o.shadow, valign: o.valign })
-      return ui.measure(s, size, bold).width
-    }
-    let cx = x
-    for (const ch of s) {
-      if (ch !== ' ') ui.text(ch, cx, y, { size, bold, color: o.color, alpha: o.alpha, shadow: o.shadow, valign: o.valign })
-      cx += charW(ch, size, bold) + sp
-    }
-    return cx - x
+    ui.text(s, x, y, { size: Math.round(o.size), bold: !!o.bold, color: o.color, alpha: o.alpha, shadow: o.shadow, valign: o.valign, spacing: o.spacing })
+    return spacedWidth(s, o)
   }
 
   // ---- 原版 m-veil / m-bars ----

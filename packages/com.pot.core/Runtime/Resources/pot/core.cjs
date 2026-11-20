@@ -4313,6 +4313,8 @@ var pot = (() => {
       __publicField(this, "_list", []);
       __publicField(this, "_colors", /* @__PURE__ */ new Map());
       __publicField(this, "_submittedEmpty", true);
+      __publicField(this, "_charWidths", /* @__PURE__ */ new Map());
+      __publicField(this, "_lineHeights", /* @__PURE__ */ new Map());
     }
     /** 屏幕宽（像素） */
     get width() {
@@ -4354,18 +4356,107 @@ var pot = (() => {
       this._list.push(["a", n(cx), n(cy), n(radius), this.hex(color, alpha), n(thickness), n(start), n(sweep)].join(FS));
     }
     text(text, x, y, options = {}) {
+      const size = Math.round(options.size ?? 16);
+      if (options.spacing) return this._spacedText(String(text), x, y, size, options);
       const h = options.align === "right" ? 2 : options.align === "center" ? 1 : 0;
       const v = options.valign === "bottom" ? 2 : options.valign === "middle" ? 1 : 0;
       const flags = (options.bold ? 1 : 0) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0);
       const w = options.w ?? 0;
       const hh = options.h ?? 0;
       const s = String(text).split(RS).join("").split(FS).join("");
-      this._list.push(["t", n(x), n(y), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(Math.round(options.size ?? 16)), String(v * 3 + h), String(flags), s].join(FS));
+      this._list.push(["t", n(x), n(y), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(size), String(v * 3 + h), String(flags), s].join(FS));
     }
-    /** 文字尺寸（像素） */
-    measure(text, size = 16, bold = false) {
+    /** 文字尺寸（像素）。spacing（em）不为 0 时按逐字宽度加字距计算，宽度含末尾字距（同 CSS） */
+    measure(text, size = 16, bold = false, spacing = 0) {
+      if (spacing) {
+        const lines = String(text).split("\n");
+        const width2 = Math.max(...lines.map((l) => this._spacedWidth(l, Math.round(size), bold, spacing * Math.round(size))));
+        return { width: width2, height: this._lineHeight(Math.round(size), bold) * lines.length };
+      }
       const [width, height] = this._host.engine.uiMeasure(text, size, bold);
       return { width, height };
+    }
+    _charWidth(ch, size, bold) {
+      const key = `${size}|${bold ? 1 : 0}|${ch}`;
+      let w = this._charWidths.get(key);
+      if (w === void 0) {
+        w = ch === " " ? size * 0.3 : this._host.engine.uiMeasure(ch, size, bold)[0];
+        if (this._charWidths.size > 4096) this._charWidths.clear();
+        this._charWidths.set(key, w);
+      }
+      return w;
+    }
+    _lineHeight(size, bold) {
+      const key = `${size}|${bold ? 1 : 0}`;
+      let h = this._lineHeights.get(key);
+      if (h === void 0) {
+        h = this._host.engine.uiMeasure("国Mg", size, bold)[1];
+        this._lineHeights.set(key, h);
+      }
+      return h;
+    }
+    _spacedWidth(line, size, bold, sp) {
+      let w = 0;
+      for (const ch of line) w += this._charWidth(ch, size, bold) + sp;
+      return w;
+    }
+    /** 带字距：按字切行（wrap 时在 w 内按字断行，英文优先在空格处断）、按 align/valign 定位后逐字提交 */
+    _spacedText(text, x, y, size, o) {
+      const bold = !!o.bold;
+      const sp = (o.spacing ?? 0) * size;
+      const maxW = o.w ?? 0;
+      const lines = [];
+      for (const para of text.split("\n")) {
+        if (!o.wrap || !maxW) {
+          lines.push(para);
+          continue;
+        }
+        let line = "", lw = 0, lastSpace = -1;
+        for (const ch of para) {
+          const cw = this._charWidth(ch, size, bold) + sp;
+          if (lw + cw > maxW && line) {
+            if (ch !== " " && lastSpace > 0) {
+              lines.push(line.slice(0, lastSpace));
+              line = line.slice(lastSpace + 1);
+              lw = this._spacedWidth(line, size, bold, sp);
+            } else {
+              lines.push(line);
+              line = "";
+              lw = 0;
+            }
+            lastSpace = -1;
+            if (ch === " ") continue;
+          }
+          if (ch === " ") lastSpace = line.length;
+          line += ch;
+          lw += cw;
+        }
+        lines.push(line);
+      }
+      const lh = this._lineHeight(size, bold);
+      const total = lh * lines.length;
+      const boxH = o.h ?? 0;
+      let top = y;
+      if (o.valign === "middle") top = boxH ? y + (boxH - total) / 2 : y - total / 2;
+      else if (o.valign === "bottom") top = boxH ? y + boxH - total : y - total;
+      const color = this.hex(o.color ?? "#ffffff", o.alpha);
+      const flags = (bold ? 1 : 0) | (o.shadow ? 2 : 0);
+      const single = lines.length === 1 && !boxH;
+      const vcode = single ? o.valign === "bottom" ? 2 : o.valign === "middle" ? 1 : 0 : 1;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lw = this._spacedWidth(line, size, bold, sp);
+        let cx = x;
+        if (o.align === "center") cx = maxW ? x + (maxW - lw) / 2 : x - lw / 2;
+        else if (o.align === "right") cx = maxW ? x + maxW - lw : x - lw;
+        if (o.align === "center") cx += sp / 2;
+        else if (o.align === "right") cx += sp;
+        const cy = single ? y : top + lh * i + lh / 2;
+        for (const ch of line) {
+          if (ch !== " ") this._list.push(["t", n(cx), n(cy), "0", "0", color, String(size), String(vcode * 3), String(flags), ch.split(RS).join("").split(FS).join("")].join(FS));
+          cx += this._charWidth(ch, size, bold) + sp;
+        }
+      }
     }
     /** 鼠标是否在矩形内 */
     hit(x, y, w, h) {

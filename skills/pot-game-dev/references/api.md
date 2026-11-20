@@ -171,7 +171,7 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 
 ## ctx.ui
 
-即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap})`、`measure(str,size,bold)`、`hit(x,y,w,h)`、`width`/`height`。颜色只认十六进制（`#rrggbbaa` 带透明度）。没有渐变、字距、字重档位：渐变用窄条带矩形近似，字距按字绘制并缓存单字宽度（见 jimao `menu.ts` 的 `spaced`）。
+即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap,spacing})`、`measure(str,size,bold,spacing?)`、`hit(x,y,w,h)`、`width`/`height`。颜色写法同上（支持 `rgba()`）。`spacing` 为字距（em，同 CSS letter-spacing，每个字后都加、含最后一个）：运行时逐字排版并缓存单字宽度，`align` 居中/右对齐时自动补回末尾字距，`wrap` 时在 `w` 内断行（英文优先在空格处断）；`measure` 传同样的 `spacing` 得到含末尾字距的宽度。没有渐变、字重档位：渐变用窄条带矩形近似。
 
 ## 定时器
 
