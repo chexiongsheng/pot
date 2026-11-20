@@ -102,14 +102,15 @@ jobs:
           npm ci --no-audit --no-fund
           node scripts/build.js
 
-      # pot_gfx.dll 不入库：按 native 源码 hash 缓存，未命中时由 pot CLI 用 CMake 编译
-      - name: Cache pot_gfx.dll
-        uses: actions/cache@v4
-        with:
-          path: packages/com.pot.core/Plugins/Windows/x86_64/pot_gfx.dll
-          key: pot-gfx-win64-${{ hashFiles('native/pot_gfx/src/**', 'native/pot_gfx/CMakeLists.txt') }}
+      # pot_gfx.dll 不入库：每次都用 CMake 重新编译（--force），不使用缓存
+      - name: Build pot_gfx
+        shell: pwsh
+        run: node js/devserver/cli.js native --platform win64 --force --unity $env:UNITY_EDITOR_PATH
 
-      - name: Setup Unity
+      # WebGL 侧只是把 native/pot_gfx/src 的源码同步进 Plugins，缺了才同步
+      - name: Sync pot_gfx sources (WebGL)
+        shell: pwsh
+        run: node js/devserver/cli.js native --platform webgl --unity $env:UNITY_EDITOR_PATH
         uses: RageAgainstThePixel/unity-setup@v3
         with:
           unity-version: ${{ env.UNITY_VERSION }}
@@ -131,10 +132,6 @@ jobs:
         run: |
           choco install vcredist2010 -y --no-progress
           if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
-
-      - name: Build pot_gfx (if missing)
-        shell: pwsh
-        run: node js/devserver/cli.js native --platform win64,webgl --unity $env:UNITY_EDITOR_PATH
 
       # ---------- Win64 ----------
       # 不加 -nographics（内置着色器导入需要图形设备），release.js 已按此调用
