@@ -49,21 +49,27 @@ if (Test-Path $jsenv) {
 # Patch: Puerts 3.0.3 puerts.jslib only knows the old Emscripten of Unity 2022
 # (updateGlobalBufferAndViews, preamble UTF16ToString ...). Unity 6 fails at runtime with
 # "updateGlobalBufferAndViews is not defined". Overlay the compatible copy kept in
-# tools/puerts-patches (works on both). Only applied to the version it was made for.
-$patchRoot = Join-Path $PSScriptRoot 'puerts-patches'
-$webglPkg = Join-Path $dest 'webgl/package.json'
-if ((Test-Path $webglPkg) -and (Test-Path $patchRoot)) {
-    $json = Get-Content -Raw -Encoding UTF8 $webglPkg
-    $webglVersion = if ($json -match '"version"\s*:\s*"([^"]+)"') { $Matches[1] } else { '?' }
-    if ($webglVersion -eq '3.0.3') {
-        $base = Join-Path $patchRoot 'webgl'
-        foreach ($file in Get-ChildItem -Recurse -File $base) {
-            $rel = $file.FullName.Substring($base.Length + 1)
-            $to = Join-Path (Join-Path $dest 'webgl') $rel
-            Copy-Item -Force $file.FullName $to
+# tools/puerts-patches (works on both). A file is only replaced when the installed one is
+# byte-identical to an upstream original we checked (SHA256 below), so a new Puerts release
+# that changes the file is reported instead of being silently overwritten.
+#   puerts.jslib: 3.0.3 and 3.0.4 ship the same file.
+$patchOriginals = @{
+    'Runtime/Plugins/WebGL/puerts.jslib' = @('C68CE9BF17BA8FE43C920D2C84794597ACBB08BD777332C9486BC40EBBC39372')
+}
+$patchBase = Join-Path $PSScriptRoot 'puerts-patches/webgl'
+$webglDir = Join-Path $dest 'webgl'
+if ((Test-Path (Join-Path $webglDir 'package.json')) -and (Test-Path $patchBase)) {
+    foreach ($rel in $patchOriginals.Keys) {
+        $from = Join-Path $patchBase $rel
+        $to = Join-Path $webglDir $rel
+        if (-not (Test-Path $to)) { Write-Warning "puerts webgl has no $rel, patch skipped"; continue }
+        $hash = (Get-FileHash -Algorithm SHA256 $to).Hash
+        if ($hash -eq (Get-FileHash -Algorithm SHA256 $from).Hash) { Write-Host "already patched $to"; continue }
+        if ($patchOriginals[$rel] -contains $hash) {
+            Copy-Item -Force $from $to
             Write-Host "patched $to"
+        } else {
+            Write-Warning "puerts webgl $rel is not a known original (sha256 $hash), patch skipped; check Unity 6 compatibility and update tools/puerts-patches"
         }
-    } else {
-        Write-Warning "puerts webgl $webglVersion != 3.0.3, skipped tools/puerts-patches (check Unity 6 compatibility)"
     }
 }

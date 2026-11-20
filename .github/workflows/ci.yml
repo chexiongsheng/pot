@@ -19,6 +19,7 @@ on:
       - js/**
       - tools/build-pages.js
       - tools/install-puerts.ps1
+      - tools/puerts-patches/**
       - .github/workflows/ci.yml
   workflow_dispatch:
     inputs:
@@ -85,7 +86,9 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "extract PuerTS_$n failed" }
           }
           & ./tools/install-puerts.ps1 -Source $src
-
+          # Unity 6 必须用打过补丁的 puerts.jslib，否则运行时报 updateGlobalBufferAndViews is not defined
+          $jslib = 'third_party/puerts/webgl/Runtime/Plugins/WebGL/puerts.jslib'
+          if (-not (Select-String -Quiet -Path $jslib -Pattern 'pot patch')) { throw "$jslib 未打补丁（Puerts $env:PUERTS_VERSION 的 jslib 变了？需更新 tools/puerts-patches 与 install-puerts.ps1 里的哈希）" }
       # 发布包内置中文字体子集（OFL，可再分发；WebGL 拿不到系统字体）
       - name: Download Noto Sans SC
         shell: pwsh
