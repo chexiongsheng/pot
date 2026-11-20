@@ -45,3 +45,6 @@ Thumbs.db
 
 *.log
 shot.png
+
+# 原生插件产物：构建前由 pot CLI 按需从 native/ 编译（meta 保留入库）
+packages/com.pot.core/Plugins/Windows/x86_64/*.dll
