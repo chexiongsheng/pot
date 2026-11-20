@@ -36,6 +36,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: unity-ci-global
+  cancel-in-progress: false
+
 # 全局串行：同一时间只有一个运行占用 Unity 授权。不取消进行中的运行（可能正在发 Release），新的运行排队
 concurrency:
   group: unity-license
