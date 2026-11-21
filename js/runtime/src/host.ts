@@ -104,6 +104,8 @@ export interface Engine {
    * bindPoses 为 Float32（每根 16 个，列主序；null 表示单位矩阵）。成功返回空串
    */
   meshSkin(name: string, boneIndices: ArrayBuffer, weights: ArrayBuffer | null, bindPoses: ArrayBuffer | null): string
+  /** 用给定切线（Float32 xyzw，每顶点 4 个）替换刚注册网格自动计算的切线。成功返回空串 */
+  meshTangents(name: string, tangents: ArrayBuffer): string
   /** slot：map / normal / mask 或着色器属性名；tex 为 0 表示解除 */
   matTexture(id: number, slot: string, tex: number): void
   matFloat(id: number, prop: string, value: number): void

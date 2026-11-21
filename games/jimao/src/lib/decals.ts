@@ -261,12 +261,12 @@ export function createDecals(ctx: Context, cap = 160): Decals | undefined {
   const map = tex(atlas.map, false), orm = tex(atlas.orm, true), nrm = tex(atlas.nrm, true)
   const uvs = Object.fromEntries(Object.entries(FRAMES).map(([k, fr]) => [k, fr.map((x) => frameUV(x))])) as Record<DecalKind, [number, number, number, number][]>
 
-  const positions = new Float32Array(cap * 12), normals = new Float32Array(cap * 12), uv = new Float32Array(cap * 8), colors = new Float32Array(cap * 16)
+  const positions = new Float32Array(cap * 12), normals = new Float32Array(cap * 12), uv = new Float32Array(cap * 8), colors = new Float32Array(cap * 16), tangents = new Float32Array(cap * 16)
   const baseA = new Float32Array(cap)
   const indices = new Uint32Array(cap * 6)
   for (let k = 0; k < cap; k++) { const c = k * 4; indices.set([c, c + 1, c + 2, c, c + 2, c + 3], k * 6) }
   const MESH = 'jimao/decals'
-  const upload = () => scene.mesh(MESH, { positions, normals, uvs: uv, colors, indices })
+  const upload = () => scene.mesh(MESH, { positions, normals, uvs: uv, colors, indices, tangents })
   upload()
   const shader = gfx.shader({ fragment: 'shaders/decal.frag', name: 'jimao/decal' })
   const ent: Entity = scene.spawn({ shape: `mesh:${MESH}`, name: 'fx_decals', position: [0, 0, 0], collider: false })
@@ -307,6 +307,9 @@ export function createDecals(ctx: Context, cap = 160): Decals | undefined {
       let ie = u * 12
       positions.set([D - S - O, C - z - q, G - H - U, D + S - O, C + z - q, G + H - U, D + S + O, C + z + q, G + H + U, D - S + O, C - z + q, G - H + U], ie)
       for (let F = 0; F < 4; F++) normals.set([h, f, p], ie + F * 3)
+      // 切线 = dP/du（+S 方向）；cross(N, S) 恰为 +O = dP/dv，所以 w = 1
+      const tl = Math.hypot(S, z, H) || 1
+      for (let F = 0; F < 4; F++) tangents.set([S / tl, z / tl, H / tl, 1], u * 16 + F * 4)
       ie = u * 8
       uv.set([l[0], l[1], l[2], l[1], l[2], l[3], l[0], l[3]], ie)
       ie = u * 16

@@ -100,6 +100,7 @@ export function createUnityHost(): Host {
       mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
       meshCached: (name, key) => S.MeshCached(name, key),
       meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? '',
+      meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? '',
       matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
       matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
       matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),

@@ -4204,13 +4204,19 @@ var pot = (() => {
       const boneIndices = d.boneIndices ? bytesOf(d.boneIndices, Int32Array) : null;
       const boneWeights = f(d.boneWeights);
       const bindPoses = f(d.bindPoses);
+      const tangents = f(d.tangents);
       if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`);
+      if (tangents && tangents.byteLength !== positions.byteLength / 3 * 4) throw new Error(`scene.mesh(${name})：tangents 须为每顶点 4 个数（xyzw），共 ${positions.byteLength / 12 * 4} 个`);
       if (options.key === true) {
-        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses]);
+        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents]);
         const cached = engine.meshCached(name, key);
         if (cached >= 0) return cached;
       }
       const count = engine.mesh(name, positions, normals, uvs, colors, indices, key);
+      if (tangents) {
+        const error = engine.meshTangents(name, tangents);
+        if (error) throw new Error(`scene.mesh(${name})：${error}`);
+      }
       if (boneIndices) {
         const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses);
         if (error) throw new Error(`scene.mesh(${name})：${error}`);
@@ -6710,6 +6716,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
         meshCached: (name, key) => S.MeshCached(name, key),
         meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
+        meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
         matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
         matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),

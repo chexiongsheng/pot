@@ -95,6 +95,14 @@ class MockEngine {
     return positions.byteLength / 12
   }
   meshCached(name, key) { const m = this.meshes?.get(name); return m && key && m.key === key ? m.vertices : -1 }
+  meshTangents(name, tangents) {
+    const m = this.meshes?.get(name)
+    if (!m) return '未注册的网格：' + name
+    const t = new Float32Array(tangents)
+    if (t.length !== m.vertices * 4) { m.key = ''; return `tangents 须为每顶点 4 个数（xyzw），共 ${m.vertices * 4} 个` }
+    m.tangents = [...t]
+    return ''
+  }
   meshSkin(name, boneIndices, weights, bindPoses) {
     const m = this.meshes?.get(name)
     if (!m) return '未注册的网格：' + name

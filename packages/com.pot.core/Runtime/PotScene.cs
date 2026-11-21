@@ -653,6 +653,32 @@ namespace Pot
         }
 
         /// <summary>
+        /// 用给定切线替换网格的切线（紧跟在 Mesh 之后调用）。tangents 为 Float32 xyzw，每顶点 4 个；
+        /// w 为副切线方向（±1，非零值按符号取）。自定义着色器的 pot_Tangent 读到的就是它。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string MeshTangents(string name, Puerts.ArrayBuffer tangents)
+        {
+            Mesh mesh;
+            if (!meshes.TryGetValue(name, out mesh) || mesh == null) return "未注册的网格：" + name;
+            var t = Floats(tangents);
+            var vcount = mesh.vertexCount;
+            if (t == null || t.Length != vcount * 4)
+            {
+                meshKeys.Remove(name);
+                return "tangents 须为每顶点 4 个数（xyzw），共 " + (vcount * 4) + " 个";
+            }
+            var ts = new Vector4[vcount];
+            for (var i = 0; i < vcount; i++)
+            {
+                var w = t[i * 4 + 3];
+                ts[i] = new Vector4(t[i * 4], t[i * 4 + 1], t[i * 4 + 2], w < 0f ? -1f : 1f);
+            }
+            mesh.tangents = ts;
+            return "";
+        }
+
+        /// <summary>
         /// 给已注册的网格补蒙皮数据（紧跟在 Mesh 之后调用）。boneIndices 为 Int32，每顶点 1 到 4 个（个数 = 长度 / 顶点数）；
         /// weights 为 Float32，形状同 boneIndices，null 表示第一根骨骼权重 1（刚性蒙皮）；
         /// bindPoses 为 Float32，每根骨骼 16 个（列主序），null 表示全是单位矩阵（顶点已在骨骼局部空间）。

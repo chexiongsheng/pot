@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 35 |
+| ✅ 已完成 | 36 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 20 |
+| ❌ 未完成 | 19 |
 
 #### 渲染与着色器（gfx）
 
@@ -212,7 +212,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
 | ❌ | gfx 深度偏移 `polygonOffset` | 弹孔 | 贴花现靠沿法线外推 4 mm 防 z-fighting，远处或掠射角仍可能闪 |
-| ❌ | 网格切线属性 `tangents` | 弹孔 | 法线贴图用 dFdx/dFdy 重建切线框架，三角形边缘有轻微接缝 |
+| ✅ | 网格切线属性 `tangents` | 弹孔 | `scene.mesh` 的 `tangents`（每顶点 xyzw）原样写进 Unity 网格，自定义着色器的 `pot_Tangent`/`vTangent` 读到它；省略时仍按 UV 自动计算，参与 `key: true` 的内容哈希。jimao 弹孔按贴花朝向写切线，着色器改用 `vTangent`，删掉屏幕导数重建（实机验证集装箱、地面弹孔正常） |
 | ⚠️ | 粒子预设 `scene.burst` 只有 spark/smoke/glow | 水花 | 原版水柱、拉伸水珠、水平涟漪环、预乘混合都没有；jimao 自建粒子池（[fx.ts](games/jimao/src/lib/fx.ts)），每帧把粒子展开成四边形动态网格上传 |
 | ❌ | 普通 gfx 网格读场景深度 | 水花 | 原版软粒子按深度差淡出，现在水柱与地面交界处是硬边；建议透明队列可绑定 `pot_SceneDepth` |
 | ❌ | 顶点属性通道不足 | 水花 | 粒子要 16 个浮点（中心、尺寸、轴/滚转、颜色、帧号、模式、年龄、明暗），只能塞进 position/normal/uv/color 并对 color 做 sRGB 逆变换 |

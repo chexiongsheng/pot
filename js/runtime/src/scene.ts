@@ -212,6 +212,11 @@ export interface MeshData {
   uvs?: ArrayLike<number>
   /** RGBA（sRGB 0 到 1） */
   colors?: ArrayLike<number>
+  /**
+   * 切线 xyzw（引擎坐标；w 为 ±1，副切线 = cross(normal, tangent.xyz) * w）。
+   * 省略时有 uvs 就由引擎按 UV 自动计算；自定义着色器从 pot_Tangent / vTangent 读到
+   */
+  tangents?: ArrayLike<number>
   /** 蒙皮：每个顶点 1 到 4 个骨骼下标（个数 = 长度 / 顶点数） */
   boneIndices?: ArrayLike<number>
   /** 蒙皮权重，形状同 boneIndices；省略表示第一根骨骼权重 1（刚性蒙皮） */
@@ -852,13 +857,19 @@ export class SceneService extends Service {
     const boneIndices = d.boneIndices ? bytesOf(d.boneIndices, Int32Array) : null
     const boneWeights = f(d.boneWeights)
     const bindPoses = f(d.bindPoses)
+    const tangents = f(d.tangents)
     if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`)
+    if (tangents && tangents.byteLength !== positions.byteLength / 3 * 4) throw new Error(`scene.mesh(${name})：tangents 须为每顶点 4 个数（xyzw），共 ${positions.byteLength / 12 * 4} 个`)
     if (options.key === true) {
-      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses])
+      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents])
       const cached = engine.meshCached(name, key)
       if (cached >= 0) return cached
     }
     const count = engine.mesh(name, positions, normals, uvs, colors, indices, key)
+    if (tangents) {
+      const error = engine.meshTangents(name, tangents)
+      if (error) throw new Error(`scene.mesh(${name})：${error}`)
+    }
     if (boneIndices) {
       const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses)
       if (error) throw new Error(`scene.mesh(${name})：${error}`)
