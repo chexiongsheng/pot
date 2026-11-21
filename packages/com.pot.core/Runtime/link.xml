@@ -3,6 +3,8 @@
        Unity 不读取包内的 link.xml：com.pot.build 构建时会把本文件复制到 Assets/PotGame/link.xml。 -->
   <assembly fullname="Pot.Core" preserve="all" />
   <assembly fullname="Pot.Devtools" preserve="all" ignoreIfMissing="1" />
+  <!-- Runner 外壳只通过 RuntimeInitializeOnLoadMethod 自举，没有任何代码引用它，开启裁剪后会被整个删掉，Runner 启动后一片空白 -->
+  <assembly fullname="Pot.RunnerShell" preserve="all" ignoreIfMissing="1" />
   <assembly fullname="com.tencent.puerts.core" preserve="all" />
   <assembly fullname="com.tencent.puerts.v8" preserve="all" />
   <!-- WebGL 后端只被 PotRuntime 反射创建，不保留会被整个裁掉 -->
