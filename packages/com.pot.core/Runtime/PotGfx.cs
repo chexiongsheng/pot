@@ -498,7 +498,7 @@ namespace Pot
             SetVec(name, c.x, c.y, c.z, c.w);
         }
 
-        static void FrameBuiltins(Camera cam, Matrix4x4 gpuProj)
+        static void FrameBuiltins(Camera cam, Matrix4x4 gpuProj, FrameIn f)
         {
             var view = cam.worldToCameraMatrix;
             SetMat("pot_View", view);
@@ -530,6 +530,12 @@ namespace Pot
             SetMat("pot_ScreenVP", screenVP);
             SetMat("pot_ScreenInvVP", screenVP.inverse);
             SetVec("pot_DepthParams", cam.nearClipPlane, cam.farClipPlane, SystemInfo.usesReversedZBuffer ? 1 : 0, 0);
+            // 相机：x 竖直视野（弧度），y 宽高比，z = tan(fov/2)（正交相机为 0），w 正交半高（透视为 0）
+            var fovRad = cam.fieldOfView * Mathf.Deg2Rad;
+            SetVec("pot_Camera", fovRad, cam.aspect, cam.orthographic ? 0 : Mathf.Tan(fovRad * 0.5f), cam.orthographic ? cam.orthographicSize : 0);
+            // 相机实际渲染分辨率（含 URP renderScale），后处理 pass 里 pot_ScreenSize 是输出目标尺寸，它保持相机尺寸
+            float rw = Mathf.Max(1, f != null && f.desc.width > 0 ? f.desc.width : cam.pixelWidth), rh = Mathf.Max(1, f != null && f.desc.height > 0 ? f.desc.height : cam.pixelHeight);
+            SetVec("pot_Resolution", rw, rh, 1f / rw, 1f / rh);
         }
 
         static void ObjectBuiltins(Transform t)
@@ -790,7 +796,7 @@ namespace Pot
             }
 
             var flipped = f.flipped;
-            FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
+            FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped), f);
             var shadowMap = ShadowBuiltins(f);
             LightBuiltins(f);
             var frameFlags = (flipped ? F_FrontCCW : 0) | (SystemInfo.usesReversedZBuffer ? F_ReversedZ : 0);
@@ -1230,7 +1236,7 @@ namespace Pot
             }
 
             var flipped = f.flipped;
-            FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped));
+            FrameBuiltins(cam, GL.GetGPUProjectionMatrix(cam.projectionMatrix, flipped), f);
             var shadowMap = ShadowBuiltins(f);
             SetMat("pot_Model", Matrix4x4.identity);
             SetMat("pot_ModelInv", Matrix4x4.identity);

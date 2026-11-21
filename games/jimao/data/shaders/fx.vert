@@ -37,7 +37,7 @@ void main() {
     off = (camR * rc.x + camU * rc.y) * size;
     T = camR * cs + camU * sn; B = camU * cs - camR * sn;
   } else if (mode < 1.5) {
-    float uPx = 2.0 / (abs(pot_Proj[1][1]) * max(1.0, pot_ScreenSize.y));
+    float uPx = 2.0 * pot_Camera.z * pot_Resolution.w;
     vec3 axis = pot_Normal;
     float len = length(axis); vec3 d = axis / max(len, 1e-5);
     vec3 side = cross(d, toCam); float sl = length(side); side = sl > 1e-3 ? side / sl : camR;

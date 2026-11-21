@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 37 |
+| ✅ 已完成 | 38 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 18 |
+| ❌ 未完成 | 17 |
 
 #### 渲染与着色器（gfx）
 
@@ -192,7 +192,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ❌ | 附加光阴影 | 地面 | 路灯光斑不会被集装箱挡住，需复算附加光阴影图集矩阵 |
 | ❌ | 实例化 `instances` | 雨 | 现在把实例展开成普通网格，顶点数与上传量 4 倍；建议 `DrawIndexedInstanced` |
 | ❌ | 自定义顶点属性 `attributes` | 雨 | 只能借用 normals / uvs，colors 会被转线性 |
-| ❌ | 相机内置量 `fov`、渲染分辨率 | 雨 | 现在从 `pot_Proj[1][1]` 反推 |
+| ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
 | ❌ | 后处理 pass 读阴影图 | 后处理 | 体积光（god rays）因此未移植 |
 | ❌ | 后处理链与 `scene.post` 可共存 | 后处理 | 链生效时 SSAO、景深一起失效；建议提供 URP 后处理之后的挂点 |
 | ✅ | 后处理 pass 单独开关 | 后处理 | pass 可带 `name` / `enabled`，`chain.enable(下标 | 名字 | 数组, on)` 成组开关、`chain.enabled()` 查询；关闭的 pass 在 C# 侧直接跳过，它写的普通目标清成透明黑，history 目标保留。jimao 画质关 bloom 时跳过 5 个上采样和 2 个光斑 pass（降采样链要给自动曝光测光，保留），实机截图确认开关前后泛光消失与恢复 |

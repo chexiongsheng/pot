@@ -24,8 +24,8 @@ void main() {
   float uTime = pot_Time.x;
   vec4 aSeed = vec4(pot_Normal, pot_UV.x);
   vec3 cameraPosition = vec3(pot_CameraPos.x, pot_CameraPos.y, -pot_CameraPos.z);
-  // 原版 uPix = 2·tan(fov/2) / 屏幕高；pot_Proj[1][1] = 1/tan(fov/2)
-  float uPix = 2.0 / (abs(pot_Proj[1][1]) * max(1.0, pot_ScreenSize.y));
+  // 原版 uPix = 2·tan(fov/2) / 屏幕高（像素在 1 米处对应的世界尺寸）
+  float uPix = 2.0 * pot_Camera.z * pot_Resolution.w;
   vec2 uv = pot_Position.xy;
   float sp = 0.82 + 0.36 * aSeed.w;
   vec3 vel = uVel * sp;

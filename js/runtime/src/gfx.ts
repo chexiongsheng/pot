@@ -235,6 +235,8 @@ uniform vec4 pot_LightCount;
 uniform mat4 pot_ScreenVP;
 uniform mat4 pot_ScreenInvVP;
 uniform vec4 pot_DepthParams;
+uniform vec4 pot_Camera;
+uniform vec4 pot_Resolution;
 `
 
 const HEADER = `#version 310 es

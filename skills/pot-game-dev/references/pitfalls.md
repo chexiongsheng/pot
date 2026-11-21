@@ -1,4 +1,4 @@
-﻿# 坑点库
+# 坑点库
 
 格式：现象 / 原因 / 做法 / 来源。能由框架消除的坑改框架，并标注“已由框架保证”。
 
@@ -98,7 +98,7 @@
 - 移植时 three 的 `vGWorld`/`cameraPosition` 用 `(x, y, -z)` 换算，法线 `(nx, ny, nz)` 换回 Unity 是 `(nx, ny, -nz)`；自定义网格按 z 取反并反转三角形绕序。
 - 没有实例化：原版 `InstancedBufferGeometry` + 每实例属性（雨、溅射、粒子）要把实例展开成普通网格，每个实例重复写它的顶点，实例数据塞进 `normals`（3 个浮点，原样传递）和 `uvs`（2 个浮点）；不要用 `colors`，会被当作 sRGB 转线性。
 - 顶点着色器重算位置（以相机为中心循环、广告牌）时网格包围盒不可信，物体会被视锥剔除而时有时无：绑定时加 `frustumCull: false`（对应 three 的 `frustumCulled = false`）。
-- three 的 `AdditiveBlending` 即 `blend: 'add'`（SrcAlpha, One）；`fov` 没有内置量，`2·tan(fov/2)` 用 `2.0 / abs(pot_Proj[1][1])` 求。
+- three 的 `AdditiveBlending` 即 `blend: 'add'`（SrcAlpha, One）；`2·tan(fov/2)` 用 `2.0 * pot_Camera.z`，屏幕像素换算用 `pot_Resolution`（含 renderScale）。
 - `gl_FragCoord.y` 原点随后端不同：D3D11 在左上（与 WebGL 相反），GLES3/WebGL 在左下。需要屏幕方向的效果用 `vUv` 或 `pot_WorldToUv` 求屏幕坐标，不要直接依赖 `gl_FragCoord.y`；只用作噪声种子则无所谓。
 - WebGL 上着色器源码由后端直接交给 `GLctx.shaderSource`，绕开了 emscripten 的 C 预处理（它会把 `sat(max(max(a,b),c))` 这类嵌套函数式宏展开坏）；游戏侧照常写宏即可。
 - 编译错误不会让画面消失：日志和错误浮层给出 `文件:行号`，旧版本继续绘制，改好即恢复。

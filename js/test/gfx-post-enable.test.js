@@ -55,3 +55,12 @@ test('post enable：pass 上的 enabled: false 作为初始状态，链生效时
   assert.deepEqual([...engine.postDisabled], [1])
   assert.equal(chain.enabled(1), false)
 })
+
+test('内置量：pot_Camera（fov、宽高比、tan(fov/2)、正交半高）与 pot_Resolution 对所有着色器可用', async () => {
+  const { engine } = await setup()
+  const prog = [...engine.programs.values()][0]
+  for (const src of [prog.vs, prog.fs]) {
+    assert.match(src, /uniform vec4 pot_Camera;/)
+    assert.match(src, /uniform vec4 pot_Resolution;/)
+  }
+})
