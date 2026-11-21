@@ -94,6 +94,10 @@ export interface PostPass {
   inputs?: Record<string, string | Texture>
   uniforms?: Record<string, UniformValue>
   blend?: 'none' | 'alpha' | 'add' | 'premultiplied'
+  /** 名字，供 chain.enable('名字') 成组开关 */
+  name?: string
+  /** 初始是否开启，默认 true */
+  enabled?: boolean
 }
 
 export interface PostChainOptions {
@@ -122,6 +126,43 @@ export class PostChain {
   setPass(index: number, values: Record<string, UniformValue>) {
     if (this._active && this._binds[index] !== undefined) this._apply(this._binds[index], values)
     return this
+  }
+  /** @internal */ _names: (string | undefined)[] = []
+  /** @internal */ _disabled = new Set<number>()
+  /** @internal */ _send?: (index: number, on: boolean) => void
+  /** @internal */
+  _resolve(which: number | string | (number | string)[]): number[] {
+    const list = Array.isArray(which) ? which : [which]
+    const out: number[] = []
+    for (const w of list) {
+      if (typeof w === 'number') {
+        if (!Number.isInteger(w) || w < 0 || w >= this._names.length) throw new Error(`PostChain：pass 下标越界：${w}`)
+        out.push(w)
+      } else {
+        const hit = this._names.flatMap((n, i) => (n === w ? [i] : []))
+        if (!hit.length) throw new Error(`PostChain：没有名为 ${w} 的 pass`)
+        out.push(...hit)
+      }
+    }
+    return out
+  }
+  /**
+   * 开关 pass：下标、pass 的 name（同名的一组一起开关，如 'bloom'）或它们的数组。
+   * 关闭的 pass 不执行；它写的普通目标被清成透明黑（下游读到 0），history 目标保留上次结果，写 screen 的则画面保持上一步。
+   * 也可以在 gfx.post 的 pass 上写 enabled: false 作为初始状态。
+   */
+  enable(which: number | string | (number | string)[], on = true) {
+    for (const i of this._resolve(which)) {
+      if (on === !this._disabled.has(i)) continue
+      if (on) this._disabled.delete(i)
+      else this._disabled.add(i)
+      if (this._active) this._send?.(i, on)
+    }
+    return this
+  }
+  /** pass 是否开启（同名多个时全部开启才为 true） */
+  enabled(which: number | string) {
+    return this._resolve(which).every((i) => !this._disabled.has(i))
   }
   destroy() {
     return this._dispose?.()
@@ -749,6 +790,12 @@ export class GfxService extends Service {
     })
     const apply = (id: number, values: Record<string, UniformValue>) => applyUniforms(engine, id, values)
     const chain: PostChain = new PostChain(apply, () => dispose())
+    chain._names = options.passes.map((p) => p.name)
+    options.passes.forEach((p, i) => { if (p.enabled === false) chain._disabled.add(i) })
+    chain._send = (i, on) => {
+      const error = engine.gfxPostEnable(i, on)
+      if (error) throw new Error(`gfx.post：${error}`)
+    }
     const dispose = this.ctx.effect(() => {
       chain._shared = engine.gfxBakeBegin()
       if (options.uniforms) apply(chain._shared, options.uniforms)
@@ -784,6 +831,7 @@ export class GfxService extends Service {
       if (this._post) this._post._active = false
       this._post = chain
       chain._active = true
+      for (const i of chain._disabled) chain._send!(i, false)
       return () => {
         if (this._post !== chain) return
         chain._active = false

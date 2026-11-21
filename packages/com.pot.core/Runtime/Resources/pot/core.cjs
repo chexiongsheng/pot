@@ -5584,6 +5584,12 @@ IncidentLight directLight;
       __publicField(this, "_binds", []);
       /** @internal */
       __publicField(this, "_active", false);
+      /** @internal */
+      __publicField(this, "_names", []);
+      /** @internal */
+      __publicField(this, "_disabled", /* @__PURE__ */ new Set());
+      /** @internal */
+      __publicField(this, "_send");
     }
     /** 当前是否生效 */
     get active() {
@@ -5598,6 +5604,40 @@ IncidentLight directLight;
     setPass(index, values) {
       if (this._active && this._binds[index] !== void 0) this._apply(this._binds[index], values);
       return this;
+    }
+    /** @internal */
+    _resolve(which) {
+      const list = Array.isArray(which) ? which : [which];
+      const out = [];
+      for (const w of list) {
+        if (typeof w === "number") {
+          if (!Number.isInteger(w) || w < 0 || w >= this._names.length) throw new Error(`PostChain：pass 下标越界：${w}`);
+          out.push(w);
+        } else {
+          const hit = this._names.flatMap((n2, i) => n2 === w ? [i] : []);
+          if (!hit.length) throw new Error(`PostChain：没有名为 ${w} 的 pass`);
+          out.push(...hit);
+        }
+      }
+      return out;
+    }
+    /**
+     * 开关 pass：下标、pass 的 name（同名的一组一起开关，如 'bloom'）或它们的数组。
+     * 关闭的 pass 不执行；它写的普通目标被清成透明黑（下游读到 0），history 目标保留上次结果，写 screen 的则画面保持上一步。
+     * 也可以在 gfx.post 的 pass 上写 enabled: false 作为初始状态。
+     */
+    enable(which, on = true) {
+      for (const i of this._resolve(which)) {
+        if (on === !this._disabled.has(i)) continue;
+        if (on) this._disabled.delete(i);
+        else this._disabled.add(i);
+        if (this._active) this._send?.(i, on);
+      }
+      return this;
+    }
+    /** pass 是否开启（同名多个时全部开启才为 true） */
+    enabled(which) {
+      return this._resolve(which).every((i) => !this._disabled.has(i));
     }
     destroy() {
       return this._dispose?.();
@@ -6193,6 +6233,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       });
       const apply = (id, values) => applyUniforms(engine, id, values);
       const chain = new PostChain(apply, () => dispose());
+      chain._names = options.passes.map((p) => p.name);
+      options.passes.forEach((p, i) => {
+        if (p.enabled === false) chain._disabled.add(i);
+      });
+      chain._send = (i, on) => {
+        const error = engine.gfxPostEnable(i, on);
+        if (error) throw new Error(`gfx.post：${error}`);
+      };
       const dispose = this.ctx.effect(() => {
         chain._shared = engine.gfxBakeBegin();
         if (options.uniforms) apply(chain._shared, options.uniforms);
@@ -6228,6 +6276,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (this._post) this._post._active = false;
         this._post = chain;
         chain._active = true;
+        for (const i of chain._disabled) chain._send(i, false);
         return () => {
           if (this._post !== chain) return;
           chain._active = false;
@@ -6733,7 +6782,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
         gfxBakeBegin: () => G.BakeBegin(),
         gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
-        gfxPost: (json) => G.Post(json) ?? ""
+        gfxPost: (json) => G.Post(json) ?? "",
+        gfxPostEnable: (pass, on) => G.PostEnable(pass, on) ?? ""
       }
     };
   }

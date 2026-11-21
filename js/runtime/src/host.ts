@@ -135,6 +135,8 @@ export interface Engine {
   gfxBake(bind: number, program: string, width: number, height: number, targets: string, blend: number): string
   /** 设置每帧后处理链（JSON 见 PotGfx.Post），空串关闭；返回空串成功，否则为错误 */
   gfxPost(json: string): string
+  /** 开关当前后处理链的第 pass 个 pass；成功返回空串 */
+  gfxPostEnable(pass: number, on: boolean): string
 }
 
 export interface RaycastResult {

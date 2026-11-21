@@ -1044,6 +1044,7 @@ namespace Pot
             public PostChainCfg cfg;
             public readonly Dictionary<string, PostTarget> targets = new Dictionary<string, PostTarget>();
             public string[][] inputUniforms, inputTargets;
+            public bool[] disabled;
         }
 
         static PostChain post;
@@ -1076,6 +1077,7 @@ namespace Pot
                 }
             chain.inputUniforms = new string[cfg.passes.Length][];
             chain.inputTargets = new string[cfg.passes.Length][];
+            chain.disabled = new bool[cfg.passes.Length];
             for (var i = 0; i < cfg.passes.Length; i++)
             {
                 var pc = cfg.passes[i];
@@ -1094,6 +1096,24 @@ namespace Pot
                 }
             }
             post = chain;
+            return "";
+        }
+
+        /// <summary>
+        /// 开关当前链中的某个 pass。关闭的 pass 不再执行：输出到普通目标的，该目标清成透明黑（下游读到 0，如关 bloom 后 bloom 贡献为零）；
+        /// history 目标保留上一次的结果；输出到 screen 的则画面保持上一个 pass 的结果。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string PostEnable(int pass, bool on)
+        {
+            var chain = post;
+            if (chain == null) return "当前没有后处理链";
+            if (pass < 0 || pass >= chain.cfg.passes.Length) return "pass 下标越界：" + pass;
+            if (chain.disabled[pass] == !on) return "";
+            chain.disabled[pass] = !on;
+            PostTarget t;
+            var output = chain.cfg.passes[pass].output;
+            if (!on && output != "screen" && chain.targets.TryGetValue(output, out t) && t.cfg.history == 0) t.fresh = true;
             return "";
         }
 
@@ -1228,6 +1248,7 @@ namespace Pot
 
             for (var i = 0; i < chain.cfg.passes.Length; i++)
             {
+                if (chain.disabled[i]) continue;
                 var pc = chain.cfg.passes[i];
                 GpuProgram p;
                 if (!programs.TryGetValue(pc.program ?? "", out p)) continue;

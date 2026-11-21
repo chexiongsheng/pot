@@ -58,9 +58,10 @@ export function createPost(ctx: Context, opts: { exposure?: number; sunColor?: s
 
   const passes: any[] = []
   for (let i = 0; i < LEVELS; i++) passes.push({ shader: down, output: `d${i}`, inputs: { tSrc: i ? `d${i - 1}` : 'scene' }, uniforms: { uFirst: i ? 0 : 1 } })
-  for (let i = LEVELS - 2; i >= 0; i--) passes.push({ shader: up, output: `u${i}`, inputs: { tLow: i === LEVELS - 2 ? `d${LEVELS - 1}` : `u${i + 1}`, tHigh: `d${i}` } })
-  passes.push({ shader: streak, output: 'sA', inputs: { tSrc: 'd2', tAdapt: 'adapt' }, uniforms: { uDirPx: 1.5, uThreshold: g.streakThreshold } })
-  passes.push({ shader: streak, output: 'sB', inputs: { tSrc: 'sA', tAdapt: 'adapt' }, uniforms: { uDirPx: 5, uThreshold: 0 } })
+  // 上采样与光斑标为 'bloom'：画质关 bloom 时直接跳过（降采样链仍要给自动曝光测光，不能关）
+  for (let i = LEVELS - 2; i >= 0; i--) passes.push({ name: 'bloom', shader: up, output: `u${i}`, inputs: { tLow: i === LEVELS - 2 ? `d${LEVELS - 1}` : `u${i + 1}`, tHigh: `d${i}` } })
+  passes.push({ name: 'bloom', shader: streak, output: 'sA', inputs: { tSrc: 'd2', tAdapt: 'adapt' }, uniforms: { uDirPx: 1.5, uThreshold: g.streakThreshold } })
+  passes.push({ name: 'bloom', shader: streak, output: 'sB', inputs: { tSrc: 'sA', tAdapt: 'adapt' }, uniforms: { uDirPx: 5, uThreshold: 0 } })
   passes.push({ shader: adapt, output: 'adapt', inputs: { tPrev: 'adapt', tLum: `d${LEVELS - 1}`, tDepth: 'depth', tAdapt: 'adapt' } })
   const gradeInputs: Record<string, string | Texture> = { tScene: 'scene', tBloom: 'u0', tBlur: 'd1', tStreak: 'sB', tDepth: 'depth', tAdapt: 'adapt' }
   if (dirt) gradeInputs.tDirt = dirt
@@ -89,6 +90,8 @@ export function createPost(ctx: Context, opts: { exposure?: number; sunColor?: s
       else chain.set({ uRate: 1 - Math.exp(-dt / g.adaptTau), uVisRate: 1 - Math.exp(-dt / 0.12) })
     },
     quality(bloom) {
+      // 关 bloom：跳过上采样与光斑（输出目标被清零，grade 读到 0），强度也置零以免污渍、眩光残留
+      chain.enable('bloom', bloom)
       chain.set({ uBloom: bloom ? g.bloom : 0, uDirt: bloom && dirt ? g.dirt : 0, uStreak: bloom ? g.streak : 0 })
     },
     set(values) {

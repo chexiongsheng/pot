@@ -117,7 +117,8 @@ export function createUnityHost(): Host {
       gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
       gfxBakeBegin: () => G.BakeBegin(),
   gfxBake: (bind, program, width, height, targets, blend) => G.Bake(bind, program, width, height, targets, blend) ?? '!',
-  gfxPost: (json) => G.Post(json) ?? '',
+gfxPost: (json) => G.Post(json) ?? '',
+      gfxPostEnable: (pass, on) => G.PostEnable(pass, on) ?? '',
     },
   }
 }
