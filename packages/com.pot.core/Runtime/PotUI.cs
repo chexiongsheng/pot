@@ -15,6 +15,7 @@ namespace Pot
     ///   b x y w h color thickness radius               描边矩形
     ///   l x1 y1 x2 y2 color width                      线段
     ///   a cx cy radius color thickness start sweep     圆弧（角度制，0 度朝上，顺时针）
+    ///   g x y w h radius vertical stops                线性渐变；vertical 1 为从上到下、0 为从左到右；stops 为 color@pos 以 ; 分隔（pos 0..1 递增）
     ///   t x y w h color size align flags text          文字；align 0..8 对应 左上/中上/右上/左中/居中/右中/左下/中下/右下；flags 1 粗体 2 阴影 4 换行
     /// </summary>
     [Preserve]
@@ -145,6 +146,76 @@ namespace Pot
             return c;
         }
 
+        const int GradientRes = 256;
+        static readonly Dictionary<string, Texture2D> gradients = new Dictionary<string, Texture2D>();
+
+        /// <summary>
+        /// 渐变贴图：沿渐变方向 256 像素、sRGB、双线性 + 钳位，按 (方向, 色标) 缓存。
+        /// 色标间按预乘 alpha 插值（同 CSS），存回非预乘；同位置的两个色标形成硬分界。
+        /// </summary>
+        static Texture2D Gradient(bool vertical, string spec)
+        {
+            var key = (vertical ? "v" : "h") + spec;
+            Texture2D tex;
+            if (gradients.TryGetValue(key, out tex) && tex != null) return tex;
+            var parts = spec.Split(';');
+            var cols = new Color[parts.Length];
+            var pos = new float[parts.Length];
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var at = parts[i].LastIndexOf('@');
+                cols[i] = C(at >= 0 ? parts[i].Substring(0, at) : parts[i]);
+                pos[i] = at >= 0 ? F(parts[i].Substring(at + 1)) : (parts.Length > 1 ? (float)i / (parts.Length - 1) : 0);
+                if (i > 0 && pos[i] < pos[i - 1]) pos[i] = pos[i - 1];
+            }
+            var px = new Color32[GradientRes];
+            for (var i = 0; i < GradientRes; i++)
+            {
+                var t = (i + 0.5f) / GradientRes;
+                Color c;
+                if (t <= pos[0]) c = cols[0];
+                else if (t >= pos[pos.Length - 1]) c = cols[cols.Length - 1];
+                else
+                {
+                    var k = 1;
+                    while (k < pos.Length - 1 && pos[k] <= t) k++;
+                    Color a = cols[k - 1], b = cols[k];
+                    var span = pos[k] - pos[k - 1];
+                    var u = span > 1e-6f ? (t - pos[k - 1]) / span : 1f;
+                    var alpha = Mathf.Lerp(a.a, b.a, u);
+                    var r = Mathf.Lerp(a.r * a.a, b.r * b.a, u);
+                    var g = Mathf.Lerp(a.g * a.a, b.g * b.a, u);
+                    var bl = Mathf.Lerp(a.b * a.a, b.b * b.a, u);
+                    // 全透明处取两端颜色的插值，避免双线性过滤时把黑色带进相邻像素
+                    c = alpha > 1e-4f ? new Color(r / alpha, g / alpha, bl / alpha, alpha) : new Color(Mathf.Lerp(a.r, b.r, u), Mathf.Lerp(a.g, b.g, u), Mathf.Lerp(a.b, b.b, u), 0);
+                }
+                px[i] = c;
+            }
+            tex = new Texture2D(vertical ? 1 : GradientRes, vertical ? GradientRes : 1, TextureFormat.RGBA32, false, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.HideAndDontSave,
+                name = "PotUI.Gradient",
+            };
+            if (vertical)
+            {
+                // 贴图 v=0 在底部，IMGUI 把 v=1 画在矩形顶部：反向写入，让 pos 0 对应顶边
+                var flipped = new Color32[GradientRes];
+                for (var i = 0; i < GradientRes; i++) flipped[i] = px[GradientRes - 1 - i];
+                px = flipped;
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            if (gradients.Count >= 256)
+            {
+                foreach (var old in gradients.Values) if (old != null) UnityEngine.Object.Destroy(old);
+                gradients.Clear();
+            }
+            gradients[key] = tex;
+            return tex;
+        }
+
         static void Line(Vector2 a, Vector2 b, Color color, float width)
         {
             var d = b - a;
@@ -185,6 +256,9 @@ namespace Pot
                             break;
                         case "l":
                             Line(new Vector2(F(f[1]), F(f[2])), new Vector2(F(f[3]), F(f[4])), C(f[5]), F(f[6]));
+                            break;
+                        case "g":
+                            GUI.DrawTexture(new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4])), Gradient(f[6] == "1", f[7]), ScaleMode.StretchToFill, true, 0, Color.white, 0, F(f[5]));
                             break;
                         case "a":
                         {

@@ -171,7 +171,7 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 
 ## ctx.ui
 
-即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap,spacing})`、`measure(str,size,bold,spacing?)`、`hit(x,y,w,h)`、`width`/`height`。颜色写法同上（支持 `rgba()`）。`spacing` 为字距（em，同 CSS letter-spacing，每个字后都加、含最后一个）：运行时逐字排版并缓存单字宽度，`align` 居中/右对齐时自动补回末尾字距，`wrap` 时在 `w` 内断行（英文优先在空格处断）；`measure` 传同样的 `spacing` 得到含末尾字距的宽度。没有渐变、字重档位：渐变用窄条带矩形近似。
+即时模式 2D，每帧在 update 里画，坐标为屏幕像素、左上角原点。`rect(x,y,w,h,color,{alpha,radius})`、`border(...,thickness)`、`gradient(x,y,w,h,stops,{angle,radius,alpha})`、`line`、`arc`、`text(str,x,y,{size,bold,color,alpha,align,valign,shadow,w,h,wrap,spacing})`、`measure(str,size,bold,spacing?)`、`hit(x,y,w,h)`、`width`/`height`。颜色写法同上（支持 `rgba()`）。`spacing` 为字距（em，同 CSS letter-spacing，每个字后都加、含最后一个）：运行时逐字排版并缓存单字宽度，`align` 居中/右对齐时自动补回末尾字距，`wrap` 时在 `w` 内断行（英文优先在空格处断）；`measure` 传同样的 `spacing` 得到含末尾字距的宽度。`gradient` 同 CSS linear-gradient：`stops` 为颜色或 `[颜色, 位置 0..1]`，缺省位置按 CSS 规则补齐，预乘 alpha 插值；`angle` 默认 180（从上到下），只支持 0/90/180/270，叠加多层就是 CSS 的多重背景（先画的在下层）。没有字重档位。
 
 布局辅助（只算矩形，不绘制）：`ui.flow(x, y, { dir: 'row'|'column', gap, align: 'start'|'center'|'end' })` 增量排布，尺寸边画边知道时用，`f.next(w, h)` 返回这一项的矩形并前移游标，`f.x`/`f.y` 为下一项位置，`f.width`/`f.height` 为已排外框（`align: 'center'` 时起点 y 是行的中线）；`ui.layout(sizes, { x, y, w, h }, { dir, gap, justify: 'start'|'center'|'end'|'between', align: 'start'|'center'|'end'|'stretch' })` 已知各项尺寸时在容器内分布，返回矩形数组。
 

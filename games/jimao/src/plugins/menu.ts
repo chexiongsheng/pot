@@ -67,19 +67,10 @@ export function apply(ctx: Context) {
   }
 
   // ---- 原版 m-veil / m-bars ----
-  /** 横向：ink .82 → .5（38%）→ 0（72%）；纵向：底部 .7 → 0（46%）。ui 没有渐变，用 6px 条带近似 */
+  /** 原版 linear-gradient(90deg, ink .82 0%, .5 38%, 0 72%), linear-gradient(0deg, ink .7 0%, 0 46%)；CSS 先列的在上层 */
   function veil(W: number, H: number, a: number) {
-    const step = 6
-    for (let x = 0; x < W * 0.72; x += step) {
-      const f = (x + step / 2) / W
-      const k = f < 0.38 ? 0.82 + (0.5 - 0.82) * (f / 0.38) : 0.5 * (1 - (f - 0.38) / 0.34)
-      ui.rect(x, 0, step, H, C.ink, { alpha: Math.max(0, k) * a })
-    }
-    const y0 = Math.floor(H * 0.54)
-    for (let y = y0; y < H; y += step) {
-      const f = (H - (y + step / 2)) / H
-      ui.rect(0, y, W, step, C.ink, { alpha: Math.max(0, 0.7 * (1 - f / 0.46)) * a })
-    }
+    ui.gradient(0, 0, W, H, [['rgba(6,8,10,.7)', 0], ['rgba(6,8,10,0)', 0.46]], { angle: 0, alpha: a })
+    ui.gradient(0, 0, W, H, [['rgba(6,8,10,.82)', 0], ['rgba(6,8,10,.5)', 0.38], ['rgba(6,8,10,0)', 0.72]], { angle: 90, alpha: a })
   }
   function bars(W: number, H: number, t: number) {
     const h = clamp(H * 0.055, 14, 52)

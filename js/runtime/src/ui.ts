@@ -43,6 +43,17 @@ export interface RectOptions {
   alpha?: number
 }
 
+/** 渐变色标：颜色，或 [颜色, 位置 0..1]；不写位置的按 CSS 规则在相邻有位置的色标间均分（首默认 0、末默认 1） */
+export type GradientStop = Color | [Color, number]
+
+export interface GradientOptions {
+  /** CSS linear-gradient 角度：180（默认）从上到下，90 从左到右，0 从下到上，270 从右到左；只支持 90 的整数倍 */
+  angle?: number
+  radius?: number
+  /** 透明度倍数 0 到 1 */
+  alpha?: number
+}
+
 export interface Rect {
   x: number
   y: number
@@ -189,6 +200,41 @@ export class UIService extends Service {
 
   border(x: number, y: number, w: number, h: number, color: Color, thickness = 1, options: RectOptions = {}) {
     this._list.push(['b', n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(thickness), n(options.radius ?? 0)].join(FS))
+  }
+
+  /**
+   * 线性渐变填充矩形（同 CSS linear-gradient，色标间按预乘 alpha 插值）。
+   * 例：ui.gradient(0, 0, W, H, [['#06080ad1', 0], ['#06080a80', 0.38], ['#06080a00', 0.72]], { angle: 90 })
+   */
+  gradient(x: number, y: number, w: number, h: number, stops: GradientStop[], options: GradientOptions = {}) {
+    if (!Array.isArray(stops) || stops.length === 0) throw new Error('ui.gradient：stops 至少要有一个色标')
+    const raw = options.angle ?? 180
+    if (!Number.isFinite(raw) || raw % 90 !== 0) throw new Error('ui.gradient：angle 只支持 0/90/180/270')
+    const angle = ((raw % 360) + 360) % 360
+    const list = stops.map((s) => {
+      const pair = Array.isArray(s) && s.length === 2 && typeof s[1] === 'number' && (typeof s[0] === 'string' || Array.isArray(s[0]))
+      const color = (pair ? s[0] : s) as Color
+      const pos = pair ? (s[1] as number) : undefined
+      if (pos !== undefined && !Number.isFinite(pos)) throw new Error('ui.gradient：色标位置须为有限数')
+      return { hex: this.hex(color, options.alpha), pos }
+    })
+    // CSS 规则：首末缺省 0 / 1；位置不得小于前一个；中间缺省的在两侧已知位置间均分
+    if (list[0].pos === undefined) list[0].pos = 0
+    if (list.length > 1 && list[list.length - 1].pos === undefined) list[list.length - 1].pos = 1
+    let max = -Infinity
+    for (const s of list) if (s.pos !== undefined) { s.pos = Math.max(s.pos, max); max = s.pos }
+    for (let i = 1; i < list.length; i++) {
+      if (list[i].pos !== undefined) continue
+      let j = i
+      while (list[j].pos === undefined) j++
+      const a = list[i - 1].pos!, b = list[j].pos!
+      for (let k = i; k < j; k++) list[k].pos = a + ((b - a) * (k - i + 1)) / (j - i + 1)
+    }
+    // 统一成沿 +x（横向）或 +y（纵向）：0° 与 270° 反转色标
+    const vertical = angle === 0 || angle === 180
+    const flip = angle === 0 || angle === 270
+    const out = (flip ? list.slice().reverse().map((s) => ({ hex: s.hex, pos: 1 - s.pos! })) : list).map((s) => `${s.hex}@${Math.round(s.pos! * 10000) / 10000}`)
+    this._list.push(['g', n(x), n(y), n(w), n(h), n(options.radius ?? 0), vertical ? '1' : '0', out.join(';')].join(FS))
   }
 
   line(x1: number, y1: number, x2: number, y2: number, color: Color, width = 1, alpha = 1) {

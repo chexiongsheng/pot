@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 41 |
+| ✅ 已完成 | 42 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 14 |
+| ❌ 未完成 | 13 |
 
 #### 渲染与着色器（gfx）
 
@@ -238,7 +238,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | 状态 | 能力 | 发现场景 | 说明 / 建议 |
 |---|---|---|---|
 | ✅ | 相机滚转 | 菜单 | `lookAt` 后改 `camera.rotation.z` 即可，无需新增 |
-| ❌ | 渐变 `gradient` | 菜单 | 现用约 180 个 6px 条带近似 |
+| ✅ | 渐变 `gradient` | 菜单 | `ui.gradient(x, y, w, h, stops, { angle, radius, alpha })`，语义同 CSS linear-gradient（色标位置缺省补齐、预乘插值），角度限 90 的整数倍。宿主新增 `g` 命令，按（方向, 色标）缓存 256 像素 sRGB 渐变贴图，IMGUI 一次绘制并支持圆角；jimao 遮罩由约 180 个条带改为两层渐变，色值照抄原版 |
 | ✅ | 字距 `spacing` | 菜单 | `ui.text(…, { spacing })` 与 `ui.measure(text, size, bold, spacing)`，单位 em（同 CSS letter-spacing）：运行时逐字排版、缓存单字宽度，支持 align/valign、居中与右对齐补回末尾字距、wrap 断行；jimao 菜单手写的 `charW`/逐字绘制删除。实现在 JS 侧逐字提交，宿主 UI 不用改；字很多时提交条数随字数增长 |
 | ❌ | 字重档位、等宽字体 | 菜单 | 900/600/500 被压成两档 |
 | ✅ | `rgba()` 颜色 | 菜单 | scene、ui、uniform 的 Color 字符串与 Canvas 共用一份 CSS 解析（[color.ts](js/runtime/src/color.ts)）：#rgb/#rgba/#rrggbb/#rrggbbaa、`rgb()`/`rgba()`（逗号或空格加 `/ alpha`、百分比）、`hsl()`/`hsla()`（deg/turn/rad）、常用颜色名；原来写错会静默变成 NaN 黑色，现在抛“无法解析颜色”并指出分量 |

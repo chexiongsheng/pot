@@ -4442,6 +4442,41 @@ var pot = (() => {
     border(x, y, w, h, color, thickness = 1, options = {}) {
       this._list.push(["b", n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(thickness), n(options.radius ?? 0)].join(FS));
     }
+    /**
+     * 线性渐变填充矩形（同 CSS linear-gradient，色标间按预乘 alpha 插值）。
+     * 例：ui.gradient(0, 0, W, H, [['#06080ad1', 0], ['#06080a80', 0.38], ['#06080a00', 0.72]], { angle: 90 })
+     */
+    gradient(x, y, w, h, stops, options = {}) {
+      if (!Array.isArray(stops) || stops.length === 0) throw new Error("ui.gradient：stops 至少要有一个色标");
+      const raw = options.angle ?? 180;
+      if (!Number.isFinite(raw) || raw % 90 !== 0) throw new Error("ui.gradient：angle 只支持 0/90/180/270");
+      const angle = (raw % 360 + 360) % 360;
+      const list = stops.map((s) => {
+        const pair = Array.isArray(s) && s.length === 2 && typeof s[1] === "number" && (typeof s[0] === "string" || Array.isArray(s[0]));
+        const color = pair ? s[0] : s;
+        const pos = pair ? s[1] : void 0;
+        if (pos !== void 0 && !Number.isFinite(pos)) throw new Error("ui.gradient：色标位置须为有限数");
+        return { hex: this.hex(color, options.alpha), pos };
+      });
+      if (list[0].pos === void 0) list[0].pos = 0;
+      if (list.length > 1 && list[list.length - 1].pos === void 0) list[list.length - 1].pos = 1;
+      let max = -Infinity;
+      for (const s of list) if (s.pos !== void 0) {
+        s.pos = Math.max(s.pos, max);
+        max = s.pos;
+      }
+      for (let i = 1; i < list.length; i++) {
+        if (list[i].pos !== void 0) continue;
+        let j = i;
+        while (list[j].pos === void 0) j++;
+        const a = list[i - 1].pos, b = list[j].pos;
+        for (let k = i; k < j; k++) list[k].pos = a + (b - a) * (k - i + 1) / (j - i + 1);
+      }
+      const vertical = angle === 0 || angle === 180;
+      const flip = angle === 0 || angle === 270;
+      const out = (flip ? list.slice().reverse().map((s) => ({ hex: s.hex, pos: 1 - s.pos })) : list).map((s) => `${s.hex}@${Math.round(s.pos * 1e4) / 1e4}`);
+      this._list.push(["g", n(x), n(y), n(w), n(h), n(options.radius ?? 0), vertical ? "1" : "0", out.join(";")].join(FS));
+    }
     line(x1, y1, x2, y2, color, width = 1, alpha = 1) {
       this._list.push(["l", n(x1), n(y1), n(x2), n(y2), this.hex(color, alpha), n(width)].join(FS));
     }
