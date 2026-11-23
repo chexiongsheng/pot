@@ -103,6 +103,15 @@ class MockEngine {
     m.tangents = [...t]
     return ''
   }
+  meshAttribute(name, channel, attr, size, data) {
+    const m = this.meshes?.get(name)
+    if (!m) return '未注册的网格：' + name
+    const d = new Float32Array(data)
+    if (channel < 1 || channel > 7) { m.key = ''; return '自定义顶点属性最多 7 个' }
+    if (d.length !== m.vertices * size) { m.key = ''; return `属性 ${attr} 须为每顶点 ${size} 个数，共 ${m.vertices * size} 个` }
+    ;(m.attributes ??= {})[attr] = { channel, size, data: [...d] }
+    return ''
+  }
   meshSkin(name, boneIndices, weights, bindPoses) {
     const m = this.meshes?.get(name)
     if (!m) return '未注册的网格：' + name

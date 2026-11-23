@@ -662,6 +662,7 @@ namespace Pot
             Mesh mesh;
             if (!meshes.TryGetValue(name, out mesh) || mesh == null) mesh = new Mesh { name = name };
             else mesh.Clear();
+            meshAttrs.Remove(mesh);
             mesh.indexFormat = vcount > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
             mesh.vertices = verts;
             var uv = Floats(uvs);
@@ -725,6 +726,63 @@ namespace Pot
             return "";
         }
 
+        // 网格 → 自定义顶点属性名 → UV 通道（1-7）
+        static readonly Dictionary<Mesh, Dictionary<string, int>> meshAttrs = new Dictionary<Mesh, Dictionary<string, int>>();
+
+        /// <summary>自定义属性在网格里的 UV 通道；没有返回 -1（PotGfx 按名字找着色器输入对应的通道）</summary>
+        internal static int MeshAttributeChannel(Mesh mesh, string attr)
+        {
+            Dictionary<string, int> m;
+            int ch;
+            return mesh != null && meshAttrs.TryGetValue(mesh, out m) && m.TryGetValue(attr, out ch) ? ch : -1;
+        }
+
+        /// <summary>
+        /// 给已注册的网格写一个自定义顶点属性（紧跟在 Mesh 之后调用）：存进 UV 通道 channel（1-7），
+        /// 运行时着色器里同名的 attributes 输入读到它。data 为 Float32，每顶点 size（1-4）个，原样存储不做色彩空间转换。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string MeshAttribute(string name, int channel, string attr, int size, Puerts.ArrayBuffer data)
+        {
+            Mesh mesh;
+            if (!meshes.TryGetValue(name, out mesh) || mesh == null) return "未注册的网格：" + name;
+            string err = null;
+            var d = Floats(data);
+            var vcount = mesh.vertexCount;
+            if (channel < 1 || channel > 7) err = "自定义顶点属性最多 7 个";
+            else if (size < 1 || size > 4) err = "属性 " + attr + " 的 size 须为 1 到 4";
+            else if (d == null || d.Length != vcount * size) err = "属性 " + attr + " 须为每顶点 " + size + " 个数，共 " + (vcount * size) + " 个";
+            else if (mesh.boneWeights != null && mesh.boneWeights.Length > 0) err = "蒙皮网格不能带自定义顶点属性（UV1-3 已用于静止姿态）";
+            if (err != null)
+            {
+                meshKeys.Remove(name);
+                return err;
+            }
+            if (size == 4)
+            {
+                var v = new Vector4[vcount];
+                for (var i = 0; i < vcount; i++) v[i] = new Vector4(d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]);
+                mesh.SetUVs(channel, v);
+            }
+            else if (size == 3)
+            {
+                var v = new Vector3[vcount];
+                for (var i = 0; i < vcount; i++) v[i] = new Vector3(d[i * 3], d[i * 3 + 1], d[i * 3 + 2]);
+                mesh.SetUVs(channel, v);
+            }
+            else
+            {
+                // 单分量也存成 2 分量（Unity 的 SetUVs 最少 2 维），着色器只读 x
+                var v = new Vector2[vcount];
+                for (var i = 0; i < vcount; i++) v[i] = size == 2 ? new Vector2(d[i * 2], d[i * 2 + 1]) : new Vector2(d[i], 0);
+                mesh.SetUVs(channel, v);
+            }
+            Dictionary<string, int> map;
+            if (!meshAttrs.TryGetValue(mesh, out map)) meshAttrs[mesh] = map = new Dictionary<string, int>();
+            map[attr] = channel;
+            return "";
+        }
+
         /// <summary>
         /// 给已注册的网格补蒙皮数据（紧跟在 Mesh 之后调用）。boneIndices 为 Int32，每顶点 1 到 4 个（个数 = 长度 / 顶点数）；
         /// weights 为 Float32，形状同 boneIndices，null 表示第一根骨骼权重 1（刚性蒙皮）；
@@ -736,6 +794,7 @@ namespace Pot
         {
             Mesh mesh;
             if (!meshes.TryGetValue(name, out mesh) || mesh == null) return "未注册的网格：" + name;
+            if (meshAttrs.ContainsKey(mesh)) { meshKeys.Remove(name); return "带自定义顶点属性的网格不能蒙皮（UV1-3 要存静止姿态）"; }
             var err = SkinData(mesh, Ints(boneIndices), Floats(weights), Floats(bindPoses));
             if (err.Length > 0) meshKeys.Remove(name);
             return err;
@@ -1019,6 +1078,7 @@ namespace Pot
             foreach (var m in meshes.Values) if (m != null) Object.Destroy(m);
             meshes.Clear();
             meshKeys.Clear();
+            meshAttrs.Clear();
             ResetEnvironment();
             PotRender.Clear();
             PotUI.Clear();

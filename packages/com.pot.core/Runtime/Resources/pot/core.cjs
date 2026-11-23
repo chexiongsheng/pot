@@ -49,6 +49,7 @@ var pot = (() => {
     Logger: () => Logger,
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
+    MAX_VERTEX_INPUTS: () => MAX_VERTEX_INPUTS,
     PluginsService: () => PluginsService,
     PostChain: () => PostChain,
     RegistryService: () => RegistryService,
@@ -108,6 +109,7 @@ var pot = (() => {
     unitOf: () => unitOf,
     unitOfFiber: () => unitOfFiber,
     unity: () => unity,
+    vertexInputs: () => vertexInputs,
     withProps: () => withProps
   });
 
@@ -3787,6 +3789,32 @@ var pot = (() => {
     const typed = view instanceof Type ? view : new Type(view);
     return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength ? typed.buffer : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength);
   }
+  var ATTRIBUTE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  function meshAttributes(mesh, attrs, vcount) {
+    if (!attrs) return [];
+    const names = Object.keys(attrs).sort();
+    if (names.length > 7) throw new Error(`scene.mesh(${mesh})：自定义顶点属性最多 7 个，给了 ${names.length} 个`);
+    return names.map((name) => {
+      if (!ATTRIBUTE_NAME.test(name) || name.startsWith("pot_") || name.startsWith("gl_")) throw new Error(`scene.mesh(${mesh})：顶点属性名 ${name} 不合法`);
+      const v = attrs[name];
+      const isArray = typeof v.length === "number";
+      const data = isArray ? v : v.data;
+      const size = isArray ? vcount > 0 ? data.length / vcount : 0 : v.size;
+      if (!(size >= 1 && size <= 4 && Number.isInteger(size))) throw new Error(`scene.mesh(${mesh})：顶点属性 ${name} 须为每顶点 1 到 4 个数`);
+      if (data.length !== size * vcount) throw new Error(`scene.mesh(${mesh})：顶点属性 ${name} 须为每顶点 ${size} 个数，共 ${size * vcount} 个`);
+      return { name, size, data: bytesOf(data, Float32Array) };
+    });
+  }
+  function attributeKeyParts(attrs) {
+    const out = [];
+    for (const a of attrs) {
+      const head = new Uint32Array(a.name.length + 1);
+      head[0] = a.size;
+      for (let i = 0; i < a.name.length; i++) head[i + 1] = a.name.charCodeAt(i);
+      out.push(head.buffer, a.data);
+    }
+    return out;
+  }
   function contentKey(buffers) {
     let a = 2166136261 | 0;
     let b = 2654435769 | 0;
@@ -4217,8 +4245,11 @@ var pot = (() => {
       const tangents = f(d.tangents);
       if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`);
       if (tangents && tangents.byteLength !== positions.byteLength / 3 * 4) throw new Error(`scene.mesh(${name})：tangents 须为每顶点 4 个数（xyzw），共 ${positions.byteLength / 12 * 4} 个`);
+      const vcount = positions.byteLength / 12;
+      const attributes = meshAttributes(name, d.attributes, vcount);
+      if (attributes.length && boneIndices) throw new Error(`scene.mesh(${name})：自定义顶点属性不能与蒙皮同时使用`);
       if (options.key === true) {
-        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents]);
+        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes)]);
         const cached = engine.meshCached(name, key);
         if (cached >= 0) return cached;
       }
@@ -4227,6 +4258,10 @@ var pot = (() => {
         const error = engine.meshTangents(name, tangents);
         if (error) throw new Error(`scene.mesh(${name})：${error}`);
       }
+      attributes.forEach((a, i) => {
+        const error = engine.meshAttribute(name, i + 1, a.name, a.size, a.data);
+        if (error) throw new Error(`scene.mesh(${name})：${error}`);
+      });
       if (boneIndices) {
         const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses);
         if (error) throw new Error(`scene.mesh(${name})：${error}`);
@@ -5631,6 +5666,24 @@ IncidentLight directLight;
   }
 
   // runtime/src/gfx.ts
+  var MAX_VERTEX_INPUTS = 11;
+  function vertexInputs(attributes, instanced) {
+    const lines = [];
+    const seen = /* @__PURE__ */ new Set();
+    const add = (group, instance) => {
+      for (const [name, type] of Object.entries(group ?? {})) {
+        if (!/^[A-Za-z_]\w*$/.test(name) || name.startsWith("pot_") || name.startsWith("gl_")) throw new Error(`gfx.shader：顶点属性名 ${name} 不合法`);
+        if (seen.has(name)) throw new Error(`gfx.shader：顶点属性 ${name} 重复声明`);
+        if (!["float", "vec2", "vec3", "vec4"].includes(type)) throw new Error(`gfx.shader：顶点属性 ${name} 的类型须为 float / vec2 / vec3 / vec4`);
+        seen.add(name);
+        lines.push(`layout(location = ${5 + lines.length}) in ${type} ${name};${instance ? " // pot:instance" : ""}`);
+      }
+    };
+    add(attributes, false);
+    add(instanced, true);
+    if (lines.length > MAX_VERTEX_INPUTS) throw new Error(`gfx.shader：自定义与实例属性合计最多 ${MAX_VERTEX_INPUTS} 个，给了 ${lines.length} 个`);
+    return lines.join("\n");
+  }
   var PostChain = class {
     constructor(_apply, _dispose) {
       __publicField(this, "_apply", _apply);
@@ -6125,6 +6178,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     out.push(BUILTIN_UNIFORMS.trimEnd());
     if (stage === "vertex") {
       if (!three) out.push(VERTEX_INPUTS.trimEnd());
+      if (options.inputs) out.push(options.inputs);
     } else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;\nuniform highp sampler2D pot_SceneDepth;");
     const expand = (name, text, depth, stack) => {
       if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(" → ")}`);
@@ -6227,12 +6281,20 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       if (fragmentEntry.path === void 0 && fragmentEntry.source === void 0) throw new Error("gfx.shader：需要 fragment 或 fragmentSource");
       if (options.dialect === "three" && options.vertex === void 0 && options.vertexSource === void 0) throw new Error("gfx.shader：three 方言需要 vertex 或 vertexSource");
       const defs = options.defines && Object.keys(options.defines).length ? `|${hash2(JSON.stringify(options.defines))}` : "";
-      const name = options.name ?? `${options.dialect ? `${options.dialect}:` : ""}${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : `<${vertexEntry.library ?? "pot/standard.vert"}>`)}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}${defs}`;
-      let error = "";
+      let inputs = "";
+      let inputError = "";
+      try {
+        inputs = vertexInputs(options.attributes, options.instanced);
+      } catch (e) {
+        inputError = String(e?.message ?? e);
+      }
+      const ins = inputs ? `|in:${hash2(inputs)}` : "";
+      const name = options.name ?? `${options.dialect ? `${options.dialect}:` : ""}${options.vertex ?? (options.vertexSource !== void 0 ? `inline:${hash2(options.vertexSource)}` : `<${vertexEntry.library ?? "pot/standard.vert"}>`)}|${options.fragment ?? `inline:${hash2(options.fragmentSource)}`}${defs}${ins}`;
+      let error = inputError;
       let vs;
       let fs;
-      try {
-        const pre = { dialect: options.dialect, defines: options.defines };
+      if (!error) try {
+        const pre = { dialect: options.dialect, defines: options.defines, inputs };
         vs = preprocess("vertex", vertexEntry, read, pre);
         fs = preprocess("fragment", fragmentEntry, read, pre);
       } catch (e) {
@@ -6855,6 +6917,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         meshCached: (name, key) => S.MeshCached(name, key),
         meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
         meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? "",
+        meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
         matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
         matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),

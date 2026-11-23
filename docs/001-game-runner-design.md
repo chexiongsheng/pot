@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 43 |
+| ✅ 已完成 | 44 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 12 |
+| ❌ 未完成 | 11 |
 
 #### 渲染与着色器（gfx）
 
@@ -191,7 +191,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ❌ | gfx 物体不进平面反射 | 地面 | 镜像相机也要挂 GfxPass 并用其矩阵打包 |
 | ❌ | 附加光阴影 | 地面 | 路灯光斑不会被集装箱挡住，需复算附加光阴影图集矩阵 |
 | ❌ | 实例化 `instances` | 雨 | 现在把实例展开成普通网格，顶点数与上传量 4 倍；建议 `DrawIndexedInstanced` |
-| ❌ | 自定义顶点属性 `attributes` | 雨 | 只能借用 normals / uvs，colors 会被转线性 |
+| ✅ | 自定义顶点属性 `attributes` | 雨 | `scene.mesh` 的 `attributes: { name: { size, data } }`（或直接给数组，size 按长度推出）按名字排序写进网格 UV1–7，Float32 原样传、不做色彩空间转换；着色器用 `shader(s, { attributes: { name: 'vec4' } })` 声明，运行时生成 `layout(location = 5+) in` 并按名字找到网格通道，网格缺该属性时读到 0。参与 `key: true` 的内容哈希；不能与蒙皮同用 |
 | ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
 | ❌ | 后处理 pass 读阴影图 | 后处理 | 体积光（god rays）因此未移植 |
 | ❌ | 后处理链与 `scene.post` 可共存 | 后处理 | 链生效时 SSAO、景深一起失效；建议提供 URP 后处理之后的挂点 |

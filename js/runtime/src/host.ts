@@ -108,6 +108,8 @@ export interface Engine {
   meshSkin(name: string, boneIndices: ArrayBuffer, weights: ArrayBuffer | null, bindPoses: ArrayBuffer | null): string
   /** 用给定切线（Float32 xyzw，每顶点 4 个）替换刚注册网格自动计算的切线。成功返回空串 */
   meshTangents(name: string, tangents: ArrayBuffer): string
+  /** 给刚注册的网格写自定义顶点属性：channel 1-7（UV1-UV7），data 为 Float32、每顶点 size（1-4）个，原样存储。成功返回空串 */
+  meshAttribute(name: string, channel: number, attr: string, size: number, data: ArrayBuffer): string
   /** slot：map / normal / mask 或着色器属性名；tex 为 0 表示解除 */
   matTexture(id: number, slot: string, tex: number): void
   matFloat(id: number, prop: string, value: number): void

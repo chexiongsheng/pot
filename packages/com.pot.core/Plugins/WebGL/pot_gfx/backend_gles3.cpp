@@ -268,6 +268,10 @@ public:
             int offsets[kAttrCount], formats[kAttrCount];
             for (int i = 0; i < kAttrCount; i++) offsets[i] = r.i32();
             for (int i = 0; i < kAttrCount; i++) formats[i] = r.i32();
+            GLuint instVB = (GLuint)(uintptr_t)r.i64();
+            int instStride = r.i32();
+            int instCount = r.i32();
+            if (!instVB || instStride <= 0) instCount = 0;
             int texCount = r.i32();
             struct Tex { int slot, sampler; GLuint tex; };
             Tex texs[kMaxUnits];
@@ -294,18 +298,32 @@ public:
             // 顶点属性：GLES3/WebGL2 没有 baseVertex 绘制，改为把属性指针整体偏移 baseVertex 个顶点
             glBindBuffer(GL_ARRAY_BUFFER, vb);
             const size_t base = (size_t)(baseVertex > 0 ? baseVertex : 0) * (size_t)stride;
+            bool anyInst = false;
             for (int i = 0; i < kAttrCount; i++) {
                 GLint comps;
                 GLenum type;
                 GLboolean norm = GL_FALSE;
-                if (!AttrGL(formats[i], comps, type, norm) || offsets[i] < 0) {
+                bool inst = (formats[i] & AF_Instance) != 0;
+                if ((inst && instCount <= 0) || !AttrGL(formats[i] & ~AF_Instance, comps, type, norm) || offsets[i] < 0) {
                     glDisableVertexAttribArray((GLuint)i);
-                    static const float defaults[kAttrCount][4] = {{0, 0, 0, 1}, {0, 1, 0, 0}, {0, 0, 0, 0}, {1, 1, 1, 1}, {1, 0, 0, 1}};
-                    glVertexAttrib4fv((GLuint)i, defaults[i]);
+                    glVertexAttribDivisor((GLuint)i, 0);
+                    static const float defaults[kBuiltinAttrs][4] = {{0, 0, 0, 1}, {0, 1, 0, 0}, {0, 0, 0, 0}, {1, 1, 1, 1}, {1, 0, 0, 1}};
+                    static const float zero[4] = {0, 0, 0, 0};
+                    glVertexAttrib4fv((GLuint)i, i < kBuiltinAttrs ? defaults[i] : zero);
                     continue;
                 }
                 glEnableVertexAttribArray((GLuint)i);
-                glVertexAttribPointer((GLuint)i, comps, type, norm, stride, (const void*)(base + (size_t)offsets[i]));
+                if (inst) {
+                    // 实例属性：每个实例前进一步，不受 baseVertex 影响
+                    glBindBuffer(GL_ARRAY_BUFFER, instVB);
+                    glVertexAttribPointer((GLuint)i, comps, type, norm, instStride, (const void*)(size_t)offsets[i]);
+                    glVertexAttribDivisor((GLuint)i, 1);
+                    glBindBuffer(GL_ARRAY_BUFFER, vb);
+                    anyInst = true;
+                } else {
+                    glVertexAttribPointer((GLuint)i, comps, type, norm, stride, (const void*)(base + (size_t)offsets[i]));
+                    glVertexAttribDivisor((GLuint)i, 0);
+                }
             }
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib);
 
@@ -321,9 +339,15 @@ public:
 
             ApplyState(flags);
             const size_t isz = index32 ? 4 : 2;
-            glDrawElements(GL_TRIANGLES, indexCount, index32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
-                           (const void*)((size_t)indexStart * isz));
+            const GLenum itype = index32 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+            const void* ioff = (const void*)((size_t)indexStart * isz);
+            if (anyInst && instCount > 0)
+                glDrawElementsInstanced(GL_TRIANGLES, indexCount, itype, ioff, instCount);
+            else
+                glDrawElements(GL_TRIANGLES, indexCount, itype, ioff);
         }
+        // 自己的 VAO 上 divisor 复位，下一帧未用到的属性不会残留实例步进
+        for (int i = 0; i < kAttrCount; i++) glVertexAttribDivisor((GLuint)i, 0);
 
         Restore(saved);
         if (target) {
@@ -417,6 +441,7 @@ private:
     static bool AttrGL(int f, GLint& comps, GLenum& type, GLboolean& norm) {
         norm = GL_FALSE;
         switch (f) {
+            case AF_Float1: comps = 1; type = GL_FLOAT; return true;
             case AF_Float2: comps = 2; type = GL_FLOAT; return true;
             case AF_Float3: comps = 3; type = GL_FLOAT; return true;
             case AF_Float4: comps = 4; type = GL_FLOAT; return true;

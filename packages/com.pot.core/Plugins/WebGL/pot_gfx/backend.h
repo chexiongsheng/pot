@@ -14,12 +14,16 @@ namespace pot {
 //     int32 program, int32 flags
 //     int64 vertexBuffer, int64 indexBuffer       （Unity Mesh 的原生缓冲指针）
 //     int32 stride, int32 index32, int32 indexStart, int32 indexCount, int32 baseVertex
-//     int32 attrOffset[5], int32 attrFormat[5]    （0 位置 1 法线 2 UV 3 颜色 4 切线；格式 0 表示缺省）
+//     int32 attrOffset[16], int32 attrFormat[16]  （location 0 位置 1 法线 2 UV 3 颜色 4 切线，5-15 自定义 / 实例属性；
+//                                                  格式 0 表示缺省值，带 AF_Instance 位表示从实例缓冲读）
+//     int64 instanceBuffer, int32 instanceStride, int32 instanceCount（instanceCount 0 表示不实例化）
 //     int32 texCount, 每个：int32 slot, int32 sampler, int64 nativeTexture
 //     int32 vsBytes, vsBytes 字节（统一块数据，按 4 对齐）
 //     int32 fsBytes, fsBytes 字节
-enum AttrFormat { AF_None = 0, AF_Float2 = 1, AF_Float3 = 2, AF_Float4 = 3, AF_UNorm8x4 = 4, AF_Half2 = 5, AF_Half4 = 6 };
-constexpr int kAttrCount = 5;
+enum AttrFormat { AF_None = 0, AF_Float2 = 1, AF_Float3 = 2, AF_Float4 = 3, AF_UNorm8x4 = 4, AF_Half2 = 5, AF_Half4 = 6, AF_Float1 = 7 };
+constexpr int AF_Instance = 0x100;
+constexpr int kAttrCount = 16;
+constexpr int kBuiltinAttrs = 5;
 
 // flags 位
 constexpr uint32_t F_CullMask = 3;         // 0 背面 1 正面 2 不剔除

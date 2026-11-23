@@ -137,6 +137,26 @@ namespace Pot
             public string vsSource, fsSource;
             public ReflStage vs, fs;
             public readonly Dictionary<string, int> textures = new Dictionary<string, int>();
+            // location 5-15：自定义顶点属性 / 实例属性的名字（null 表示未声明）
+            public readonly string[] inputs = new string[AttrCount];
+            public readonly bool[] instanced = new bool[AttrCount];
+        }
+
+        const int AttrCount = 16, BuiltinAttrs = 5, AF_Instance = 0x100;
+
+        // 运行时预置代码生成的声明：layout(location = N) in TYPE name; 行尾 // pot:instance 表示实例属性
+        static readonly System.Text.RegularExpressions.Regex inputDecl = new System.Text.RegularExpressions.Regex(
+            @"layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*in\s+\w+\s+(\w+)\s*;[ \t]*(//\s*pot:instance)?");
+
+        static void ParseInputs(GpuProgram p)
+        {
+            foreach (System.Text.RegularExpressions.Match m in inputDecl.Matches(p.vsSource ?? ""))
+            {
+                var loc = int.Parse(m.Groups[1].Value);
+                if (loc < BuiltinAttrs || loc >= AttrCount) continue;
+                p.inputs[loc] = m.Groups[2].Value;
+                p.instanced[loc] = m.Groups[3].Success;
+            }
         }
 
         static readonly Dictionary<string, GpuProgram> programs = new Dictionary<string, GpuProgram>();
@@ -159,6 +179,7 @@ namespace Pot
             var p = new GpuProgram { id = id, vsSource = vs, fsSource = fs, vs = refl.vs ?? new ReflStage(), fs = refl.fs ?? new ReflStage() };
             AddTextures(p, p.vs);
             AddTextures(p, p.fs);
+            ParseInputs(p);
             GpuProgram old;
             if (programs.TryGetValue(name, out old)) PotGfx_Destroy(old.id);
             programs[name] = p;
@@ -699,13 +720,49 @@ namespace Pot
 
         static int AttrFormat(VertexAttributeFormat f, int dim)
         {
-            if (f == VertexAttributeFormat.Float32) return dim == 2 ? 1 : dim == 3 ? 2 : dim == 4 ? 3 : 0;
+            if (f == VertexAttributeFormat.Float32) return dim == 1 ? 7 : dim == 2 ? 1 : dim == 3 ? 2 : dim == 4 ? 3 : 0;
             if (f == VertexAttributeFormat.UNorm8 && dim == 4) return 4;
             if (f == VertexAttributeFormat.Float16) return dim == 2 ? 5 : dim == 4 ? 6 : 0;
             return 0;
         }
 
         static readonly VertexAttribute[] attrs = { VertexAttribute.Position, VertexAttribute.Normal, VertexAttribute.TexCoord0, VertexAttribute.Color, VertexAttribute.Tangent };
+
+        /// <summary>location i 的自定义属性在网格里对应的 UV 通道属性（找不到返回 false）</summary>
+        static bool MeshInput(GpuProgram p, Mesh mesh, int i, out VertexAttribute a)
+        {
+            a = VertexAttribute.TexCoord1;
+            var name = p.inputs[i];
+            if (name == null || p.instanced[i]) return false;
+            var ch = PotScene.MeshAttributeChannel(mesh, name);
+            if (ch < 1 || ch > 7) return false;
+            a = VertexAttribute.TexCoord0 + ch;
+            return mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0;
+        }
+
+        static int InputOffset(GpuProgram p, Binding b, Mesh mesh, int i)
+        {
+            if (p.instanced[i]) return InstanceOffset(b, p.inputs[i]);
+            VertexAttribute a;
+            return MeshInput(p, mesh, i, out a) ? mesh.GetVertexAttributeOffset(a) : 0;
+        }
+
+        static int InputFormat(GpuProgram p, Binding b, Mesh mesh, int i)
+        {
+            if (p.instanced[i]) return InstanceFormat(b, p.inputs[i]);
+            VertexAttribute a;
+            return MeshInput(p, mesh, i, out a) ? AttrFormat(mesh.GetVertexAttributeFormat(a), mesh.GetVertexAttributeDimension(a)) : 0;
+        }
+
+        static int InstanceOffset(Binding b, string name) { return 0; }
+        static int InstanceFormat(Binding b, string name) { return 0; }
+
+        static void WriteInstances(Binding b)
+        {
+            writer.Write(0L);
+            writer.Write(0);
+            writer.Write(0);
+        }
 
         static int SamplerBits(Texture t)
         {
@@ -860,8 +917,11 @@ namespace Pot
             writer.Write(sub.baseVertex);
             foreach (var a in attrs)
                 writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? mesh.GetVertexAttributeOffset(a) : 0);
+            for (var i = BuiltinAttrs; i < AttrCount; i++) writer.Write(InputOffset(p, b, mesh, i));
             foreach (var a in attrs)
                 writer.Write(mesh.HasVertexAttribute(a) && mesh.GetVertexAttributeStream(a) == 0 ? AttrFormat(mesh.GetVertexAttributeFormat(a), mesh.GetVertexAttributeDimension(a)) : 0);
+            for (var i = BuiltinAttrs; i < AttrCount; i++) writer.Write(InputFormat(p, b, mesh, i));
+            WriteInstances(b);
 
             // 贴图
             var texPos = frame.Position;

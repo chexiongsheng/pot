@@ -231,6 +231,18 @@ export interface MeshData {
   boneWeights?: ArrayLike<number>
   /** 每根骨骼的绑定矩阵（16 个数，列主序，引擎坐标系）；省略表示单位矩阵，即顶点已经在各自骨骼的局部空间里 */
   bindPoses?: ArrayLike<number>
+  /**
+   * 自定义顶点属性：名字 → 每顶点 1 到 4 个浮点（`{ size, data }`，或直接给数组，size 按长度 / 顶点数推出）。
+   * 最多 7 个，存进 Unity 网格的 UV1-UV7，原样存储（不做 sRGB 转换）；运行时着色器用 `shader({ attributes: { 名字: 'vec4' } })`
+   * 声明后在顶点阶段按同名变量读取。不能与蒙皮同时使用
+   */
+  attributes?: Record<string, MeshAttribute | ArrayLike<number>>
+}
+
+export interface MeshAttribute {
+  /** 每顶点分量数 1 到 4 */
+  size: 1 | 2 | 3 | 4
+  data: ArrayLike<number>
 }
 
 export interface PostOptions {
@@ -374,6 +386,37 @@ function bytesOf(view: ArrayLike<number>, Type: Float32ArrayConstructor | Uint32
   return typed.byteOffset === 0 && typed.byteLength === typed.buffer.byteLength
     ? typed.buffer as ArrayBuffer
     : typed.buffer.slice(typed.byteOffset, typed.byteOffset + typed.byteLength) as ArrayBuffer
+}
+
+interface ResolvedAttribute { name: string, size: number, data: ArrayBuffer }
+
+const ATTRIBUTE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function meshAttributes(mesh: string, attrs: MeshData['attributes'], vcount: number): ResolvedAttribute[] {
+  if (!attrs) return []
+  const names = Object.keys(attrs).sort()
+  if (names.length > 7) throw new Error(`scene.mesh(${mesh})：自定义顶点属性最多 7 个，给了 ${names.length} 个`)
+  return names.map(name => {
+    if (!ATTRIBUTE_NAME.test(name) || name.startsWith('pot_') || name.startsWith('gl_')) throw new Error(`scene.mesh(${mesh})：顶点属性名 ${name} 不合法`)
+    const v = attrs[name] as MeshAttribute | ArrayLike<number>
+    const isArray = typeof (v as ArrayLike<number>).length === 'number'
+    const data = isArray ? v as ArrayLike<number> : (v as MeshAttribute).data
+    const size = isArray ? (vcount > 0 ? data.length / vcount : 0) : (v as MeshAttribute).size
+    if (!(size >= 1 && size <= 4 && Number.isInteger(size))) throw new Error(`scene.mesh(${mesh})：顶点属性 ${name} 须为每顶点 1 到 4 个数`)
+    if (data.length !== size * vcount) throw new Error(`scene.mesh(${mesh})：顶点属性 ${name} 须为每顶点 ${size} 个数，共 ${size * vcount} 个`)
+    return { name, size, data: bytesOf(data, Float32Array) }
+  })
+}
+
+function attributeKeyParts(attrs: ResolvedAttribute[]): ArrayBuffer[] {
+  const out: ArrayBuffer[] = []
+  for (const a of attrs) {
+    const head = new Uint32Array(a.name.length + 1)
+    head[0] = a.size
+    for (let i = 0; i < a.name.length; i++) head[i + 1] = a.name.charCodeAt(i)
+    out.push(head.buffer, a.data)
+  }
+  return out
 }
 
 /** 网格内容哈希（两路 32 位，按 4 字节字混合）：百万顶点量级几十毫秒，远快于上传 */
@@ -881,8 +924,11 @@ export class SceneService extends Service {
     const tangents = f(d.tangents)
     if (!boneIndices && (boneWeights || bindPoses)) throw new Error(`scene.mesh(${name})：boneWeights、bindPoses 需要和 boneIndices 一起给`)
     if (tangents && tangents.byteLength !== positions.byteLength / 3 * 4) throw new Error(`scene.mesh(${name})：tangents 须为每顶点 4 个数（xyzw），共 ${positions.byteLength / 12 * 4} 个`)
+    const vcount = positions.byteLength / 12
+    const attributes = meshAttributes(name, d.attributes, vcount)
+    if (attributes.length && boneIndices) throw new Error(`scene.mesh(${name})：自定义顶点属性不能与蒙皮同时使用`)
     if (options.key === true) {
-      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents])
+      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes)])
       const cached = engine.meshCached(name, key)
       if (cached >= 0) return cached
     }
@@ -891,6 +937,10 @@ export class SceneService extends Service {
       const error = engine.meshTangents(name, tangents)
       if (error) throw new Error(`scene.mesh(${name})：${error}`)
     }
+    attributes.forEach((a, i) => {
+      const error = engine.meshAttribute(name, i + 1, a.name, a.size, a.data)
+      if (error) throw new Error(`scene.mesh(${name})：${error}`)
+    })
     if (boneIndices) {
       const error = engine.meshSkin(name, boneIndices, boneWeights, bindPoses)
       if (error) throw new Error(`scene.mesh(${name})：${error}`)

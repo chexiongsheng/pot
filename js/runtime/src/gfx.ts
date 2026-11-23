@@ -47,6 +47,40 @@ export interface ShaderOptions {
   dialect?: 'three'
   /** 预置的宏（true → #define K；false 省略；其他 → #define K 值） */
   defines?: Defines
+  /**
+   * 自定义顶点属性：名字 → 类型。顶点阶段预置 `in 类型 名字;`，读的是 scene.mesh 的 attributes 里同名的数据；
+   * 网格没有这个属性时读到 0。与 instanced 合计最多 11 个
+   */
+  attributes?: Record<string, VertexInputType>
+  /**
+   * 实例属性：名字 → 类型。顶点阶段预置 `in 类型 名字;`，每个实例读一份，数据由 entity.instances() 提供；
+   * 没给实例数据时只画一份、读到 0
+   */
+  instanced?: Record<string, VertexInputType>
+}
+
+export type VertexInputType = 'float' | 'vec2' | 'vec3' | 'vec4'
+
+/** 自定义 / 实例属性占用的 location 范围：5 到 15（0-4 为内置） */
+export const MAX_VERTEX_INPUTS = 11
+
+/** 生成自定义 / 实例属性声明（C# PotGfx.ParseInputs 按这个格式解析 location 与名字） */
+export function vertexInputs(attributes?: Record<string, VertexInputType>, instanced?: Record<string, VertexInputType>): string {
+  const lines: string[] = []
+  const seen = new Set<string>()
+  const add = (group: Record<string, VertexInputType> | undefined, instance: boolean) => {
+    for (const [name, type] of Object.entries(group ?? {})) {
+      if (!/^[A-Za-z_]\w*$/.test(name) || name.startsWith('pot_') || name.startsWith('gl_')) throw new Error(`gfx.shader：顶点属性名 ${name} 不合法`)
+      if (seen.has(name)) throw new Error(`gfx.shader：顶点属性 ${name} 重复声明`)
+      if (!['float', 'vec2', 'vec3', 'vec4'].includes(type)) throw new Error(`gfx.shader：顶点属性 ${name} 的类型须为 float / vec2 / vec3 / vec4`)
+      seen.add(name)
+      lines.push(`layout(location = ${5 + lines.length}) in ${type} ${name};${instance ? ' // pot:instance' : ''}`)
+    }
+  }
+  add(attributes, false)
+  add(instanced, true)
+  if (lines.length > MAX_VERTEX_INPUTS) throw new Error(`gfx.shader：自定义与实例属性合计最多 ${MAX_VERTEX_INPUTS} 个，给了 ${lines.length} 个`)
+  return lines.join('\n')
 }
 
 export interface BakeTarget {
@@ -594,7 +628,7 @@ function dirname(path: string) {
  * 展开 #include，并用 #line 把行号映射回原文件。
  * read(path) 读取 data/ 下的文件（会登记依赖，文件变化时触发热重载）。
  */
-export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string; library?: string }, read: (path: string) => string, options: { dialect?: 'three'; defines?: Defines } = {}): Source {
+export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string; source?: string; library?: string }, read: (path: string) => string, options: { dialect?: 'three'; defines?: Defines; inputs?: string } = {}): Source {
   const files: string[] = ['(预置)']
   const once = new Set<string>()
   const three = options.dialect === 'three'
@@ -608,6 +642,7 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
   out.push(BUILTIN_UNIFORMS.trimEnd())
   if (stage === 'vertex') {
     if (!three) out.push(VERTEX_INPUTS.trimEnd())
+    if (options.inputs) out.push(options.inputs)
   } else out.push('uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;\nuniform highp sampler2D pot_SceneDepth;')
 
   const expand = (name: string, text: string, depth: number, stack: string[]) => {
@@ -722,13 +757,21 @@ export class GfxService extends Service {
     if (fragmentEntry.path === undefined && fragmentEntry.source === undefined) throw new Error('gfx.shader：需要 fragment 或 fragmentSource')
     if (options.dialect === 'three' && options.vertex === undefined && options.vertexSource === undefined) throw new Error('gfx.shader：three 方言需要 vertex 或 vertexSource')
     const defs = options.defines && Object.keys(options.defines).length ? `|${hash(JSON.stringify(options.defines))}` : ''
+    let inputs = ''
+    let inputError = ''
+    try {
+      inputs = vertexInputs(options.attributes, options.instanced)
+    } catch (e: any) {
+      inputError = String(e?.message ?? e)
+    }
+    const ins = inputs ? `|in:${hash(inputs)}` : ''
     const name = options.name
-      ?? `${options.dialect ? `${options.dialect}:` : ''}${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : `<${vertexEntry.library ?? 'pot/standard.vert'}>`)}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}${defs}`
-    let error = ''
+      ?? `${options.dialect ? `${options.dialect}:` : ''}${options.vertex ?? (options.vertexSource !== undefined ? `inline:${hash(options.vertexSource)}` : `<${vertexEntry.library ?? 'pot/standard.vert'}>`)}|${options.fragment ?? `inline:${hash(options.fragmentSource!)}`}${defs}${ins}`
+    let error = inputError
     let vs: Source | undefined
     let fs: Source | undefined
-    try {
-      const pre = { dialect: options.dialect, defines: options.defines }
+    if (!error) try {
+      const pre = { dialect: options.dialect, defines: options.defines, inputs }
       vs = preprocess('vertex', vertexEntry, read, pre)
       fs = preprocess('fragment', fragmentEntry, read, pre)
     } catch (e: any) {

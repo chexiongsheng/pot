@@ -43,8 +43,8 @@ struct ProgramD3D11 {
 
 struct SavedState {
     ID3D11InputLayout* layout = nullptr;
-    ID3D11Buffer* vb[2] = {};
-    UINT vbStride[2] = {}, vbOffset[2] = {};
+    ID3D11Buffer* vb[3] = {};
+    UINT vbStride[3] = {}, vbOffset[3] = {};
     ID3D11Buffer* ib = nullptr;
     DXGI_FORMAT ibFormat = DXGI_FORMAT_UNKNOWN;
     UINT ibOffset = 0;
@@ -74,7 +74,8 @@ class BackendD3D11 : public Backend {
 public:
     explicit BackendD3D11(ID3D11Device* device) : device_(device) {
         // 缺省属性：slot 1，步长 0，所有顶点读同一个值
-        const float dummy[20] = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1};
+        // 0 位置 1 法线 2 UV 3 颜色 4 切线；5 以后的自定义属性缺省为 0
+        float dummy[kAttrCount * 4] = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1};
         D3D11_BUFFER_DESC bd = {};
         bd.ByteWidth = sizeof dummy;
         bd.Usage = D3D11_USAGE_IMMUTABLE;
@@ -171,6 +172,13 @@ public:
             int offsets[kAttrCount], formats[kAttrCount];
             for (int i = 0; i < kAttrCount; i++) offsets[i] = r.i32();
             for (int i = 0; i < kAttrCount; i++) formats[i] = r.i32();
+            ID3D11Buffer* instVB = (ID3D11Buffer*)(intptr_t)r.i64();
+            int instStride = r.i32();
+            int instCount = r.i32();
+            if (!instVB || instStride <= 0) instCount = 0;
+            if (instCount <= 0)
+                for (int i = 0; i < kAttrCount; i++)
+                    if (formats[i] & AF_Instance) formats[i] = AF_None;
             int texCount = r.i32();
             struct Tex { int slot, sampler; ID3D11Resource* res; };
             Tex texs[16];
@@ -193,15 +201,20 @@ public:
             ProgramD3D11& prog = it->second;
             ID3D11InputLayout* layout = Layout(prog, stride, offsets, formats);
             if (!layout) continue;
+            if (instCount > 0) {
+                bool any = false;
+                for (int i = 0; i < kAttrCount; i++) any = any || (formats[i] & AF_Instance);
+                if (!any) instCount = 0;  // 着色器没声明实例属性：照常画一份
+            }
 
             Upload(ctx, prog.vsCB, prog.vsCBSize, vsData, vsBytes);
             Upload(ctx, prog.psCB, prog.psCBSize, fsData, fsBytes);
 
             ctx->IASetInputLayout(layout);
-            ID3D11Buffer* vbs[2] = {vb, dummy_};
-            UINT strides[2] = {(UINT)stride, 0};
-            UINT offs[2] = {0, 0};
-            ctx->IASetVertexBuffers(0, 2, vbs, strides, offs);
+            ID3D11Buffer* vbs[3] = {vb, dummy_, instCount > 0 ? instVB : nullptr};
+            UINT strides[3] = {(UINT)stride, 0, instCount > 0 ? (UINT)instStride : 0};
+            UINT offs[3] = {0, 0, 0};
+            ctx->IASetVertexBuffers(0, 3, vbs, strides, offs);
             ctx->IASetIndexBuffer(ib, index32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
             ctx->VSSetShader(prog.vs, nullptr, 0);
             ctx->PSSetShader(prog.ps, nullptr, 0);
@@ -220,7 +233,10 @@ public:
             const float factor[4] = {0, 0, 0, 0};
             ctx->OMSetBlendState(Blend((flags >> F_BlendShift) & 3), factor, 0xffffffff);
             ctx->OMSetDepthStencilState(Depth(flags), 0);
-            ctx->DrawIndexed((UINT)indexCount, (UINT)indexStart, baseVertex);
+            if (instCount > 0)
+                ctx->DrawIndexedInstanced((UINT)indexCount, (UINT)instCount, (UINT)indexStart, baseVertex, 0);
+            else
+                ctx->DrawIndexed((UINT)indexCount, (UINT)indexStart, baseVertex);
         }
 
         Restore(ctx, saved);
@@ -276,7 +292,8 @@ private:
     }
 
     static DXGI_FORMAT AttrDxgi(int f) {
-        switch (f) {
+        switch (f & ~AF_Instance) {
+            case AF_Float1: return DXGI_FORMAT_R32_FLOAT;
             case AF_Float2: return DXGI_FORMAT_R32G32_FLOAT;
             case AF_Float3: return DXGI_FORMAT_R32G32B32_FLOAT;
             case AF_Float4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -292,19 +309,20 @@ private:
         for (int i = 0; i < kAttrCount; i++) key += "," + std::to_string(offsets[i]) + ":" + std::to_string(formats[i]);
         auto it = prog.layouts.find(key);
         if (it != prog.layouts.end()) return it->second;
-        static const DXGI_FORMAT defaults[kAttrCount] = {DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT,
-                                                         DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT,
-                                                         DXGI_FORMAT_R32G32B32A32_FLOAT};
+        static const DXGI_FORMAT defaults[kBuiltinAttrs] = {DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT,
+                                                            DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT,
+                                                            DXGI_FORMAT_R32G32B32A32_FLOAT};
         D3D11_INPUT_ELEMENT_DESC el[kAttrCount];
         for (int i = 0; i < kAttrCount; i++) {
-            bool has = formats[i] != AF_None && offsets[i] >= 0;
+            bool has = (formats[i] & ~AF_Instance) != AF_None && offsets[i] >= 0;
+            bool inst = has && (formats[i] & AF_Instance);
             el[i].SemanticName = "TEXCOORD";
             el[i].SemanticIndex = (UINT)i;
-            el[i].Format = has ? AttrDxgi(formats[i]) : defaults[i];
-            el[i].InputSlot = has ? 0 : 1;
+            el[i].Format = has ? AttrDxgi(formats[i]) : i < kBuiltinAttrs ? defaults[i] : DXGI_FORMAT_R32G32B32A32_FLOAT;
+            el[i].InputSlot = inst ? 2 : has ? 0 : 1;
             el[i].AlignedByteOffset = has ? (UINT)offsets[i] : (UINT)(i * 16);
-            el[i].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
-            el[i].InstanceDataStepRate = 0;
+            el[i].InputSlotClass = inst ? D3D11_INPUT_PER_INSTANCE_DATA : D3D11_INPUT_PER_VERTEX_DATA;
+            el[i].InstanceDataStepRate = inst ? 1 : 0;
         }
         ID3D11InputLayout* layout = nullptr;
         device_->CreateInputLayout(el, kAttrCount, prog.vsBlob.data(), prog.vsBlob.size(), &layout);
@@ -453,7 +471,7 @@ private:
 
     static void Save(ID3D11DeviceContext* c, SavedState& s) {
         c->IAGetInputLayout(&s.layout);
-        c->IAGetVertexBuffers(0, 2, s.vb, s.vbStride, s.vbOffset);
+        c->IAGetVertexBuffers(0, 3, s.vb, s.vbStride, s.vbOffset);
         c->IAGetIndexBuffer(&s.ib, &s.ibFormat, &s.ibOffset);
         c->IAGetPrimitiveTopology(&s.topo);
         c->VSGetShader(&s.vs, nullptr, nullptr);
@@ -471,7 +489,7 @@ private:
 
     static void Restore(ID3D11DeviceContext* c, SavedState& s) {
         c->IASetInputLayout(s.layout);
-        c->IASetVertexBuffers(0, 2, s.vb, s.vbStride, s.vbOffset);
+        c->IASetVertexBuffers(0, 3, s.vb, s.vbStride, s.vbOffset);
         c->IASetIndexBuffer(s.ib, s.ibFormat, s.ibOffset);
         c->IASetPrimitiveTopology(s.topo);
         c->VSSetShader(s.vs, nullptr, 0);
