@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 44 |
+| ✅ 已完成 | 45 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 11 |
+| ❌ 未完成 | 10 |
 
 #### 渲染与着色器（gfx）
 
@@ -215,7 +215,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 网格切线属性 `tangents` | 弹孔 | `scene.mesh` 的 `tangents`（每顶点 xyzw）原样写进 Unity 网格，自定义着色器的 `pot_Tangent`/`vTangent` 读到它；省略时仍按 UV 自动计算，参与 `key: true` 的内容哈希。jimao 弹孔按贴花朝向写切线，着色器改用 `vTangent`，删掉屏幕导数重建（实机验证集装箱、地面弹孔正常） |
 | ⚠️ | 粒子预设 `scene.burst` 只有 spark/smoke/glow | 水花 | 原版水柱、拉伸水珠、水平涟漪环、预乘混合都没有；jimao 自建粒子池（[fx.ts](games/jimao/src/lib/fx.ts)），每帧把粒子展开成四边形动态网格上传 |
 | ✅ | 普通 gfx 网格读场景深度 `pot_SceneDepth` | 水花 | 透明队列（`queue: 'transparent'`）绑定 URP 的 `_CameraDepthTexture`，`#include <pot/depth>` 提供 `pot_SceneUv`、`pot_SceneEyeDepth`、`pot_SoftFade`；不透明队列和无深度纹理时读到无限远。jimao 水花两个粒子池按原版软粒子公式淡出 |
-| ❌ | 顶点属性通道不足 | 水花 | 粒子要 16 个浮点（中心、尺寸、轴/滚转、颜色、帧号、模式、年龄、明暗），只能塞进 position/normal/uv/color 并对 color 做 sRGB 逆变换 |
+| ✅ | 顶点属性通道不足 | 水花 | 帧协议从 5 个属性扩到 16 个 location：0–4 内置（position/normal/uv/color/tangent），5–15 共 11 个给自定义与实例属性（网格自定义属性最多 7 个，占 UV1–7），每个 1 到 4 个 float，Float32 原样传。jimao 粒子改为 position + 角点 uv + `aAxis`/`aCol`/`aMisc` 三个 vec4，不再借用 normal 和 color，HDR 颜色不经 sRGB 转换，着色器里的逆变换删除 |
 | ✅ | 射线可附带无限平面 | 水花 | `scene.raycast(o, d, { planes })`：`{ y }` 或 `{ point, normal }`，可用 `region` 限定范围、`twoSided` 双面，与碰撞体命中一起取最近，平面命中带回 `plane` 与 `tag`。jimao 子弹射线改为传地坪（x≤30，y=0）与海面（码头外，y=-1.6，tag 'water'）两个平面，原来手写的求交删除 |
 
 #### 物理与运行时

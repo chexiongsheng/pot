@@ -1,12 +1,12 @@
 /**
  * 原版粒子系统（pretty.js Cf 内的 Bb/Ob 图集 + Rf 模拟池 + Ev 渲染）机械移植，目前接入水花 T（子弹打进积水）。
  * - 两个池：lit（alpha 预乘、太阳/环境光、按距离排序；水柱、水雾、烟团）与 add（加法；拉伸水珠、水平涟漪环）。
- * - 原版 Ev 是实例化四边形（每实例 aPos/aAxis/aCol/aMisc 16 个浮点）；gfx 没有实例化，也只有 12 个顶点浮点可用，
- *   所以每帧把存活粒子展开成 4 顶点（中心相同），按角点编码打包：
- *     position = 中心（Unity 坐标）
- *     uv       = (mode·32 + frame·4 + 角点, size)
- *     normal   = mode 1：拉伸轴（Unity 坐标）；其余：(roll, age, shade)
- *     color    = rgb（HDR）+ a；Runner 会把 rgb 当 sRGB 转线性，着色器里逆变换取回原值
+ * - 原版 Ev 是实例化四边形（每实例 aPos/aAxis/aCol/aMisc 16 个浮点）；这里每帧把存活粒子展开成 4 顶点（中心相同），
+ *   用自定义顶点属性打包（Float32 原样传，HDR 颜色不经 sRGB 转换）：
+ *     position = 中心（Unity 坐标），uv.x = 角点 0..3
+ *     aAxis    = mode 1：(拉伸轴（Unity 坐标）, size)；其余：(roll, 0, 0, size)
+ *     aCol     = rgb（HDR）+ a
+ *     aMisc    = (frame, mode, age, shade)
  *   展开、朝向、拉伸宽度都在 shaders/fx.vert 里按原版 HR 计算。
  * - 模拟、发射全部在原版 three 坐标下进行（与原版逐句对照），只在打包时把 z 取反。
  * - 原版 soft particle（读场景深度）：两个片元着色器用 <pot/depth> 的 pot_SoftFade，淡出距离同原版 clamp(size·.4, .04, .7)。
@@ -234,9 +234,9 @@ interface Batch {
 
 function createBatch(ctx: Context, name: string, cap: number, shader: unknown, bind: Record<string, unknown>): Batch & { ent: Entity } {
   const { scene } = ctx
-  const P = new Float32Array(cap * 12), N = new Float32Array(cap * 12), U = new Float32Array(cap * 8), C = new Float32Array(cap * 16)
+  const P = new Float32Array(cap * 12), U = new Float32Array(cap * 8), A = new Float32Array(cap * 16), C = new Float32Array(cap * 16), M = new Float32Array(cap * 16)
   const I = new Uint32Array(cap * 6)
-  for (let k = 0; k < cap; k++) { const c = k * 4; I.set([c, c + 1, c + 2, c, c + 2, c + 3], k * 6) }
+  for (let k = 0; k < cap; k++) { const c = k * 4; I.set([c, c + 1, c + 2, c, c + 2, c + 3], k * 6); for (let j = 0; j < 4; j++) U[(c + j) * 2] = j }
   const mesh = `jimao/fx-${name}`
   // 初始一个不可见的非退化四边形（隐藏状态下不会绘制）
   scene.mesh(mesh, { positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1]), indices: new Uint32Array([0, 1, 2]) })
@@ -249,20 +249,24 @@ function createBatch(ctx: Context, name: string, cap: number, shader: unknown, b
     push(x, y, z, size, ax, ay, az, roll, r, g, b, a, frame, mode, age, shade) {
       if (n >= cap) return false
       const zU = -z
-      const nx = mode === 1 ? ax : roll, ny = mode === 1 ? ay : age, nz = mode === 1 ? -az : shade
+      const nx = mode === 1 ? ax : roll, ny = mode === 1 ? ay : 0, nz = mode === 1 ? -az : 0
       for (let k = 0; k < 4; k++) {
         const v = n * 4 + k
         P[v * 3] = x; P[v * 3 + 1] = y; P[v * 3 + 2] = zU
-        N[v * 3] = nx; N[v * 3 + 1] = ny; N[v * 3 + 2] = nz
-        U[v * 2] = mode * 32 + frame * 4 + k; U[v * 2 + 1] = size
+        A[v * 4] = nx; A[v * 4 + 1] = ny; A[v * 4 + 2] = nz; A[v * 4 + 3] = size
         C[v * 4] = r; C[v * 4 + 1] = g; C[v * 4 + 2] = b; C[v * 4 + 3] = a
+        M[v * 4] = frame; M[v * 4 + 1] = mode; M[v * 4 + 2] = age; M[v * 4 + 3] = shade
       }
       n++
       return true
     },
     end() {
       if (n === 0) { if (shown) { shown = false; ent.active(false) } return }
-      scene.mesh(mesh, { positions: P.slice(0, n * 12), normals: N.slice(0, n * 12), uvs: U.slice(0, n * 8), colors: C.slice(0, n * 16), indices: I.slice(0, n * 6) })
+      const v4 = n * 16
+      scene.mesh(mesh, {
+        positions: P.slice(0, n * 12), uvs: U.slice(0, n * 8), indices: I.slice(0, n * 6),
+        attributes: { aAxis: { size: 4, data: A.slice(0, v4) }, aCol: { size: 4, data: C.slice(0, v4) }, aMisc: { size: 4, data: M.slice(0, v4) } },
+      })
       if (!shown) { shown = true; ent.active(true) }
     },
   }
@@ -306,8 +310,9 @@ export function createFx(ctx: Context, opts: { mask?: number } = {}): Fx | undef
   const litTex = tex(at.lit), addTex = tex(at.add)
 
   const LIT_CAP = 1400, ADD_CAP = 3200 - 160
-  const litShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_lit.frag', name: 'jimao/fx-lit' })
-  const addShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_add.frag', name: 'jimao/fx-add' })
+  const attributes = { aAxis: 'vec4', aCol: 'vec4', aMisc: 'vec4' } as const
+  const litShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_lit.frag', name: 'jimao/fx-lit', attributes })
+  const addShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_add.frag', name: 'jimao/fx-add', attributes })
   const common = { queue: 'transparent', cull: 'none', depthWrite: false, shadows: false, frustumCull: false }
   const r = createBatch(ctx, 'lit', LIT_CAP, litShader, {
     ...common, blend: 'premultiplied',

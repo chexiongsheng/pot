@@ -177,7 +177,7 @@
 
 ## 自建粒子：把实例数据塞进普通顶点属性
 
-没有实例化与自定义属性时，每个粒子展开成 4 个顶点：position 放中心，normal 放拉伸轴或 (滚转, 年龄, 明暗)，uv 放 (模式·32 + 帧·4 + 角点, 尺寸)，color 放 rgba。注意 color 的 rgb 会被逐分量 sRGB→线性（不截断），在顶点着色器里做线性→sRGB 逆变换即可取回原值。参考 `games/jimao/src/lib/fx.ts`。
+粒子、广告牌这类每顶点要带很多数据的效果，用 `scene.mesh` 的 `attributes` 加 `gfx.shader` 的 `attributes` 声明自定义顶点属性（最多 7 个 vec4，Float32 原样传），不要再把数据塞进 normal/uv/color：color 的 rgb 会被逐分量 sRGB→线性，HDR 颜色要放进自定义属性。参考 `games/jimao/src/lib/fx.ts` 与 `data/shaders/fx.vert`（aAxis、aCol、aMisc）。
 
 ## 射线打地面"未命中"
 
