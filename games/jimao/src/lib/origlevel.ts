@@ -158,6 +158,39 @@ export function origLevel(): OrigLevel {
 
 // ---- 原版右手系 → Unity 左手系 ----
 
+/**
+ * 原版海鸥（port wb，12 只 × 6 顶点）的网格数据，配 data/shaders/gull.vert：
+ * positions 保持原版 three 坐标（着色器里算完轨道再把 z 取反），属性 aOrbit/aPar 原样传。
+ * 顶点全在着色器里重算，绑定时要关视锥剔除。
+ */
+export function gullMesh() {
+  const g = port.createGulls(null, { value: 0 }).geometry
+  const positions = new Float32Array(g.attributes.position.array)
+  const n = positions.length / 3
+  const indices = new Uint32Array(n)
+  for (let k = 0; k < n; k++) indices[k] = k
+  return {
+    positions, indices,
+    attributes: {
+      aOrbit: { size: 4 as const, data: new Float32Array(g.attributes.aOrbit.array) },
+      aPar: { size: 4 as const, data: new Float32Array(g.attributes.aPar.array) },
+    },
+  }
+}
+
+/** 原版闪灯网格（kind 'lamps'）的 blink 属性与线性 HDR 顶点色，顶点顺序与 toMesh 一致；不是闪灯网格时返回 undefined */
+export function lampAttributes(geometry: any) {
+  const blink = geometry.attributes.blink, col = geometry.attributes.color
+  if (!blink || !col) return undefined
+  const n = geometry.attributes.position.count
+  const b = new Float32Array(n * 3), c = new Float32Array(n * 3)
+  for (let k = 0; k < n; k++) {
+    b[k * 3] = blink.getX(k); b[k * 3 + 1] = blink.getY(k); b[k * 3 + 2] = blink.getZ(k)
+    c[k * 3] = col.getX(k); c[k * 3 + 1] = col.getY(k); c[k * 3 + 2] = col.getZ(k)
+  }
+  return { blink: { size: 3 as const, data: b }, aLamp: { size: 3 as const, data: c } }
+}
+
 export const toUnityPos = (v: { x: number; y: number; z: number }): Vec3 => [v.x, v.y, -v.z]
 
 const S = new Matrix4().makeScale(1, 1, -1)

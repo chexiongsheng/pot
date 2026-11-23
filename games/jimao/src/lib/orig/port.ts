@@ -3908,7 +3908,7 @@ function Eb(i, { only: e = null, showcase: t = false } = {}) {
     let b = new io(), m = i.mats.get("rope");
     b.add(m, kr(ua(_t(3.2, 0.95, 0.05), _t(4.6, 2.12, 2.3), 0.22, 7), 0.016, 5)), b.add(m, kr(ua(_t(-3.25, 0.82, 0.95), _t(-4.6, 2.12, 2.3), 0.2, 7), 0.016, 5)), a.root.add(b.build({ cast: false, recv: false }));
   }
-  n("crane") && (l = z1(i, o), s.add(l.root)), n("ship") && (c = vb(i, o), s.add(c.root)), n("sky") && (u = Mb(i, o), s.add(u.root)), h = null; /* 海鸥 wb 依赖顶点着色器动画，Runner 暂不支持，跳过 */
+  n("crane") && (l = z1(i, o), s.add(l.root)), n("ship") && (c = vb(i, o), s.add(c.root)), n("sky") && (u = Mb(i, o), s.add(u.root)), h = null; /* 海鸥 wb 依赖顶点着色器动画：不加入场景，由 world.ts 取 createGulls 的几何体配 ctx.gfx 着色器绘制 */
   let f = o.build();
   f && (f.name = "backdrop-lamps", f.frustumCulled = false, s.add(f)), i.scene.add(s);
   let p = [], d = (b, m) => {
@@ -3939,4 +3939,4 @@ function pv(i) { // 原版 async，改同步
   return Eb(i, {});
 }
 
-export { Gi as PROP_SIZES, Yg as createProps, _i as registerProp, C1 as createLevel, pv as createBackdrop, By as flatten, Ii as mergeAll, Qi as makeMesh, il as rng, Wi, ot, Fn, Dc, sa }
+export { Gi as PROP_SIZES, Yg as createProps, _i as registerProp, C1 as createLevel, pv as createBackdrop, wb as createGulls, By as flatten, Ii as mergeAll, Qi as makeMesh, il as rng, Wi, ot, Fn, Dc, sa }

@@ -7,7 +7,7 @@ import { createRain } from '../lib/rain'
 import { rng } from '../lib/math'
 import { createMats, MATS, type Mat, type Mats } from '../lib/mats'
 import { toMesh } from '../lib/geo'
-import { emissiveMaterial, hdr, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '../lib/origlevel'
+import { emissiveMaterial, gullMesh, hdr, lampAttributes, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '../lib/origlevel'
 import { registerSfx, sfx } from '../lib/sfx'
 import { createPost } from '../lib/post'
 import { on } from '../lib/bus'
@@ -209,7 +209,7 @@ export async function apply(ctx: Context) {
   /** 材质令牌 → Runner 材质：GPU 烘焙的原版材质；没有运行时着色器时退回纯色 */
   const resolveToken = (t: MatToken): { color: string; material: MaterialOptions; mat?: Mat } => {
     if (t.kind === 'emissive') return emissiveMaterial(t)
-    // 远景闪灯：原版 MeshBasicMaterial + HDR 顶点色（闪烁着色器暂缺，常亮）
+    // 远景闪灯：原版 MeshBasicMaterial + HDR 顶点色 + blink 顶点动画；ctx.gfx 可用时下面换成 lamp 着色器闪烁，否则常亮
     if (t.kind === 'lamps') return { color: '#ffffff', material: { mode: 'unlit', vertexColors: true, shadows: false } }
     if (mats) {
       const r = mats.get(t.name, { interior: !!t.opts.interior, vertexColors: t.vertexColors })
@@ -238,12 +238,17 @@ export async function apply(ctx: Context) {
     if (r.mat) mats!.apply(ent, r.mat, { shadows: s.cast })
   }
   const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
+  // 闪灯与海鸥的顶点动画（原版 onBeforeCompile 注入）用 ctx.gfx 自定义着色器 + 自定义顶点属性实现
+  const lampShader = ctx.gfx.supported
+    ? ctx.gfx.shader({ vertex: 'shaders/lamp.vert', fragment: 'shaders/lamp.frag', name: 'jimao/lamp', attributes: { blink: 'vec3', aLamp: 'vec3' } })
+    : undefined
   for (let k = 0; k < orig.dynamics.length; k++) {
     const d = orig.dynamics[k]
     await step('装配动态模型', 0.6 + (0.66 - 0.6) * k / orig.dynamics.length)
     if (!drawable(d.material)) continue
     const name = `orig-dyn-${k}`
-    scene.mesh(name, () => toMesh(d.mesh.geometry), meshKey)
+    const lamp = lampShader && d.material.kind === 'lamps' ? lampAttributes(d.mesh.geometry) : undefined
+    scene.mesh(name, () => (lamp ? { ...toMesh(d.mesh.geometry), attributes: lamp } : toMesh(d.mesh.geometry)), meshKey)
     const r = resolveToken(d.material)
     const tr = toUnityTransform(d.mesh.matrixWorld)
     // 中继、闸杆等会动的实心网格也要挡子弹：网格碰撞体 + 运动学刚体，移动时不重建静态碰撞体
@@ -254,7 +259,15 @@ export async function apply(ctx: Context) {
       collider: solid ? 'mesh' : false, dynamic: solid, layer: solid ? LEVEL_LAYER : undefined,
     })
     if (r.mat) mats!.apply(ent, r.mat, { shadows: d.mesh.castShadow })
+    // 闪灯网格包围盒是真实的（只是颜色变），保留视锥剔除
+    if (lamp) ent.shader(lampShader!, { shadows: false })
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
+  }
+  if (ctx.gfx.supported) {
+    scene.mesh('jimao/gulls', () => gullMesh(), meshKey)
+    const gullShader = ctx.gfx.shader({ vertex: 'shaders/gull.vert', fragment: 'shaders/gull.frag', name: 'jimao/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
+    scene.spawn({ shape: 'mesh:jimao/gulls', name: 'gulls', position: [0, 0, 0], collider: false })
+      .shader(gullShader, { cull: 'none', frustumCull: false, shadows: false, uniforms: { uColor: [0.2, 0.21, 0.23] } })
   }
   await step('布置灯光', 0.67)
   // 原版点光源：three 物理单位（坎德拉）直接传，由 Runner 换算；distance 为 0（不截断）时 URP 仍需有限范围，取 15 米
