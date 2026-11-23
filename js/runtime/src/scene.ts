@@ -436,6 +436,11 @@ export interface ShaderBinding {
   depthTest?: boolean
   /** 视锥剔除（默认 true，按网格包围盒）。顶点着色器重算位置（粒子、以相机为中心的效果）时设 false */
   frustumCull?: boolean
+  /**
+   * 深度偏移 [factor, units]（同 three polygonOffsetFactor/Units、GL glPolygonOffset，负数朝相机），
+   * 贴花、共面叠加层防 z-fighting。各取整并限制在 -128 到 127；reversed Z 平台由宿主取反
+   */
+  polygonOffset?: [number, number]
   /** 用网格投射阴影（opaque 默认 true） */
   shadows?: boolean
 }
@@ -619,6 +624,12 @@ export class Entity {
     flags |= ({ none: 0, alpha: 1, add: 2, premultiplied: 3 } as const)[blend] << 3
     if (options.depthTest === false) flags |= 128
     if (options.frustumCull === false) flags |= 256
+    if (options.polygonOffset) {
+      const [f, u] = options.polygonOffset
+      if (!Number.isFinite(f) || !Number.isFinite(u)) throw new Error(`polygonOffset 须为两个有限数 [factor, units]，收到 ${options.polygonOffset}`)
+      const i8 = (v: number) => Math.max(-128, Math.min(127, Math.round(v))) & 255
+      flags |= (i8(f) << 16) | (i8(u) << 24)
+    }
     const shadows = options.shadows ?? queue === 'opaque'
     engine.gfxBind(this.id, typeof shader === 'string' ? shader : shader.name, flags, queue === 'transparent' ? 1 : 0, shadows ? 1 : 0)
     if (options.uniforms) this.uniforms(options.uniforms)

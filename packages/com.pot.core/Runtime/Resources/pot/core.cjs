@@ -3977,6 +3977,12 @@ var pot = (() => {
       flags |= { none: 0, alpha: 1, add: 2, premultiplied: 3 }[blend] << 3;
       if (options.depthTest === false) flags |= 128;
       if (options.frustumCull === false) flags |= 256;
+      if (options.polygonOffset) {
+        const [f, u] = options.polygonOffset;
+        if (!Number.isFinite(f) || !Number.isFinite(u)) throw new Error(`polygonOffset 须为两个有限数 [factor, units]，收到 ${options.polygonOffset}`);
+        const i8 = (v) => Math.max(-128, Math.min(127, Math.round(v))) & 255;
+        flags |= i8(f) << 16 | i8(u) << 24;
+      }
       const shadows = options.shadows ?? queue === "opaque";
       engine.gfxBind(this.id, typeof shader === "string" ? shader : shader.name, flags, queue === "transparent" ? 1 : 0, shadows ? 1 : 0);
       if (options.uniforms) this.uniforms(options.uniforms);
@@ -5555,6 +5561,7 @@ IncidentLight directLight;
       depthTest: o.depthTest ?? true,
       shadows: o.castShadow ?? true
     };
+    if (o.polygonOffset) state.polygonOffset = [o.polygonOffsetFactor ?? 0, o.polygonOffsetUnits ?? 0];
     return { shader, state };
   }
   function resolveUniforms(uniforms) {

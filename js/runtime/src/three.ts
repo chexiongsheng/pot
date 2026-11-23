@@ -219,6 +219,10 @@ export interface StandardMaterialOptions {
   flatShading?: boolean
   depthWrite?: boolean
   depthTest?: boolean
+  /** 同 three：开启后按 polygonOffsetFactor / polygonOffsetUnits 做深度偏移 */
+  polygonOffset?: boolean
+  polygonOffsetFactor?: number
+  polygonOffsetUnits?: number
   /** 环境反射强度，默认 1 */
   envMapIntensity?: number
   /** 投射阴影（castShadow），默认 true */
@@ -302,6 +306,7 @@ export function buildStandard(o: StandardMaterialOptions) {
     depthTest: o.depthTest ?? true,
     shadows: o.castShadow ?? true,
   }
+  if (o.polygonOffset) state.polygonOffset = [o.polygonOffsetFactor ?? 0, o.polygonOffsetUnits ?? 0]
   return { shader, state }
 }
 

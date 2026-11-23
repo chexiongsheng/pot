@@ -4,8 +4,8 @@
  *   高度（Sobel 转法线）。绘制走 ctx.scene.canvas（Runner 的 Canvas 2D），像素在模块内缓存，热重载不重画。
  * - 池：每个贴花一个四边形（Unity 世界坐标），全部放进一个网格；add 后整体重传（640 顶点，开销可忽略）。
  *   池满后接下来 14 个槽的 alpha 逐级淡出（原版 Yb）。
- * - 原版用 polygonOffset 防 z-fighting；gfx 没有，沿法线外推 0.004 + 槽号×0.0003（与原版相同的错层）。
- * - 法线贴图没有切线属性：片元里用屏幕导数重建切线框架（decal.frag）。
+ * - 防 z-fighting 与原版相同：沿法线外推 0.004 + 槽号×0.0003（错层），再加 polygonOffset(-4, -4)。
+ * - 切线由网格 tangents 提供（decal.frag 读 vTangent）。
  */
 import type { Context, Entity, Vec3 } from '@pot/core'
 import * as port from './orig/port'
@@ -270,7 +270,7 @@ export function createDecals(ctx: Context, cap = 160): Decals | undefined {
   upload()
   const shader = gfx.shader({ fragment: 'shaders/decal.frag', name: 'jimao/decal' })
   const ent: Entity = scene.spawn({ shape: `mesh:${MESH}`, name: 'fx_decals', position: [0, 0, 0], collider: false })
-    .shader(shader, { queue: 'transparent', blend: 'alpha', cull: 'none', depthWrite: false, shadows: false, frustumCull: false, uniforms: { uMap: map, uOrm: orm, uNrm: nrm } })
+    .shader(shader, { queue: 'transparent', blend: 'alpha', cull: 'none', depthWrite: false, shadows: false, frustumCull: false, polygonOffset: [-4, -4], uniforms: { uMap: map, uOrm: orm, uNrm: nrm } })
   ent.active(false)
 
   let next = 0, count = 0

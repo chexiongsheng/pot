@@ -63,8 +63,10 @@ namespace Pot
         const int F_NoDepthTest = 1 << 7;
         /// <summary>仅 C# 使用：不做视锥剔除（顶点着色器重算位置时，网格包围盒不可信）</summary>
         const int F_NoFrustumCull = 1 << 8;
-        /// <summary>JS 传入的 flags 只占低 5 位（剔除、写深度、混合）和 bit7（关深度测试）</summary>
-        const int F_UserMask = F_CullMask | F_DepthWrite | (3 << F_BlendShift) | F_NoDepthTest;
+        /// <summary>深度偏移：bit16-23 int8 factor，bit24-31 int8 units（同 glPolygonOffset，负数朝相机）</summary>
+        const int F_OffsetMask = unchecked((int)0xFFFF0000);
+        /// <summary>JS 传入的 flags 只占低 5 位（剔除、写深度、混合）、bit7（关深度测试）与高 16 位（深度偏移）</summary>
+        const int F_UserMask = F_CullMask | F_DepthWrite | (3 << F_BlendShift) | F_NoDepthTest | F_OffsetMask;
 
         static bool? available;
         static string backendName = "";
@@ -206,7 +208,7 @@ namespace Pot
 
         /// <summary>
         /// 让对象用运行时着色器绘制。program 为空串表示解除（恢复普通材质）。
-        /// flags：bit0-1 剔除（0 背面 1 正面 2 不剔除）、bit2 写深度、bit3-4 混合（0 无 1 alpha 2 叠加 3 预乘）、bit7 关深度测试、bit8 不做视锥剔除。
+        /// flags：bit0-1 剔除（0 背面 1 正面 2 不剔除）、bit2 写深度、bit3-4 混合（0 无 1 alpha 2 叠加 3 预乘）、bit7 关深度测试、bit8 不做视锥剔除、bit16-23 / bit24-31 深度偏移 factor / units（int8）。
         /// queue：0 不透明之后，1 透明之后（由远到近）。shadows：1 仍用网格投射阴影。
         /// </summary>
         [Preserve]

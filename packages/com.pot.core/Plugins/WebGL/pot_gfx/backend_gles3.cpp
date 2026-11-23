@@ -109,6 +109,8 @@ struct SavedGL {
     GLboolean blend = 0, depthTest = 0, cull = 0, stencil = 0, depthMask = 0;
     GLint srcRGB = 0, dstRGB = 0, srcA = 0, dstA = 0, eqRGB = 0, eqA = 0;
     GLint depthFunc = 0, cullMode = 0, frontFace = 0;
+    GLboolean polyOffset = 0;
+    GLfloat polyFactor = 0, polyUnits = 0;
     GLboolean colorMask[4] = {1, 1, 1, 1};
     GLfloat attr[kAttrCount][4] = {};
 };
@@ -504,6 +506,14 @@ private:
             glDepthFunc((flags & F_ReversedZ) ? GL_GEQUAL : GL_LEQUAL);
         }
         glDepthMask((flags & F_DepthWrite) ? GL_TRUE : GL_FALSE);
+        int of = OffsetFactor(flags), ou = OffsetUnits(flags);
+        if (of != 0 || ou != 0) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            float sign = (flags & F_ReversedZ) ? -1.0f : 1.0f;
+            glPolygonOffset(sign * (float)of, sign * (float)ou);
+        } else {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        }
         int mode = (int)((flags >> F_BlendShift) & 3);
         if (mode == 0) {
             glDisable(GL_BLEND);
@@ -539,6 +549,9 @@ private:
         s.depthTest = glIsEnabled(GL_DEPTH_TEST);
         s.cull = glIsEnabled(GL_CULL_FACE);
         s.stencil = glIsEnabled(GL_STENCIL_TEST);
+        s.polyOffset = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+        glGetFloatv(GL_POLYGON_OFFSET_FACTOR, &s.polyFactor);
+        glGetFloatv(GL_POLYGON_OFFSET_UNITS, &s.polyUnits);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &s.depthMask);
         glGetBooleanv(GL_COLOR_WRITEMASK, s.colorMask);
         glGetIntegerv(GL_BLEND_SRC_RGB, &s.srcRGB);
@@ -577,6 +590,8 @@ private:
         SetEnabled(GL_DEPTH_TEST, s.depthTest);
         SetEnabled(GL_CULL_FACE, s.cull);
         SetEnabled(GL_STENCIL_TEST, s.stencil);
+        SetEnabled(GL_POLYGON_OFFSET_FILL, s.polyOffset);
+        glPolygonOffset(s.polyFactor, s.polyUnits);
         glDepthMask(s.depthMask);
         glColorMask(s.colorMask[0], s.colorMask[1], s.colorMask[2], s.colorMask[3]);
         glBlendFuncSeparate((GLenum)s.srcRGB, (GLenum)s.dstRGB, (GLenum)s.srcA, (GLenum)s.dstA);

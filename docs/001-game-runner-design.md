@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 39 |
+| ✅ 已完成 | 40 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 16 |
+| ❌ 未完成 | 15 |
 
 #### 渲染与着色器（gfx）
 
@@ -211,7 +211,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 点光源物理单位选项 | 远景 | `scene.light({ units: 'three', intensity, distance })`：强度按 three 物理单位（坎德拉 / 勒克斯）传，运行时按 1/π 换算，`entity.intensity()` 沿用同一单位；`distance` > 0 当作 range。jimao 原版点光源改为直接传原版数值，手写的 /π 删除 |
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
-| ❌ | gfx 深度偏移 `polygonOffset` | 弹孔 | 贴花现靠沿法线外推 4 mm 防 z-fighting，远处或掠射角仍可能闪 |
+| ✅ | gfx 深度偏移 `polygonOffset` | 弹孔 | `shader(s, { polygonOffset: [factor, units] })`，语义同 three / glPolygonOffset（负数朝相机）；两个 int8 编码进 flags 高 16 位，D3D11 写进光栅化状态的 `SlopeScaledDepthBias` / `DepthBias`，GLES3 用 `glPolygonOffset`，reversed Z 平台由后端取反。`gfx.standard` 的 `polygonOffset*` 选项直通。jimao 弹孔与原版一致：法线外推错层 + `[-4, -4]` |
 | ✅ | 网格切线属性 `tangents` | 弹孔 | `scene.mesh` 的 `tangents`（每顶点 xyzw）原样写进 Unity 网格，自定义着色器的 `pot_Tangent`/`vTangent` 读到它；省略时仍按 UV 自动计算，参与 `key: true` 的内容哈希。jimao 弹孔按贴花朝向写切线，着色器改用 `vTangent`，删掉屏幕导数重建（实机验证集装箱、地面弹孔正常） |
 | ⚠️ | 粒子预设 `scene.burst` 只有 spark/smoke/glow | 水花 | 原版水柱、拉伸水珠、水平涟漪环、预乘混合都没有；jimao 自建粒子池（[fx.ts](games/jimao/src/lib/fx.ts)），每帧把粒子展开成四边形动态网格上传 |
 | ❌ | 普通 gfx 网格读场景深度 | 水花 | 原版软粒子按深度差淡出，现在水柱与地面交界处是硬边；建议透明队列可绑定 `pot_SceneDepth` |

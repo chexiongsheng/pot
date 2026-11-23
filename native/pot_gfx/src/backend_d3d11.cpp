@@ -237,7 +237,7 @@ private:
     std::unordered_map<int, ID3D11SamplerState*> samplers_;
     std::unordered_map<int, ID3D11BlendState*> blends_;
     std::unordered_map<int, ID3D11DepthStencilState*> depths_;
-    std::unordered_map<int, ID3D11RasterizerState*> rasters_;
+    std::unordered_map<uint32_t, ID3D11RasterizerState*> rasters_;
     uint64_t frame_ = 0;
 
     bool Compile(const std::string& src, const char* target, ID3DBlob** code, std::string& err) {
@@ -430,7 +430,8 @@ private:
     }
 
     ID3D11RasterizerState* Raster(uint32_t flags) {
-        int key = (int)(flags & (F_CullMask | F_FrontCCW));
+        // 缓存键：剔除、绕序、深度偏移（bit16-31）
+        uint32_t key = flags & (F_CullMask | F_FrontCCW | F_ReversedZ | (0xFFFFu << F_OffsetShift));
         auto it = rasters_.find(key);
         if (it != rasters_.end()) return it->second;
         D3D11_RASTERIZER_DESC rd = {};
@@ -439,6 +440,11 @@ private:
         rd.CullMode = cull == 0 ? D3D11_CULL_BACK : cull == 1 ? D3D11_CULL_FRONT : D3D11_CULL_NONE;
         rd.FrontCounterClockwise = (flags & F_FrontCCW) ? TRUE : FALSE;
         rd.DepthClipEnable = TRUE;
+        // 同 GL：offset = factor·斜率 + units·最小可分辨深度；reversed Z 时“朝相机”是深度变大，取反
+        float sign = (flags & F_ReversedZ) ? -1.0f : 1.0f;
+        rd.DepthBias = (INT)(sign * (float)OffsetUnits(flags));
+        rd.SlopeScaledDepthBias = sign * (float)OffsetFactor(flags);
+        rd.DepthBiasClamp = 0.0f;
         ID3D11RasterizerState* s = nullptr;
         device_->CreateRasterizerState(&rd, &s);
         rasters_[key] = s;

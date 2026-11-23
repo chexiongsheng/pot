@@ -28,6 +28,10 @@ constexpr uint32_t F_BlendShift = 3;       // 2 位：0 不混合 1 alpha 2 叠�
 constexpr uint32_t F_FrontCCW = 1u << 5;
 constexpr uint32_t F_ReversedZ = 1u << 6;
 constexpr uint32_t F_NoDepthTest = 1u << 7;
+// 深度偏移（同 GL glPolygonOffset / three polygonOffset，负数朝相机）：bit16-23 int8 factor，bit24-31 int8 units
+constexpr uint32_t F_OffsetShift = 16;
+inline int OffsetFactor(uint32_t flags) { return (int)(int8_t)((flags >> F_OffsetShift) & 255u); }
+inline int OffsetUnits(uint32_t flags) { return (int)(int8_t)((flags >> (F_OffsetShift + 8)) & 255u); }
 
 // 采样器编码：bit0 clamp，bit1-2 过滤（0 点 1 双线性 2 三线性），bit3 各向异性
 class Backend {
