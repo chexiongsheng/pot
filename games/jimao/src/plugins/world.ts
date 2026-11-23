@@ -25,6 +25,8 @@ interface QualityLevel {
   drops: number
   ao: number
   antialias: 'none' | 'fxaa' | 'smaa'
+  /** 多重采样数（1/2/4/8）；远处集装箱瓦楞这类亚像素几何靠它消除摩尔纹，FXAA/SMAA 处理不了 */
+  msaa?: number
   reflectionShadows: boolean
   bloom?: boolean
 }
@@ -314,7 +316,7 @@ export async function apply(ctx: Context) {
   const applyQuality = (index: number) => {
     const q = levels[Math.max(0, Math.min(levels.length - 1, index))]
     appliedQuality = index
-    scene.quality({ renderScale: q.renderScale, shadowDistance: q.shadowDistance, shadowResolution: q.shadowResolution, shadowCascades: q.shadowCascades })
+    scene.quality({ renderScale: q.renderScale, shadowDistance: q.shadowDistance, shadowResolution: q.shadowResolution, shadowCascades: q.shadowCascades, msaa: q.msaa ?? 1 })
     scene.reflection({ enabled: q.reflection > 0, height: 0, scale: q.reflection > 0 ? q.reflection : undefined, exclude: [VIEW_LAYER], shadows: q.reflectionShadows })
     scene.post({ ao: q.ao, antialias: q.antialias })
     post?.quality(q.bloom !== false)

@@ -55,10 +55,10 @@
   "quality": {
     "names": ["低", "中", "高", "极高"],
     "levels": [
-      { "renderScale": 0.75, "shadowDistance": 45, "shadowResolution": 1024, "shadowCascades": 2, "reflection": 0, "drops": 3000, "ao": 0, "antialias": "fxaa", "reflectionShadows": false },
-      { "renderScale": 0.9, "shadowDistance": 70, "shadowResolution": 2048, "shadowCascades": 2, "reflection": 0.35, "drops": 5000, "ao": 0.9, "antialias": "smaa", "reflectionShadows": false },
-      { "renderScale": 1, "shadowDistance": 100, "shadowResolution": 2048, "shadowCascades": 4, "reflection": 0.5, "drops": 8000, "ao": 1.3, "antialias": "smaa", "reflectionShadows": false },
-      { "renderScale": 1.25, "shadowDistance": 140, "shadowResolution": 4096, "shadowCascades": 4, "reflection": 0.75, "drops": 12000, "ao": 1.5, "antialias": "smaa", "reflectionShadows": true }
+      { "renderScale": 0.75, "shadowDistance": 45, "shadowResolution": 1024, "shadowCascades": 2, "reflection": 0, "drops": 3000, "ao": 0, "antialias": "fxaa", "msaa": 1, "reflectionShadows": false },
+      { "renderScale": 0.9, "shadowDistance": 70, "shadowResolution": 2048, "shadowCascades": 2, "reflection": 0.35, "drops": 5000, "ao": 0.9, "antialias": "smaa", "msaa": 2, "reflectionShadows": false },
+      { "renderScale": 1, "shadowDistance": 100, "shadowResolution": 2048, "shadowCascades": 4, "reflection": 0.5, "drops": 8000, "ao": 1.3, "antialias": "smaa", "msaa": 4, "reflectionShadows": false },
+      { "renderScale": 1.25, "shadowDistance": 140, "shadowResolution": 4096, "shadowCascades": 4, "reflection": 0.75, "drops": 12000, "ao": 1.5, "antialias": "smaa", "msaa": 4, "reflectionShadows": true }
     ]
   }
 }

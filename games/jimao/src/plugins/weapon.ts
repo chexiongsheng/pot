@@ -27,6 +27,32 @@ const NU = { p: [-0.03, 0.1, -0.02], r: [0.46, 0.22, -0.8] }
 const VIEW_FOV = 54
 const DEG = 180 / Math.PI
 const u = (p: readonly number[]): Vec3 => [p[0], p[1], -p[2]]
+/**
+ * 原版 N_：第一人称枪口火焰的面片（three 坐标，枪口朝 -Z）。原版的 aType 属性编码进 uv.y（+ aType·2），
+ * 由 shaders/muzzle.frag 解出。Z 翻成 Unity 坐标；双面渲染，绕序无所谓。
+ */
+function muzzleFlashMesh() {
+  const pos: number[] = [], uv: number[] = [], idx: number[] = []
+  const s = (d: number[], v: number[], g: number[], x: number[], y: number) => {
+    const b = pos.length / 3
+    for (const m of [d, v, g, x]) pos.push(m[0], m[1], -m[2])
+    uv.push(0, y * 2, 1, y * 2, 1, 1 + y * 2, 0, 1 + y * 2)
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3)
+  }
+  s([-0.13, -0.13, -0.03], [0.13, -0.13, -0.03], [0.13, 0.13, -0.03], [-0.13, 0.13, -0.03], 0)
+  s([-0.13 * 0.7, -0.13 * 0.7, -0.09], [0.13 * 0.7, -0.13 * 0.7, -0.09], [0.13 * 0.7, 0.13 * 0.7, -0.09], [-0.13 * 0.7, 0.13 * 0.7, -0.09], 0)
+  const r = 0.065, a = 0.34
+  s([-r, 0, 0.01], [r, 0, 0.01], [r, 0, -a], [-r, 0, -a], 1)
+  s([0, -r, 0.01], [0, r, 0.01], [0, r, -a], [0, -r, -a], 1)
+  const l = 0.17, c = 0.05, w = 0.035
+  s([-l, -c, w], [l, -c, w], [l, c, w], [-l, c, w], 2)
+  s([-l, 0, w + c], [l, 0, w + c], [l, 0, w - c], [-l, 0, w - c], 2)
+  s([-0.05, -0.05, -0.01], [0.05, -0.05, -0.01], [0.05, 0.05, -0.01], [-0.05, 0.05, -0.01], 3)
+  s([-0.03, -0.03, 0.02], [0.03, -0.03, 0.02], [0.03, 0.03, 0.02], [-0.03, 0.03, 0.02], 4)
+  const n = pos.length / 3, normals = new Float32Array(n * 3)
+  for (let k = 0; k < n; k++) normals[k * 3 + 2] = 1
+  return { positions: new Float32Array(pos), normals, uvs: new Float32Array(uv), indices: new Uint32Array(idx) }
+}
 /** Three.js 欧拉角（弧度，YXZ）→ Unity 本地欧拉角（度）：Z 镜像，x、y 取反 */
 const euler = (x: number, y: number, z: number): Vec3 => [-x * DEG, -y * DEG, z * DEG]
 
@@ -178,7 +204,16 @@ export function apply(ctx: Context) {
   scene.spawn({ shape: 'quad', name: 'lens', parent: gun, position: [0, PAC9.sightY, PAC9.lensF + 0.0025], scale: [ww, wh, 1], color: [0.55, 0.6, 0.55, 0.12], material: { mode: 'lit-fade', smoothness: 0.95, metallic: 0.2, shadows: false }, collider: false, layer: VIEW_LAYER })
   scene.spawn({ shape: 'quad', name: 'reticle', parent: gun, position: [0, PAC9.sightY, PAC9.lensF + 0.002], scale: 0.0012, color: '#000000', material: { mode: 'lit', emission: '#ff2a1a', emissionIntensity: 12, shadows: false }, collider: false, layer: VIEW_LAYER })
   const muzzle = scene.spawn({ shape: 'empty', name: 'muzzle', parent: gun, position: u(PAC9.muzzle) })
-  const flash = scene.spawn({ shape: 'quad', name: 'flash', parent: muzzle, scale: 0.12, color: '#ffcf7a', material: { mode: 'additive', shadows: false }, collider: false, layer: VIEW_LAYER, active: false })
+  // 原版 N_：程序化枪口火焰（星芒、侧焰、横向喷流、核心光、枪管余热）。不支持运行时着色器的平台不画火焰，只留火光
+  let flash: Entity | null = null
+  if (ctx.gfx?.supported) {
+    const sh = ctx.gfx.shader({ fragment: 'shaders/muzzle.frag', name: 'jimao/muzzle' })
+    if (sh.ok !== false) {
+      scene.mesh('muzzle-flash', muzzleFlashMesh)
+      flash = scene.spawn({ shape: 'mesh:muzzle-flash', name: 'flash', parent: muzzle, collider: false, layer: VIEW_LAYER, active: false })
+      flash.shader(sh, { blend: 'add', cull: 'none', queue: 'transparent', depthWrite: false, shadows: false, uniforms: { uSeed: 0, uInt: 0, uHeat: 0, uJet: 1 } })
+    }
+  }
   const flashLight = scene.light({ type: 'point', name: 'muzzle-light', parent: muzzle, intensity: 0, range: 7, color: '#ffbe6a' })
 
   // ---- 曳光弹 ----
@@ -186,6 +221,8 @@ export function apply(ctx: Context) {
   for (let i = 0; i < 8; i++) tracers.push({ e: scene.spawn({ name: 'tracer', scale: [0.018, 0.018, 1], color: '#ffd9a0', material: { mode: 'additive', shadows: false }, collider: false, active: false }), life: 0 })
   let ti = 0
   let flashT = 0
+  /** 原版 k.flashDur（每发 0.036–0.056 秒）、k.heat（每发 +0.05，上限 1.3，每秒 -0.2）、uSeed/uJet/火焰绕枪管转角 */
+  let flashDur = 0.05, heat = 0, flashSeed = 0, flashJet = 1
 
   // ---- 枪模动画状态（原版 dm 的 k.*；纯表现，不进存档） ----
   const kZ = spring(520, 30), kP = spring(380, 26), kY = spring(300, 22), kR = spring(300, 20), bump = spring(600, 30)
@@ -223,7 +260,11 @@ export function apply(ctx: Context) {
     w.recoilP = Math.max(-10, w.recoilP - W.recoilPitch * (1 - w.ads * 0.35))
     w.recoilY += (rand() - 0.5) * 2 * W.recoilYaw
     w.kick = 1
-    flashT = 0.05
+    flashT = flashDur = 0.036 + rand() * 0.02
+    heat = Math.min(1.3, heat + 0.05)
+    flashSeed = rand() * 100
+    flashJet = 0.6 + rand() * 0.6
+    if (flash) flash.localRotation = [0, 0, (rand() - 0.5) * 0.4 * DEG]
     // 枪模后坐弹簧（原版 Be）
     const ke = smoother(w.ads), bt = lerp(1, 0.55, ke) * (crouching ? 0.85 : 1)
     kZ.v += 1.5 * lerp(1, 0.6, ke); kP.v += 1.5 * bt; kY.v += (rand() - 0.5) * bt; kR.v += (rand() - 0.5) * 1.8 * bt
@@ -283,8 +324,14 @@ export function apply(ctx: Context) {
     if (g.phase !== 'paused') {
       for (const t of tracers) if (t.life > 0 && (t.life -= dt) <= 0) t.e.active(false)
       flashT -= dt
-      flash.active(flashT > 0)
-      if (flashT > 0) flash.localRotation = [0, 0, rand() * 360]
+      heat = Math.max(0, heat - dt * 0.2)
+      if (flash) {
+        const uInt = flashT > 0 ? 9.5 * Math.sqrt(Math.max(0, flashT / flashDur)) : 0
+        const uHeat = clamp((heat - 0.45) / 0.8, 0, 1) * 2.2
+        const on = uInt > 0 || uHeat > 0.02
+        flash.active(on)
+        if (on) flash.uniforms({ uSeed: flashSeed, uInt, uHeat, uJet: flashJet })
+      }
       flashLight.intensity(flashT > 0 ? 3 : 0)
     }
     if (g.phase !== 'playing' || p.health <= 0) {
