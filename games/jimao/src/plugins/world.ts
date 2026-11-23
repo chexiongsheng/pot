@@ -319,13 +319,7 @@ export async function apply(ctx: Context) {
   if (!post) scene.post(look.post)
   on(ctx, 'jimao/post', (values) => post?.set(values))
 
-  for (const [x, z] of level.masts) {
-    scene.light({ type: 'spot', name: 'mast', position: P(x, 11.7, z), rotation: [90, 0, 0], intensity: 2.4, range: 30, spotAngle: 95, color: '#ffe2b0' })
-  }
-  for (const [cz] of level.cranes) {
-    scene.light({ type: 'point', name: 'crane', position: P(level.quay.RAILS[1] - 1, 19, cz), intensity: 1.2, range: 16, color: '#ffc070' })
-  }
-  scene.light({ type: 'point', name: 'quay', position: P(level.quay.X - 2, 3, 12), intensity: 0.8, range: 12, color: '#9fc4ff' })
+  // 原版只有太阳与上面 origLights 里的点光（不投影）；灯杆 light_mast 只是模型，不生成灯
 
   // ---- 画质档位（设置变化时重新应用） ----
   let appliedQuality = -1
