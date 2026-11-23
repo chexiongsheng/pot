@@ -369,9 +369,34 @@ namespace Pot
         /// lit 不透明受光（默认）、lit-cutout 镂空受光、lit-twosided 双面受光、lit-fade 半透明受光、
         /// unlit 不透明不受光、unlit-fade 半透明不受光、additive 叠加发光（按雾透射率淡出）
         /// </summary>
-        public static Material ModeMaterial(string mode)
+        public static Material ModeMaterial(string mode) => ModeMaterial(mode, -1);
+
+        /// <summary>模式默认的剔除：lit-twosided 不剔除，其余剔除背面</summary>
+        static int DefaultCull(string mode) => mode == "lit-twosided" ? 0 : 2;
+
+        /// <summary>
+        /// 模式 + 剔除的共享材质变体（cull：-1 模式默认、0 不剔除、1 剔除正面、2 剔除背面）。
+        /// Cull 是渲染状态，不能走 MaterialPropertyBlock，所以按 (mode, cull) 各缓存一份材质
+        /// </summary>
+        public static Material ModeMaterial(string mode, int cull)
         {
-            if (string.IsNullOrEmpty(mode) || mode == "lit") return DefaultMaterial;
+            if (string.IsNullOrEmpty(mode)) mode = "lit";
+            if (cull < 0 || cull > 2) cull = DefaultCull(mode);
+            if (cull != DefaultCull(mode))
+            {
+                var key = mode + "|" + cull;
+                Material v;
+                if (modeMaterials.TryGetValue(key, out v) && v != null) return v;
+                var b = ModeMaterial(mode, -1);
+                if (b == DefaultMaterial && mode != "lit") return b;
+                v = new Material(b);
+                v.SetFloat("_Cull", cull);
+                v.name = b.name + "_cull" + cull;
+                modeMaterials[key] = v;
+                materialModes[v] = new KeyValuePair<string, int>(mode, cull);
+                return v;
+            }
+            if (mode == "lit") return DefaultMaterial;
             Material mat;
             if (modeMaterials.TryGetValue(mode, out mat) && mat != null) return mat;
             var One = UnityEngine.Rendering.BlendMode.One;
@@ -408,18 +433,40 @@ namespace Pot
             }
             mat.name = "Pot_" + mode;
             modeMaterials[mode] = mat;
+            materialModes[mat] = new KeyValuePair<string, int>(mode, -1);
             return mat;
         }
 
-        /// <summary>切换材质模式；castShadows：-1 不变，0 关，1 开</summary>
+        /// <summary>材质变体反查 (mode, 显式 cull)：只改其中一项时沿用另一项</summary>
+        static readonly Dictionary<Material, KeyValuePair<string, int>> materialModes = new Dictionary<Material, KeyValuePair<string, int>>();
+
+        /// <summary>切换材质模式与剔除；mode 空串表示不变，cull：-1 不变（换模式时沿用已显式设置的值），0 不剔除、1 正面、2 背面，3 恢复模式默认；castShadows：-1 不变，0 关，1 开</summary>
         [Preserve]
-        public static void SetMaterial(int id, string mode, int castShadows)
+        public static void SetMaterial(int id, string mode, int castShadows, int cull)
         {
             var go = Get(id);
             if (go == null) return;
             var renderer = go.GetComponent<Renderer>();
             if (renderer == null) return;
-            if (!string.IsNullOrEmpty(mode)) renderer.sharedMaterial = ModeMaterial(mode);
+            if (!string.IsNullOrEmpty(mode) || cull >= 0)
+            {
+                var cur = renderer.sharedMaterial;
+                KeyValuePair<string, int> info;
+                string curMode = "lit";
+                int curCull = -1;
+                if (cur != null && materialModes.TryGetValue(cur, out info)) { curMode = info.Key; curCull = info.Value; }
+                else if (cur != null && cur != DefaultMaterial && string.IsNullOrEmpty(mode))
+                {
+                    Debug.LogWarning("[pot] material.cull 只对内置材质模式生效（" + go.name + " 用的是自定义材质）");
+                    curMode = null;
+                }
+                if (curMode != null || !string.IsNullOrEmpty(mode))
+                {
+                    var m = string.IsNullOrEmpty(mode) ? curMode : mode;
+                    var c = cull == 3 ? -1 : cull >= 0 ? cull : curCull;
+                    renderer.sharedMaterial = ModeMaterial(m, c);
+                }
+            }
             if (castShadows >= 0) renderer.shadowCastingMode = castShadows > 0 ? UnityEngine.Rendering.ShadowCastingMode.On : UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 

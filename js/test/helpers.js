@@ -49,7 +49,7 @@ class MockEngine {
   axis(name) { return this.axes[name] ?? [0, 0] }
   key(name, mode) { return mode === 0 ? this.keys.has(name) : false }
   count() { return this.objects.size }
-  material(id, mode, castShadows) { const o = this._get(id); if (mode) o.mode = mode; if (castShadows >= 0) o.shadows = !!castShadows }
+  material(id, mode, castShadows, cull = -1) { const o = this._get(id); if (mode) o.mode = mode; if (castShadows >= 0) o.shadows = !!castShadows; if (cull >= 0) o.cull = cull === 3 ? undefined : ['none', 'front', 'back'][cull] }
   surface(id, metallic, smoothness) { const o = this._get(id); if (metallic >= 0) o.metallic = metallic; if (smoothness >= 0) o.smoothness = smoothness }
   emission(id, r, g, b) { this._get(id).emission = [r, g, b] }
   collider(id, enabled) { this._get(id).collider = enabled }

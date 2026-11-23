@@ -41,7 +41,8 @@ export interface Engine {
 
   // ---- 材质 ----
   /** mode: lit/lit-fade/unlit/unlit-fade/additive（空串不变）；castShadows -1 不变 0 关 1 开 */
-  material(id: number, mode: string, castShadows: number): void
+  /** cull：-1 不变、0 不剔除、1 正面、2 背面、3 恢复模式默认 */
+  material(id: number, mode: string, castShadows: number, cull: number): void
   /** 负数表示不变 */
   surface(id: number, metallic: number, smoothness: number): void
   emission(id: number, r: number, g: number, b: number): void

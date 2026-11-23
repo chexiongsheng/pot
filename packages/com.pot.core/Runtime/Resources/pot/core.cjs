@@ -3762,6 +3762,7 @@ var pot = (() => {
   };
 
   // runtime/src/scene.ts
+  var CULL = { none: 0, front: 1, back: 2, default: 3 };
   var Texture = class {
     constructor(id, width, height, _dispose) {
       __publicField(this, "id", id);
@@ -3923,8 +3924,10 @@ var pot = (() => {
     /** 材质参数（逐对象，不复制材质）。只设置传入的字段 */
     material(options) {
       const engine = this._engine;
-      if (options.mode !== void 0 || options.shadows !== void 0) {
-        engine.material(this.id, options.mode ?? "", options.shadows === void 0 ? -1 : options.shadows ? 1 : 0);
+      if (options.mode !== void 0 || options.shadows !== void 0 || options.cull !== void 0) {
+        const cull = options.cull === void 0 ? -1 : CULL[options.cull];
+        if (cull === void 0) throw new Error(`material.cull 只能是 back/front/none/default，收到 ${options.cull}`);
+        engine.material(this.id, options.mode ?? "", options.shadows === void 0 ? -1 : options.shadows ? 1 : 0, cull);
       }
       if (options.metallic !== void 0 || options.smoothness !== void 0) {
         engine.surface(this.id, options.metallic ?? -1, options.smoothness ?? -1);
@@ -6720,7 +6723,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         },
         key: (name, mode) => I.Key(name, mode),
         count: () => S.Count(),
-        material: (id, mode, castShadows) => S.SetMaterial(id, mode, castShadows),
+        material: (id, mode, castShadows, cull) => S.SetMaterial(id, mode, castShadows, cull),
         surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
         emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
         collider: (id, enabled) => S.SetCollider(id, enabled),

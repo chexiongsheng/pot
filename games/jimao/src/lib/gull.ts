@@ -74,11 +74,9 @@ function j_() {
       s('shell', 'body', Ce(ft(0.012, 0.05, 0.036, 0.003), c + Math.cos(g) * 0.205, u, h + Math.sin(g) * 0.205, 0, -g, 0), v === 0 ? s0 : Of)
     }
     s('metal', 'rotor' + l, Ce(ds(0.017, 0.02, 0.03, 8), 0, -0.002, 0), Yn), s('metal', 'rotor' + l, Ce(ft(0.158, 0.0035, 0.03, 0.001), 0.088, 0.008, 0, 0.22, 0, 0), an), s('metal', 'rotor' + l, Ce(ft(0.158, 0.0035, 0.03, 0.001), -0.088, 0.008, 0, -0.22, 0, 0), an), s('shell', 'rotor' + l, Ce(ft(0.02, 0.004, 0.031, 0.001), 0.158, 0.008, 0, 0.22, 0, 0), Of), s('shell', 'rotor' + l, Ce(ft(0.02, 0.004, 0.031, 0.001), -0.158, 0.008, 0, -0.22, 0, 0), Of)
-    // 旋翼残影盘：原版 RingGeometry + DoubleSide；Runner 半透明材质单面，正反各一片
+    // 旋翼残影盘：原版 RingGeometry + DoubleSide，对应 material.cull: 'none'
     const d = ring(0.03, 0.168, 24)
     d.rotateX(-va), e.add('disc', 'body', Ce(d, c, u + 0.008, h), [1, 1, 1], false)
-    const d2 = ring(0.03, 0.168, 24)
-    d2.rotateX(va), e.add('disc', 'body', Ce(d2, c, u + 0.008, h), [1, 1, 1], false)
   }
   s('glow', 'strobeR', Ce(Ur(0.012, 8, 6), 0.33 + 0.215, 0.035, 0.3), [10, 0.4, 0.2], false), s('glow', 'strobeR', Ce(Ur(0.012, 8, 6), 0.33 + 0.215, 0.035, -0.3), [10, 0.4, 0.2], false), s('glow', 'strobeG', Ce(Ur(0.012, 8, 6), -0.33 - 0.215, 0.035, 0.3), [0.3, 9, 1], false), s('glow', 'strobeG', Ce(Ur(0.012, 8, 6), -0.33 - 0.215, 0.035, -0.3), [0.3, 9, 1], false), s('glow', 'strobeW', Ce(Ur(0.011, 8, 6), 0, 0.05, -0.325), [9, 9, 9], false), s('metal', 'gimbalYaw', Ce(ds(0.036, 0.036, 0.014, 12), 0, -0.004, 0), an), s('metal', 'gimbalYaw', Ce(ft(0.156, 0.01, 0.03, 0.003), 0, -0.014, 0), As)
   for (const l of [1, -1]) s('metal', 'gimbalYaw', Ce(ft(0.009, 0.075, 0.03, 0.003), l * 0.0735, -0.05, 0), As)
@@ -247,8 +245,8 @@ export function buildGull(ctx, name: string, mats?: any) {
         .shader(cone, { blend: 'add', cull: 'none', queue: 'transparent', depthWrite: false, shadows: false, uniforms: { uColor: [1, 0.9, 0.74], uGain: 0.085 } })
       continue
     }
-    // 原版旋翼盘：MeshBasicMaterial 0x0c0d0f，opacity .42
-    const r = p.slot === 'disc' ? { color: '#0c0d0f6b', material: { mode: 'unlit-fade', shadows: false } } : slotMaterial(p.slot, mats)
+    // 原版旋翼盘：MeshBasicMaterial 0x0c0d0f，opacity .42，DoubleSide
+    const r = p.slot === 'disc' ? { color: '#0c0d0f6b', material: { mode: 'unlit-fade' as const, shadows: false, cull: 'none' as const } } : slotMaterial(p.slot, mats)
     const e = scene.spawn({ shape: `mesh:${meshName(p)}`, name: `${name}-${p.slot}`, parent, color: r.color, material: r.material, collider: false })
     if (p.slot === 'lens') lens.push(e)
   }

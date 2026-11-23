@@ -53,7 +53,7 @@ export function createUnityHost(): Host {
       },
       key: (name, mode) => I.Key(name, mode),
       count: () => S.Count(),
-      material: (id, mode, castShadows) => S.SetMaterial(id, mode, castShadows),
+  material: (id, mode, castShadows, cull) => S.SetMaterial(id, mode, castShadows, cull),
       surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
       emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
       collider: (id, enabled) => S.SetCollider(id, enabled),

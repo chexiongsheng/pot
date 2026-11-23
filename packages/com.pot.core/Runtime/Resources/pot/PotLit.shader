@@ -218,9 +218,11 @@ Shader "Pot/Lit"
                 return o;
             }
 
-            half4 frag(Varyings i) : SV_Target
+            half4 frag(Varyings i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
             {
                 float3 geomN = normalize(i.normalWS);
+                // 双面（cull none/front）时背面按翻转后的法线受光
+                geomN = IS_FRONT_VFACE(face, geomN, -geomN);
                 half4 base;
                 half4 mask;
                 float3 n;
@@ -439,9 +441,11 @@ Shader "Pot/Lit"
                 return o;
             }
 
-            half4 frag(Varyings i) : SV_Target
+            half4 frag(Varyings i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
             {
                 float3 geomN = normalize(i.normalWS);
+                // 双面（cull none/front）时背面按翻转后的法线受光
+                geomN = IS_FRONT_VFACE(face, geomN, -geomN);
                 half4 base;
                 half4 mask;
                 float3 n;

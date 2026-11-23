@@ -24,6 +24,8 @@ export type Color = [number, number, number] | [number, number, number, number] 
  */
 export type MaterialMode = 'lit' | 'lit-cutout' | 'lit-twosided' | 'lit-fade' | 'unlit' | 'unlit-fade' | 'additive'
 
+const CULL: Record<string, number> = { none: 0, front: 1, back: 2, default: 3 }
+
 /** 贴图句柄（scene.texture / scene.text 创建，随创建它的插件卸载而销毁） */
 export class Texture {
   constructor(readonly id: number, readonly width: number, readonly height: number, private _dispose?: () => any) {}
@@ -34,6 +36,12 @@ export class Texture {
 
 export interface MaterialOptions {
   mode?: MaterialMode
+  /**
+   * 面剔除：back 剔除背面（除 lit-twosided 外的默认）、front 剔除正面、none 双面；
+   * default 恢复模式默认。只传 cull 时沿用当前模式，换模式时沿用已设置的 cull。
+   * 双面受光时背面按翻转法线着色。仅对内置材质模式生效
+   */
+  cull?: 'back' | 'front' | 'none' | 'default'
   /** 0 到 1 */
   metallic?: number
   /** 0 到 1 */
@@ -556,8 +564,10 @@ export class Entity {
   /** 材质参数（逐对象，不复制材质）。只设置传入的字段 */
   material(options: MaterialOptions) {
     const engine = this._engine
-    if (options.mode !== undefined || options.shadows !== undefined) {
-      engine.material(this.id, options.mode ?? '', options.shadows === undefined ? -1 : options.shadows ? 1 : 0)
+    if (options.mode !== undefined || options.shadows !== undefined || options.cull !== undefined) {
+      const cull = options.cull === undefined ? -1 : CULL[options.cull]
+      if (cull === undefined) throw new Error(`material.cull 只能是 back/front/none/default，收到 ${options.cull}`)
+      engine.material(this.id, options.mode ?? '', options.shadows === undefined ? -1 : options.shadows ? 1 : 0, cull)
     }
     if (options.metallic !== undefined || options.smoothness !== undefined) {
       engine.surface(this.id, options.metallic ?? -1, options.smoothness ?? -1)
