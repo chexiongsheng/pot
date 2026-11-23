@@ -73,7 +73,8 @@ export interface Engine {
   // ---- 2D 绘制 ----
   /** 提交本帧绘制命令（格式见 PotUI.cs） */
   uiSubmit(list: string): void
-  uiMeasure(text: string, size: number, bold: boolean): [number, number]
+  /** flags 同 PotUI 文字命令（1 粗体、8 等宽、位 4..7 字重/100），只看字体相关位 */
+  uiMeasure(text: string, size: number, flags: number): [number, number]
 
   // ---- 音频 ----
   audioClip(name: string, rate: number, channels: number, pcm16Base64: string): boolean

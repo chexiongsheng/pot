@@ -85,6 +85,7 @@ var pot = (() => {
     encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
     fontFamilies: () => fontFamilies,
+    fontFlags: () => fontFlags,
     getPropertyDescriptor: () => getPropertyDescriptor,
     getTraceable: () => getTraceable,
     hash: () => hash,
@@ -4330,6 +4331,13 @@ var pot = (() => {
   // runtime/src/ui.ts
   var RS = "";
   var FS = "";
+  function fontFlags(o) {
+    const opt = typeof o === "boolean" ? { bold: o } : o ?? {};
+    let w = opt.weight === "bold" ? 700 : opt.weight === "normal" ? 400 : opt.weight ?? (opt.bold ? 700 : 400);
+    if (!Number.isFinite(w)) throw new Error("ui：weight 须为 100 到 900 的数或 normal/bold");
+    w = Math.min(9, Math.max(1, Math.round(w / 100)));
+    return (w >= 6 ? 1 : 0) | (opt.mono ? 8 : 0) | (w === 4 || w === 7 ? 0 : w << 4);
+  }
   var Flow = class {
     constructor(_x0, _y0, _o = {}) {
       __publicField(this, "_x0", _x0);
@@ -4489,49 +4497,53 @@ var pot = (() => {
       if (options.spacing) return this._spacedText(String(text), x, y, size, options);
       const h = options.align === "right" ? 2 : options.align === "center" ? 1 : 0;
       const v = options.valign === "bottom" ? 2 : options.valign === "middle" ? 1 : 0;
-      const flags = (options.bold ? 1 : 0) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0);
+      const flags = fontFlags(options) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0);
       const w = options.w ?? 0;
       const hh = options.h ?? 0;
       const s = String(text).split(RS).join("").split(FS).join("");
       this._list.push(["t", n(x), n(y), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(size), String(v * 3 + h), String(flags), s].join(FS));
     }
-    /** 文字尺寸（像素）。spacing（em）不为 0 时按逐字宽度加字距计算，宽度含末尾字距（同 CSS） */
-    measure(text, size = 16, bold = false, spacing = 0) {
+    /**
+     * 文字尺寸（像素）。第三个参数为是否粗体，或字体选项 { bold, weight, mono }。
+     * spacing（em）不为 0 时按逐字宽度加字距计算，宽度含末尾字距（同 CSS）
+     */
+    measure(text, size = 16, font = false, spacing = 0) {
+      const ff = fontFlags(font);
       if (spacing) {
         const lines = String(text).split("\n");
-        const width2 = Math.max(...lines.map((l) => this._spacedWidth(l, Math.round(size), bold, spacing * Math.round(size))));
-        return { width: width2, height: this._lineHeight(Math.round(size), bold) * lines.length };
+        const width2 = Math.max(...lines.map((l) => this._spacedWidth(l, Math.round(size), ff, spacing * Math.round(size))));
+        return { width: width2, height: this._lineHeight(Math.round(size), ff) * lines.length };
       }
-      const [width, height] = this._host.engine.uiMeasure(text, size, bold);
+      const [width, height] = this._host.engine.uiMeasure(text, size, ff);
       return { width, height };
     }
-    _charWidth(ch, size, bold) {
-      const key = `${size}|${bold ? 1 : 0}|${ch}`;
+    _charWidth(ch, size, ff) {
+      const key = `${size}|${ff}|${ch}`;
       let w = this._charWidths.get(key);
       if (w === void 0) {
-        w = ch === " " ? size * 0.3 : this._host.engine.uiMeasure(ch, size, bold)[0];
+        w = ch === " " ? size * 0.3 : this._host.engine.uiMeasure(ch, size, ff)[0];
         if (this._charWidths.size > 4096) this._charWidths.clear();
         this._charWidths.set(key, w);
       }
       return w;
     }
-    _lineHeight(size, bold) {
-      const key = `${size}|${bold ? 1 : 0}`;
+    _lineHeight(size, ff) {
+      const key = `${size}|${ff}`;
       let h = this._lineHeights.get(key);
       if (h === void 0) {
-        h = this._host.engine.uiMeasure("国Mg", size, bold)[1];
+        h = this._host.engine.uiMeasure("国Mg", size, ff)[1];
         this._lineHeights.set(key, h);
       }
       return h;
     }
-    _spacedWidth(line, size, bold, sp) {
+    _spacedWidth(line, size, ff, sp) {
       let w = 0;
-      for (const ch of line) w += this._charWidth(ch, size, bold) + sp;
+      for (const ch of line) w += this._charWidth(ch, size, ff) + sp;
       return w;
     }
     /** 带字距：按字切行（wrap 时在 w 内按字断行，英文优先在空格处断）、按 align/valign 定位后逐字提交 */
     _spacedText(text, x, y, size, o) {
-      const bold = !!o.bold;
+      const ff = fontFlags(o);
       const sp = (o.spacing ?? 0) * size;
       const maxW = o.w ?? 0;
       const lines = [];
@@ -4542,12 +4554,12 @@ var pot = (() => {
         }
         let line = "", lw = 0, lastSpace = -1;
         for (const ch of para) {
-          const cw = this._charWidth(ch, size, bold) + sp;
+          const cw = this._charWidth(ch, size, ff) + sp;
           if (lw + cw > maxW && line) {
             if (ch !== " " && lastSpace > 0) {
               lines.push(line.slice(0, lastSpace));
               line = line.slice(lastSpace + 1);
-              lw = this._spacedWidth(line, size, bold, sp);
+              lw = this._spacedWidth(line, size, ff, sp);
             } else {
               lines.push(line);
               line = "";
@@ -4562,19 +4574,19 @@ var pot = (() => {
         }
         lines.push(line);
       }
-      const lh = this._lineHeight(size, bold);
+      const lh = this._lineHeight(size, ff);
       const total = lh * lines.length;
       const boxH = o.h ?? 0;
       let top = y;
       if (o.valign === "middle") top = boxH ? y + (boxH - total) / 2 : y - total / 2;
       else if (o.valign === "bottom") top = boxH ? y + boxH - total : y - total;
       const color = this.hex(o.color ?? "#ffffff", o.alpha);
-      const flags = (bold ? 1 : 0) | (o.shadow ? 2 : 0);
+      const flags = ff | (o.shadow ? 2 : 0);
       const single = lines.length === 1 && !boxH;
       const vcode = single ? o.valign === "bottom" ? 2 : o.valign === "middle" ? 1 : 0 : 1;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const lw = this._spacedWidth(line, size, bold, sp);
+        const lw = this._spacedWidth(line, size, ff, sp);
         let cx = x;
         if (o.align === "center") cx = maxW ? x + (maxW - lw) / 2 : x - lw / 2;
         else if (o.align === "right") cx = maxW ? x + maxW - lw : x - lw;
@@ -4583,7 +4595,7 @@ var pot = (() => {
         const cy = single ? y : top + lh * i + lh / 2;
         for (const ch of line) {
           if (ch !== " ") this._list.push(["t", n(cx), n(cy), "0", "0", color, String(size), String(vcode * 3), String(flags), ch.split(RS).join("").split(FS).join("")].join(FS));
-          cx += this._charWidth(ch, size, bold) + sp;
+          cx += this._charWidth(ch, size, ff) + sp;
         }
       }
     }
@@ -6823,8 +6835,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         wheel: () => I.Wheel(),
         focused: () => I.Focused(),
         uiSubmit: (list) => U.Submit(list),
-        uiMeasure: (text, size, bold) => {
-          U.Measure(text, size, bold);
+        uiMeasure: (text, size, flags) => {
+          U.Measure(text, size, flags);
           return [U.tw, U.th];
         },
         audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),

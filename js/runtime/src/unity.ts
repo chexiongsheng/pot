@@ -81,8 +81,8 @@ export function createUnityHost(): Host {
       wheel: () => I.Wheel(),
       focused: () => I.Focused(),
       uiSubmit: (list) => U.Submit(list),
-      uiMeasure: (text, size, bold) => {
-        U.Measure(text, size, bold)
+      uiMeasure: (text, size, flags) => {
+        U.Measure(text, size, flags)
         return [U.tw, U.th]
       },
       audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),

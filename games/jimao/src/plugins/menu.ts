@@ -41,7 +41,8 @@ const BONE_DIM = '#e8e4daa3'
 interface Spaced {
   size: number
   color: string
-  bold?: boolean
+  /** 字重（CSS font-weight）；原版菜单用 900 / 600 / 500 三档 */
+  weight?: number
   /** 字距，单位 em（CSS letter-spacing） */
   spacing?: number
   alpha?: number
@@ -58,11 +59,11 @@ export function apply(ctx: Context) {
 
   // ---- 字距（CSS letter-spacing，单位 em）：ui.text / ui.measure 的 spacing ----
   function spacedWidth(s: string, o: Spaced) {
-    return ui.measure(s, Math.round(o.size), !!o.bold, o.spacing ?? 0).width
+    return ui.measure(s, Math.round(o.size), { weight: o.weight }, o.spacing ?? 0).width
   }
   /** 带字距的文字，(x, y) 为左端，返回宽度（含末尾字距，同 CSS） */
   function spaced(s: string, x: number, y: number, o: Spaced) {
-    ui.text(s, x, y, { size: Math.round(o.size), bold: !!o.bold, color: o.color, alpha: o.alpha, shadow: o.shadow, valign: o.valign, spacing: o.spacing })
+    ui.text(s, x, y, { size: Math.round(o.size), weight: o.weight, color: o.color, alpha: o.alpha, shadow: o.shadow, valign: o.valign, spacing: o.spacing })
     return spacedWidth(s, o)
   }
 
@@ -81,7 +82,7 @@ export function apply(ctx: Context) {
   }
 
   /** 原版 m-btn：主按钮 signal 底 ink 字 18px 字距 .3em 高 52；次按钮半透明 ink 底 + bone .42 边框 15px 字距 .22em 高 46 */
-  const btnStyle = (primary: boolean): Spaced => (primary ? { size: 18, bold: true, spacing: 0.3, color: C.ink } : { size: 15, bold: true, spacing: 0.22, color: C.bone })
+  const btnStyle = (primary: boolean): Spaced => (primary ? { size: 18, weight: 600, spacing: 0.3, color: C.ink } : { size: 15, weight: 600, spacing: 0.22, color: C.bone })
   const btnSize = (label: string, primary: boolean): [number, number] => [Math.round(spacedWidth(label, btnStyle(primary)) + (primary ? 64 : 48)), primary ? 52 : 46]
   function mbtn(id: string, label: string, x: number, cy: number, primary = false) {
     const o = btnStyle(primary)
@@ -113,8 +114,8 @@ export function apply(ctx: Context) {
   function stats(items: [string, string, string?][], x: number, y: number, a: number) {
     const f = ui.flow(x, y)
     for (const [k, v, color] of items) {
-      spaced(k, f.x, y, { size: 11, spacing: 0.2, color: C.steel, alpha: a, bold: true })
-      const w = spaced(v, f.x, y + 20, { size: 26, bold: true, color: color ?? C.bone, alpha: a })
+      spaced(k, f.x, y, { size: 11, spacing: 0.2, color: C.steel, alpha: a, weight: 500 })
+      const w = spaced(v, f.x, y + 20, { size: 26, weight: 500, color: color ?? C.bone, alpha: a })
       f.next(Math.max(150, w + 48), 54)
     }
   }
@@ -128,16 +129,16 @@ export function apply(ctx: Context) {
   function heading(eyebrow: string, title: string, x: number, bottom: number, size: number, a: number, tag?: string, tagColor = C.signal) {
     const lh = size * 0.8
     // 原版 CSS：line-height .8，字形在行框中竖直居中（会略微溢出行框底部），所以按行框中心摆放
-    spaced(title, x, bottom - lh / 2, { size, bold: true, spacing: 0.15, color: C.bone, alpha: a, shadow: true, valign: 'middle' })
+    spaced(title, x, bottom - lh / 2, { size, weight: 900, spacing: 0.15, color: C.bone, alpha: a, shadow: true, valign: 'middle' })
     let ex = x
     const ey = bottom - lh - 22
     if (tag) {
-      const tw = spacedWidth(tag, { size: 15, bold: true, spacing: 0.1, color: C.ink }) + 16
+      const tw = spacedWidth(tag, { size: 15, weight: 900, spacing: 0.1, color: C.ink }) + 16
       ui.rect(ex, ey - 12, tw, 24, tagColor, { alpha: a })
-      spaced(tag, ex + 8, ey, { size: 15, bold: true, spacing: 0.1, color: C.ink, alpha: a, valign: 'middle' })
+      spaced(tag, ex + 8, ey, { size: 15, weight: 900, spacing: 0.1, color: C.ink, alpha: a, valign: 'middle' })
       ex += tw + 12
     }
-    spaced(eyebrow, ex, ey, { size: 13, bold: true, spacing: 0.24, color: C.bone, alpha: a, valign: 'middle' })
+    spaced(eyebrow, ex, ey, { size: 13, weight: 600, spacing: 0.24, color: C.bone, alpha: a, valign: 'middle' })
     return bottom - lh
   }
 
@@ -147,13 +148,13 @@ export function apply(ctx: Context) {
     ui.rect(x, y, w, h, over ? (accent ? C.signal : C.bone) : C.ink, { alpha: over ? 0.95 : 0.6, radius: 3 })
     if (!over) ui.border(x, y, w, h, accent ? C.signal : C.steel, 1, { alpha: 0.7, radius: 3 })
     ui.rect(x, y, 3, h, accent ? C.signal : C.steel, { alpha: over ? 0 : 1 })
-    ui.text(label, x + 20, y + h / 2, { size: 17, bold: true, color: over ? C.ink : C.bone, valign: 'middle' })
+    ui.text(label, x + 20, y + h / 2, { size: 17, weight: 600, color: over ? C.ink : C.bone, valign: 'middle' })
     return over && input.pressed('mouse0')
   }
 
   function slider(label: string, value: number, min: number, max: number, x: number, y: number, w: number, fmt: (v: number) => string) {
     ui.text(label, x, y, { size: 15, color: C.bone })
-    ui.text(fmt(value), x + w, y, { size: 15, color: C.signal, align: 'right', bold: true })
+    ui.text(fmt(value), x + w, y, { size: 15, color: C.signal, align: 'right', weight: 500 })
     const ty = y + 28
     const k = (value - min) / (max - min)
     ui.rect(x, ty, w, 4, C.steel, { alpha: 0.35, radius: 2 })
@@ -173,7 +174,7 @@ export function apply(ctx: Context) {
     ui.rect(x, y, pw, ph, C.ink, { alpha: 0.92, radius: 6 })
     ui.rect(x, y, pw, 4, C.signal)
     const title = g.panel === 'settings' ? '设置' : g.panel === 'controls' ? '操作说明' : '项目介绍'
-    ui.text(title, x + 28, y + 26, { size: 24, bold: true, color: C.bone })
+    ui.text(title, x + 28, y + 26, { size: 24, weight: 600, color: C.bone })
     const cx = x + 28, cw = pw - 56
     if (g.panel === 'settings') {
       const s = g.settings
@@ -194,14 +195,14 @@ export function apply(ctx: Context) {
         const qx = cx + cw - (names.length - i) * (qw + 6) + 6
         const on = (s.quality ?? 2) === i
         ui.rect(qx, qy, qw, 28, on ? C.signal : C.steel, { radius: 3, alpha: on ? 1 : 0.25 })
-        ui.text(label, qx + qw / 2, qy + 14, { size: 14, bold: true, color: on ? C.ink : C.bone, align: 'center', valign: 'middle' })
+        ui.text(label, qx + qw / 2, qy + 14, { size: 14, weight: 600, color: on ? C.ink : C.bone, align: 'center', valign: 'middle' })
         if (input.pressed('mouse0') && ui.hit(qx, qy, qw, 28) && !on) { s.quality = i; ctx.audio.play(sfx('ui'), { volume: 0.4 }) }
       })
     } else if (g.panel === 'controls') {
       CONTROLS.forEach(([k, v], i) => {
         const yy = y + 76 + i * 30
         ui.rect(cx, yy, 150, 24, C.steel, { alpha: 0.18, radius: 3 })
-        ui.text(k, cx + 75, yy + 12, { size: 14, bold: true, color: C.signal, align: 'center', valign: 'middle' })
+        ui.text(k, cx + 75, yy + 12, { size: 14, weight: 500, color: C.signal, align: 'center', valign: 'middle' })
         ui.text(v, cx + 170, yy + 12, { size: 15, color: C.bone, valign: 'middle' })
       })
     } else {
@@ -217,15 +218,15 @@ export function apply(ctx: Context) {
     // 右下操作速览
     if (W >= 1180) {
       LEGEND.forEach((line, i) => {
-        const o: Spaced = { size: 12, spacing: 0.16, color: C.bone, alpha: 0.78 }
+        const o: Spaced = { size: 12, weight: 500, spacing: 0.16, color: C.bone, alpha: 0.78 }
         const parts = line.map(([k, v]) => [k, v] as const)
         const gap = 18
         let w = 0
-        for (const [k, v] of parts) w += spacedWidth(k, { ...o, bold: true }) + 6 + spacedWidth(v, o) + gap
+        for (const [k, v] of parts) w += spacedWidth(k, { ...o, weight: 500 }) + 6 + spacedWidth(v, o) + gap
         let lx = W - x - (w - gap)
         const ly = bottom - (LEGEND.length - 1 - i) * 22
         for (const [k, v] of parts) {
-          lx += spaced(k, lx, ly, { ...o, bold: true, color: C.signal, valign: 'bottom' }) + 6
+          lx += spaced(k, lx, ly, { ...o, weight: 500, color: C.signal, valign: 'bottom' }) + 6
           lx += spaced(v, lx, ly, { ...o, valign: 'bottom' }) + gap
         }
       })
@@ -247,11 +248,11 @@ export function apply(ctx: Context) {
     // 大标题 + 副标题
     const hs = Math.round(clamp(W * 0.155, 52, 208))
     const hb = py - 34
-    const tw = spacedWidth('几猫', { size: hs, bold: true, spacing: 0.15, color: C.bone })
+    const tw = spacedWidth('几猫', { size: hs, weight: 900, spacing: 0.15, color: C.bone })
     const top = heading('几猫突击小队', '几猫', x, hb, hs, 1, 'B4')
-    spaced('3A大作', x + tw + 4, hb - hs * 0.06, { size: Math.round(hs * 0.24), bold: true, spacing: 0.08, color: C.signal, shadow: true, valign: 'bottom' })
-    const ew = spacedWidth('B4', { size: 15, bold: true, spacing: 0.1, color: C.ink }) + 28 + spacedWidth('几猫突击小队', { size: 13, bold: true, spacing: 0.24, color: C.bone })
-    spaced('几猫港区 · 05:42', x + ew + 14, top - 22, { size: 13, bold: true, spacing: 0.24, color: BONE_DIM, valign: 'middle' })
+    spaced('3A大作', x + tw + 4, hb - hs * 0.06, { size: Math.round(hs * 0.24), weight: 900, spacing: 0.08, color: C.signal, shadow: true, valign: 'bottom' })
+    const ew = spacedWidth('B4', { size: 15, weight: 900, spacing: 0.1, color: C.ink }) + 28 + spacedWidth('几猫突击小队', { size: 13, weight: 600, spacing: 0.24, color: C.bone })
+    spaced('几猫港区 · 05:42', x + ew + 14, top - 22, { size: 13, weight: 600, spacing: 0.24, color: BONE_DIM, valign: 'middle' })
   }
 
   ctx.on('update', () => {
@@ -308,8 +309,8 @@ export function apply(ctx: Context) {
         ['重新部署', `${g.retries}`],
       ], x, sy, a)
       const ry = sy - 30 - 40
-      spaced('行动评级', x, ry, { size: 11, bold: true, spacing: 0.2, color: C.steel, alpha: a })
-      const rw = spaced(r.label, x, ry + 18, { size: 30, bold: true, color: C.signal, alpha: a })
+      spaced('行动评级', x, ry, { size: 11, weight: 500, spacing: 0.2, color: C.steel, alpha: a })
+      const rw = spaced(r.label, x, ry + 18, { size: 30, weight: 900, color: C.signal, alpha: a })
       for (let i = 0; i < 5; i++) ui.rect(x + rw + 20 + i * 22, ry + 34, 16, 6, i < r.score ? C.signal : C.steel, { alpha: a * (i < r.score ? 1 : 0.35) })
       heading('四号泊位 · 行动简报', '几猫港区已解除封锁', x, ry - 30, Math.round(clamp(W * 0.05, 36, 72)), a)
     }

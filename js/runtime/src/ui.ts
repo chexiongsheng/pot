@@ -29,13 +29,37 @@ export interface TextOptions {
   alpha?: number
   align?: HAlign
   valign?: VAlign
+  /** 粗体，等同 weight 700 */
   bold?: boolean
+  /** 字重 100 到 900（同 CSS font-weight，按百取整），优先于 bold；按 CSS 规则匹配系统已装的字面，不够粗时合成粗体 */
+  weight?: FontWeight
+  /** 等宽字体（Cascadia Mono / Consolas 等，缺字回退中文字体）；WebGL 与内置字体发布包上仍为内置字体 */
+  mono?: boolean
   /** 1 像素黑色投影 */
   shadow?: boolean
   /** 在 w 内自动换行 */
   wrap?: boolean
   /** 字距，单位 em（同 CSS letter-spacing，每个字后面都加，含最后一个） */
   spacing?: number
+}
+
+export type FontWeight = number | 'normal' | 'bold'
+
+/** 量字用的字体选项（TextOptions 的子集） */
+export interface FontOptions {
+  bold?: boolean
+  weight?: FontWeight
+  mono?: boolean
+}
+
+/** 字体相关的 flags 位：1 粗体（≥ 600，供只认粗体位的宿主）、8 等宽、位 4..7 为 字重/100 */
+export function fontFlags(o: FontOptions | boolean | undefined): number {
+  const opt: FontOptions = typeof o === 'boolean' ? { bold: o } : o ?? {}
+  let w = opt.weight === 'bold' ? 700 : opt.weight === 'normal' ? 400 : opt.weight ?? (opt.bold ? 700 : 400)
+  if (!Number.isFinite(w)) throw new Error('ui：weight 须为 100 到 900 的数或 normal/bold')
+  w = Math.min(9, Math.max(1, Math.round(w / 100)))
+  // 400 / 700 只用粗体位表示（与旧命令一致）；其他字重写进位 4..7
+  return (w >= 6 ? 1 : 0) | (opt.mono ? 8 : 0) | (w === 4 || w === 7 ? 0 : w << 4)
 }
 
 export interface RectOptions {
@@ -251,58 +275,62 @@ export class UIService extends Service {
     if (options.spacing) return this._spacedText(String(text), x, y, size, options)
     const h = options.align === 'right' ? 2 : options.align === 'center' ? 1 : 0
     const v = options.valign === 'bottom' ? 2 : options.valign === 'middle' ? 1 : 0
-    const flags = (options.bold ? 1 : 0) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0)
+    const flags = fontFlags(options) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0)
     const w = options.w ?? 0
     const hh = options.h ?? 0
     const s = String(text).split(RS).join('').split(FS).join('')
     this._list.push(['t', n(x), n(y), n(w), n(hh), this.hex(options.color ?? '#ffffff', options.alpha), String(size), String(v * 3 + h), String(flags), s].join(FS))
   }
 
-  /** 文字尺寸（像素）。spacing（em）不为 0 时按逐字宽度加字距计算，宽度含末尾字距（同 CSS） */
-  measure(text: string, size = 16, bold = false, spacing = 0) {
+  /**
+   * 文字尺寸（像素）。第三个参数为是否粗体，或字体选项 { bold, weight, mono }。
+   * spacing（em）不为 0 时按逐字宽度加字距计算，宽度含末尾字距（同 CSS）
+   */
+  measure(text: string, size = 16, font: boolean | FontOptions = false, spacing = 0) {
+    const ff = fontFlags(font)
     if (spacing) {
       const lines = String(text).split('\n')
-      const width = Math.max(...lines.map((l) => this._spacedWidth(l, Math.round(size), bold, spacing * Math.round(size))))
-      return { width, height: this._lineHeight(Math.round(size), bold) * lines.length }
+      const width = Math.max(...lines.map((l) => this._spacedWidth(l, Math.round(size), ff, spacing * Math.round(size))))
+      return { width, height: this._lineHeight(Math.round(size), ff) * lines.length }
     }
-    const [width, height] = this._host.engine.uiMeasure(text, size, bold)
+    const [width, height] = this._host.engine.uiMeasure(text, size, ff)
     return { width, height }
   }
 
   private _charWidths = new Map<string, number>()
   private _lineHeights = new Map<string, number>()
 
-  private _charWidth(ch: string, size: number, bold: boolean) {
-    const key = `${size}|${bold ? 1 : 0}|${ch}`
+  private _charWidth(ch: string, size: number, ff: number) {
+    const key = `${size}|${ff}|${ch}`
     let w = this._charWidths.get(key)
     if (w === undefined) {
       // 宿主量单个空格常为 0，按常见字体的空格宽度（约 0.3em）计
-      w = ch === ' ' ? size * 0.3 : this._host.engine.uiMeasure(ch, size, bold)[0]
+      w = ch === ' ' ? size * 0.3 : this._host.engine.uiMeasure(ch, size, ff)[0]
       if (this._charWidths.size > 4096) this._charWidths.clear()
       this._charWidths.set(key, w)
     }
     return w
   }
 
-  private _lineHeight(size: number, bold: boolean) {
-    const key = `${size}|${bold ? 1 : 0}`
+  private _lineHeight(size: number, ff: number) {
+    const key = `${size}|${ff}`
     let h = this._lineHeights.get(key)
     if (h === undefined) {
-      h = this._host.engine.uiMeasure('国Mg', size, bold)[1]
+      h = this._host.engine.uiMeasure('国Mg', size, ff)[1]
       this._lineHeights.set(key, h)
     }
     return h
   }
 
-  private _spacedWidth(line: string, size: number, bold: boolean, sp: number) {
+  private _spacedWidth(line: string, size: number, ff: number, sp: number) {
     let w = 0
-    for (const ch of line) w += this._charWidth(ch, size, bold) + sp
+    for (const ch of line) w += this._charWidth(ch, size, ff) + sp
     return w
   }
 
   /** 带字距：按字切行（wrap 时在 w 内按字断行，英文优先在空格处断）、按 align/valign 定位后逐字提交 */
   private _spacedText(text: string, x: number, y: number, size: number, o: TextOptions) {
-    const bold = !!o.bold
+    const ff = fontFlags(o)
     const sp = (o.spacing ?? 0) * size
     const maxW = o.w ?? 0
     const lines: string[] = []
@@ -310,12 +338,12 @@ export class UIService extends Service {
       if (!o.wrap || !maxW) { lines.push(para); continue }
       let line = '', lw = 0, lastSpace = -1
       for (const ch of para) {
-        const cw = this._charWidth(ch, size, bold) + sp
+        const cw = this._charWidth(ch, size, ff) + sp
         if (lw + cw > maxW && line) {
           if (ch !== ' ' && lastSpace > 0) {
             lines.push(line.slice(0, lastSpace))
             line = line.slice(lastSpace + 1)
-            lw = this._spacedWidth(line, size, bold, sp)
+            lw = this._spacedWidth(line, size, ff, sp)
           } else {
             lines.push(line)
             line = ''
@@ -330,7 +358,7 @@ export class UIService extends Service {
       }
       lines.push(line)
     }
-    const lh = this._lineHeight(size, bold)
+    const lh = this._lineHeight(size, ff)
     const total = lh * lines.length
     const boxH = o.h ?? 0
     // 与无字距的 text 一致：有框时在框内对齐，没框时 (x, y) 为锚点
@@ -338,13 +366,13 @@ export class UIService extends Service {
     if (o.valign === 'middle') top = boxH ? y + (boxH - total) / 2 : y - total / 2
     else if (o.valign === 'bottom') top = boxH ? y + boxH - total : y - total
     const color = this.hex(o.color ?? '#ffffff', o.alpha)
-    const flags = (bold ? 1 : 0) | (o.shadow ? 2 : 0)
+    const flags = ff | (o.shadow ? 2 : 0)
     // 单行且没给框：每个字直接按原 valign 以 y 为锚点（与无字距的 text 逐像素一致）；否则每行按行中心对齐
     const single = lines.length === 1 && !boxH
     const vcode = single ? (o.valign === 'bottom' ? 2 : o.valign === 'middle' ? 1 : 0) : 1
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
-      const lw = this._spacedWidth(line, size, bold, sp)
+      const lw = this._spacedWidth(line, size, ff, sp)
       let cx = x
       if (o.align === 'center') cx = maxW ? x + (maxW - lw) / 2 : x - lw / 2
       else if (o.align === 'right') cx = maxW ? x + maxW - lw : x - lw
@@ -354,7 +382,7 @@ export class UIService extends Service {
       const cy = single ? y : top + lh * i + lh / 2
       for (const ch of line) {
         if (ch !== ' ') this._list.push(['t', n(cx), n(cy), '0', '0', color, String(size), String(vcode * 3), String(flags), ch.split(RS).join('').split(FS).join('')].join(FS))
-        cx += this._charWidth(ch, size, bold) + sp
+        cx += this._charWidth(ch, size, ff) + sp
       }
     }
   }

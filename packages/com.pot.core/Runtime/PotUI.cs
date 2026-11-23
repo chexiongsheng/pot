@@ -16,7 +16,7 @@ namespace Pot
     ///   l x1 y1 x2 y2 color width                      线段
     ///   a cx cy radius color thickness start sweep     圆弧（角度制，0 度朝上，顺时针）
     ///   g x y w h radius vertical stops                线性渐变；vertical 1 为从上到下、0 为从左到右；stops 为 color@pos 以 ; 分隔（pos 0..1 递增）
-    ///   t x y w h color size align flags text          文字；align 0..8 对应 左上/中上/右上/左中/居中/右中/左下/中下/右下；flags 1 粗体 2 阴影 4 换行
+    ///   t x y w h color size align flags text          文字；align 0..8 对应 左上/中上/右上/左中/居中/右中/左下/中下/右下；flags 1 粗体 2 阴影 4 换行 8 等宽，位 4..7 为字重/100（0 表示按粗体位取 400/700）
     /// </summary>
     [Preserve]
     public static class PotUI
@@ -29,7 +29,6 @@ namespace Pot
         static bool dirty;
         static readonly Dictionary<string, Color> colors = new Dictionary<string, Color>();
         static readonly Dictionary<int, GUIStyle> styles = new Dictionary<int, GUIStyle>();
-        static Font font;
 
         /// <summary>提交本帧的绘制命令（覆盖上一帧）</summary>
         [Preserve]
@@ -43,9 +42,9 @@ namespace Pot
         [Preserve] public static float tw, th;
 
         [Preserve]
-        public static void Measure(string text, int size, bool bold)
+        public static void Measure(string text, int size, int flags)
         {
-            var style = Style(size, 0, bold ? 1 : 0);
+            var style = Style(size, 0, flags & ~6);
             var s = style.CalcSize(new GUIContent(text ?? ""));
             tw = s.x;
             th = s.y;
@@ -58,35 +57,33 @@ namespace Pot
             dirty = false;
         }
 
-        static Font UIFont
+        /// <summary>flags 中的字重：位 4..7 为 字重/100（1..9）；为 0 时看位 0（粗体 700，否则 400）</summary>
+        internal static int Weight(int flags)
         {
-            get
-            {
-                if (font == null)
-                {
-                    try
-                    {
-                        font = PotFonts.Default(16);
-                    }
-                    catch (Exception)
-                    {
-                        font = null;
-                    }
-                }
-                return font;
-            }
+            var w = (flags >> 4) & 15;
+            return w > 0 ? Mathf.Min(w, 9) * 100 : (flags & 1) != 0 ? 700 : 400;
         }
 
         static GUIStyle Style(int size, int align, int flags)
         {
-            var key = (size << 8) | (align << 4) | (flags & 15);
+            var key = (size << 12) | (align << 8) | (flags & 255);
             GUIStyle style;
             if (styles.TryGetValue(key, out style)) return style;
             style = new GUIStyle();
-            var f = UIFont;
+            Font f;
+            FontStyle fs;
+            try
+            {
+                f = PotFonts.ForWeight(Weight(flags), (flags & 8) != 0, 16, out fs);
+            }
+            catch (Exception)
+            {
+                f = null;
+                fs = Weight(flags) >= 600 ? FontStyle.Bold : FontStyle.Normal;
+            }
             if (f != null) style.font = f;
             style.fontSize = Mathf.Max(1, size);
-            style.fontStyle = (flags & 1) != 0 ? FontStyle.Bold : FontStyle.Normal;
+            style.fontStyle = fs;
             style.alignment = (TextAnchor)Mathf.Clamp(align, 0, 8);
             style.wordWrap = (flags & 4) != 0;
             style.clipping = TextClipping.Overflow;
