@@ -130,7 +130,7 @@ chain.set({ uThunder: 0.3 })   // 改共享 uniform；chain.setPass(i, {...}) �
 - 内置输入：`scene`（本帧 HDR 场景，线性）、`depth`（相机原始深度）。输入也可以直接给 Texture。`history: true` 的目标在同一帧里读到的是上一帧结果，写入本帧；首帧为透明黑。
 - pass 选项：`blend`（同 bake）、`uniforms`、`name`、`enabled`（初始开关，默认 true）。`chain.enable(下标 | 名字 | 数组, on)` 开关 pass，同名的一组一起开关（如所有 bloom pass 都叫 `bloom`），`chain.enabled(x)` 查询；关闭的 pass 不执行，它写的普通目标被清成透明黑（下游读到 0），history 目标保留上次结果，写 screen 的则画面保持上一步。比把强度置零省 GPU。按数组顺序执行，`output: 'screen'` 的 pass 写最终画面，必须输出线性颜色（最终拷贝负责转 sRGB）。
 - 后建的链替换先建的，`chain.active` 为 false 表示已被替换或释放。着色器编译失败或目标名不存在时抛错。
-- `#include <pot/post>`：`in vec2 vUv`（原点左下）、`pot_Depth01(raw)`、`pot_EyeDepth(raw)`、`pot_IsSky(raw)`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`（xy 为屏幕 uv，z 为裁剪空间 w，<0 在相机后）。内置量 `pot_ScreenVP`、`pot_ScreenInvVP`、`pot_DepthParams`；`pot_ScreenSize` 在每个 pass 里是输出目标的尺寸（xy 像素、zw 倒数），源贴图尺寸用 `textureSize`。`<pot/lit>` 也能 include，用其中的雾函数和太阳量。
+- `#include <pot/post>`：`in vec2 vUv`（原点左下）、`pot_Depth01(raw)`、`pot_EyeDepth(raw)`、`pot_IsSky(raw)`、`pot_WorldPos(uv, raw)`、`pot_ViewDir(uv)`、`pot_WorldToUv(p)`（xy 为屏幕 uv，z 为裁剪空间 w，<0 在相机后）。内置量 `pot_ScreenVP`、`pot_ScreenInvVP`、`pot_DepthParams`；`pot_ScreenSize` 在每个 pass 里是输出目标的尺寸（xy 像素、zw 倒数），源贴图尺寸用 `textureSize`。`<pot/lit>` 也能 include，用其中的雾函数和太阳量。 `#include <pot/shadow>`（`<pot/lit>` 已包含）读主光阴影：`pot_Shadow(worldPos)`（3×3 PCF，乘阴影强度、距离淡出）、`pot_SunVisibility(worldPos)`（单次采样 0/1，不在级联内或超出阴影距离返回 1，体积光 raymarch 用）、`pot_ShadowCascade(worldPos)`；后处理里先用 `pot_WorldPos` 重建世界坐标，参考 jimao 的 `shaders/post/vol.frag`。
 
 ### Canvas 2D（ctx.scene.canvas）
 

@@ -4,11 +4,12 @@
 #include <pot/post>
 #include <pot/lit>
 #include "common.glsl"
-uniform sampler2D tScene, tBloom, tBlur, tStreak, tDirt, tDepth;
+uniform sampler2D tScene, tBloom, tBlur, tStreak, tDirt, tDepth, tVol;
 uniform vec3 uSunCol, uFlashDir;
 uniform float uBloom, uDirt, uStreak, uFlare, uCA, uVignette;
 uniform float uDamage, uLowHealth, uAds, uFlash, uFade, uSaturation, uThunder, uAgxMix;
 uniform float uLookPower, uLookSat;
+uniform float uVol;  // 体积光强度（0 = 关闭，vol pass 也会被跳过）
 out vec4 fragColor;
 
 const mat3 SL_REC2020_TO_SRGB = mat3(vec3(1.6605, -0.1246, -0.0182), vec3(-0.5876, 1.1329, -0.1006), vec3(-0.0728, -0.0083, 1.1187));
@@ -66,6 +67,7 @@ void main() {
   vec2 off = c * r2 * (uCA + uDamage * 0.006);
   vec3 col = vec3(texture(tScene, vUv + off).r, texture(tScene, vUv).g, texture(tScene, vUv - off).b);
   col = max(col, vec3(0.0));
+  if (uVol > 0.0) col += texture(tVol, vUv).rgb * uVol;
 
   // 雷电：天空按闪电方向照亮云层，地面按雾量整体提亮（原版体积光环境项 ×(1 + thunder × 1.5)）
   if (uThunder > 0.0) {

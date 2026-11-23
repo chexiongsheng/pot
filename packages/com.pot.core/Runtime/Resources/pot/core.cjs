@@ -6009,6 +6009,66 @@ float pot_SoftFade(vec3 worldPos, float distance) {
 }
 #endif
 `,
+    "pot/shadow": `#ifndef POT_SHADOW
+#define POT_SHADOW
+// 主光阴影（普通网格与 gfx.post 后处理均可用；后处理里配合 pot/post 的 pot_WorldPos 重建世界坐标）
+// pot_ShadowParams: x 强度（0 表示本帧无阴影），y 级联数，z 最大距离，w 1 = reversed Z
+float pot_ShadowCmp(ivec2 p, float z) {
+  float d = texelFetch(pot_ShadowMap, p, 0).r;
+  return pot_ShadowParams.w > 0.5 ? step(d, z) : step(z, d);
+}
+
+// 按级联包围球选级联；返回 -1 表示不在任何级联内（或本帧无阴影）
+int pot_ShadowCascade(vec3 worldPos) {
+  if (pot_ShadowParams.x <= 0.0) return -1;
+  int count = int(pot_ShadowParams.y + 0.5);
+  for (int i = 0; i < 4; i++) {
+    if (i >= count) break;
+    vec3 dv = worldPos - pot_ShadowSpheres[i].xyz;
+    if (dot(dv, dv) < pot_ShadowSpheres[i].w * pot_ShadowSpheres[i].w) return i;
+  }
+  return -1;
+}
+
+// 1 = 全亮，0 = 全影。3x3 双线性 PCF，超出阴影距离淡出，已乘阴影强度
+float pot_Shadow(vec3 worldPos) {
+  int ci = pot_ShadowCascade(worldPos);
+  if (ci < 0) return 1.0;
+  vec4 sc = pot_ShadowMatrix[ci] * vec4(worldPos, 1.0);
+  sc.xyz /= sc.w;
+  ivec2 size = textureSize(pot_ShadowMap, 0);
+  vec2 tc = sc.xy * vec2(size) - 0.5;
+  ivec2 base = ivec2(floor(tc)) - 1;
+  vec2 f = fract(tc);
+  float sum = 0.0;
+  for (int j = 0; j < 4; j++) {
+    float wy = j == 0 ? 1.0 - f.y : (j == 3 ? f.y : 1.0);
+    for (int i = 0; i < 4; i++) {
+      float wx = i == 0 ? 1.0 - f.x : (i == 3 ? f.x : 1.0);
+      ivec2 p = clamp(base + ivec2(i, j), ivec2(0), size - 1);
+      sum += wx * wy * pot_ShadowCmp(p, sc.z);
+    }
+  }
+  float lit = sum / 9.0;
+  float dist = length(worldPos - pot_CameraPos.xyz);
+  float fade = clamp((dist - pot_ShadowParams.z * 0.9) / max(pot_ShadowParams.z * 0.1, 1e-3), 0.0, 1.0);
+  return mix(1.0, mix(1.0, lit, pot_ShadowParams.x), 1.0 - fade);
+}
+
+// 单次采样的太阳可见度（体积光 raymarch 用，开销低）：1 = 被照亮，0 = 在阴影中
+// 不在级联内、超出最大阴影距离或本帧无阴影时返回 1；不乘阴影强度
+float pot_SunVisibility(vec3 worldPos) {
+  int ci = pot_ShadowCascade(worldPos);
+  if (ci < 0) return 1.0;
+  if (length(worldPos - pot_CameraPos.xyz) > pot_ShadowParams.z) return 1.0;
+  vec4 sc = pot_ShadowMatrix[ci] * vec4(worldPos, 1.0);
+  sc.xyz /= sc.w;
+  ivec2 size = textureSize(pot_ShadowMap, 0);
+  ivec2 p = clamp(ivec2(sc.xy * vec2(size)), ivec2(0), size - 1);
+  return pot_ShadowCmp(p, sc.z);
+}
+#endif
+`,
     "pot/lit": `#ifndef POT_LIT
 #define POT_LIT
 // 输出到 HDR 线性缓冲（后处理负责色调映射）；颜色常量多为 sRGB，用 pot_ToLinear 转换
@@ -6106,43 +6166,7 @@ vec4 pot_PlanarReflection(vec3 worldPos, vec3 n, float roughness) {
   return pot_PlanarReflection(worldPos, n, roughness, vec2(0.0));
 }
 
-// 主光阴影：1 = 全亮，0 = 全影。按级联包围球选级联，3x3 双线性 PCF，超出阴影距离淡出
-// pot_ShadowParams: x 强度（0 表示本帧无阴影），y 级联数，z 最大距离，w 1 = reversed Z
-float pot_ShadowCmp(ivec2 p, float z) {
-  float d = texelFetch(pot_ShadowMap, p, 0).r;
-  return pot_ShadowParams.w > 0.5 ? step(d, z) : step(z, d);
-}
-
-float pot_Shadow(vec3 worldPos) {
-  if (pot_ShadowParams.x <= 0.0) return 1.0;
-  int count = int(pot_ShadowParams.y + 0.5);
-  int ci = -1;
-  for (int i = 0; i < 4; i++) {
-    if (i >= count) break;
-    vec3 dv = worldPos - pot_ShadowSpheres[i].xyz;
-    if (dot(dv, dv) < pot_ShadowSpheres[i].w * pot_ShadowSpheres[i].w) { ci = i; break; }
-  }
-  if (ci < 0) return 1.0;
-  vec4 sc = pot_ShadowMatrix[ci] * vec4(worldPos, 1.0);
-  sc.xyz /= sc.w;
-  ivec2 size = textureSize(pot_ShadowMap, 0);
-  vec2 tc = sc.xy * vec2(size) - 0.5;
-  ivec2 base = ivec2(floor(tc)) - 1;
-  vec2 f = fract(tc);
-  float sum = 0.0;
-  for (int j = 0; j < 4; j++) {
-    float wy = j == 0 ? 1.0 - f.y : (j == 3 ? f.y : 1.0);
-    for (int i = 0; i < 4; i++) {
-      float wx = i == 0 ? 1.0 - f.x : (i == 3 ? f.x : 1.0);
-      ivec2 p = clamp(base + ivec2(i, j), ivec2(0), size - 1);
-      sum += wx * wy * pot_ShadowCmp(p, sc.z);
-    }
-  }
-  float lit = sum / 9.0;
-  float dist = length(worldPos - pot_CameraPos.xyz);
-  float fade = clamp((dist - pot_ShadowParams.z * 0.9) / max(pot_ShadowParams.z * 0.1, 1e-3), 0.0, 1.0);
-  return mix(1.0, mix(1.0, lit, pot_ShadowParams.x), 1.0 - fade);
-}
+#include <pot/shadow>
 
 // 单个光源的直射项（GGX + Lambert，与 URP LightingPhysicallyBased 同量纲：乘 π 后对应 Unity 光强）
 vec3 pot_BRDF(PotSurface s, vec3 n, vec3 v, vec3 l, vec3 f0) {
