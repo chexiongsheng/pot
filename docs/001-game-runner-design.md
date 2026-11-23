@@ -152,7 +152,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 ### 复刻几猫发现的 Runner 能力缺口
 
-通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。状态说明：✅ 已完成，❌ 未完成，⚠️ 可用但与原版有出入。
+通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。状态说明：✅ 已完成，❌ 未完成，⚠️ 可用但与原版有出入，➖ 原版不需要、暂不做（以后有游戏要用再做）。
 
 **汇总**
 
@@ -160,7 +160,8 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 |---|---|
 | ✅ 已完成 | 53 |
 | ⚠️ 有出入 | 8 |
-| ❌ 未完成 | 1 |
+| ❌ 未完成 | 0 |
+| ➖ 原版不需要 | 1 |
 
 #### 渲染与着色器（gfx）
 
@@ -189,7 +190,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ⚠️ | 镜头污渍改为程序噪声 | 后处理 | 原版用噪声贴图，外观接近 |
 | ⚠️ | 雷电只作用于后处理 | 后处理 | 与原版一致，但没有闪电对物体的直射光和闪电几何 |
 | ✅ | gfx 物体进平面反射 | 地面 | 镜像相机也挂不透明 / 透明两个 GfxPass，用其矩阵打包；按相机 `cullingMask` 过滤（`scene.reflection` 的 `exclude` 对 gfx 同样生效）；倒影里不绑定正在写的 `pot_PlanarMap`、`pot_SceneDepth` 视为无限远（不为镜像相机额外生成深度纹理）；不挂后处理链 |
-| ❌ | 附加光阴影 | 地面 | 路灯光斑不会被集装箱挡住，需复算附加光阴影图集矩阵 |
+| ➖ | 附加光阴影 | 地面 | 原版只有太阳投影：码头 4 盏点光显式 `castShadow=false`，枪火/爆炸 6 盏闪光点光不投影，没有聚光灯，`light_mast` 的 `userData.lamps` 只是数据、不生成灯。复刻版的 `mast` 聚光、`crane`/`quay` 点光是自行添加，原版没有。内置 PotLit 已能接收 URP 附加光阴影，gfx 着色器的 `pot_AdditionalLights` 不采样阴影。以后要做：URP 不公开附加光阴影图集分块与矩阵，需照 `AdditionalLightsShadowCasterPass` 复算（URP14/17 两套）；gfx 光源顺序映射到阴影 slice；点光 6 面；帧协议加矩阵；D3D11 与 GLES3 后端加图集贴图和比较采样。可先只做聚光 |
 | ✅ | 实例化 `instances` | 雨 | `entity.instances({ iPos: 4, iCol: 4 }, data, count)`（或 `shader(s, { instances })`）：交错 Float32 上传到 C# 复用的 GraphicsBuffer（容量按 2 的幂增长，可只传预分配数组的前 count 个），着色器用 `gfx.shader({ instanced: { iPos: 'vec4' } })` 声明，运行时生成带 `// pot:instance` 标记的输入；D3D11 走输入槽 2 + `DrawIndexedInstanced`，GLES3 用 divisor 1 + `glDrawElementsInstanced`。实例化绘制不做视锥剔除、不投射网格阴影；着色器没声明实例属性时仍画一次 |
 | ✅ | 自定义顶点属性 `attributes` | 雨 | `scene.mesh` 的 `attributes: { name: { size, data } }`（或直接给数组，size 按长度推出）按名字排序写进网格 UV1–7，Float32 原样传、不做色彩空间转换；着色器用 `shader(s, { attributes: { name: 'vec4' } })` 声明，运行时生成 `layout(location = 5+) in` 并按名字找到网格通道，网格缺该属性时读到 0。参与 `key: true` 的内容哈希；不能与蒙皮同用 |
 | ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
