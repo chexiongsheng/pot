@@ -52,6 +52,8 @@ public static class RunnerBuild
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Minimal);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+            // pot_gfx：Android 只有 GLES3 后端（单线程渲染）
+            Pot.Build.PotBuild.ConfigureAndroidGfx();
             AssetDatabase.SaveAssets();
 
             var output = Arg("potOut") ?? defaultOut;

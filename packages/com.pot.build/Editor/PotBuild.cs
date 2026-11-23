@@ -292,6 +292,7 @@ namespace Pot.Build
             PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, ManagedStrippingLevel.Minimal);
             if (PlayerSettings.Android.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
                 PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+            ConfigureAndroidGfx();
 
             // WebGL：gzip + 解压回退（任意静态服务器可直接托管）
             PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.WebGL, ManagedStrippingLevel.Minimal);
@@ -317,10 +318,21 @@ namespace Pot.Build
                 case BuildTarget.WebGL:
                     return null;
                 case BuildTarget.Android:
-                    return "Android 包不含 pot_gfx（GLES/Vulkan 后端未构建），ctx.gfx 不可用，画面走回退材质";
+                    return "Android 运行时着色器只有 GLES3 后端（arm64-v8a），未在真机上做过完整验证";
                 default:
                     return target + " 没有 pot_gfx 后端，ctx.gfx 不可用";
             }
+        }
+
+        /// <summary>
+        /// Android 的 pot_gfx 只有 GLES3 后端：图形 API 固定为 OpenGLES3；
+        /// 关闭多线程渲染，让 PotGfx_Create（在调用线程编译 GL 程序）运行时 GL 上下文就在主线程上。
+        /// </summary>
+        public static void ConfigureAndroidGfx()
+        {
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
+            PlayerSettings.SetMobileMTRendering(BuildTargetGroup.Android, false);
         }
 
         public static void CreateBootScene()

@@ -6,8 +6,8 @@
 // - gl_FragCoord 原点在左下（D3D11 在左上）；
 // - 采样器 bit4（sRGB 视图）忽略：GL 贴图的 sRGB 由内部格式决定，采样时自动解码。
 //
-// 线程：CreateProgram 直接在调用线程编译，要求调用时 GL 上下文是当前的（WebGL 单线程满足）。
-// Android 多线程渲染下需要改成推迟到渲染线程编译，见 docs/001 缺口表。
+// 线程：CreateProgram 直接在调用线程编译，要求调用时 GL 上下文是当前的（WebGL 单线程满足；
+// Android 由出包设置关闭多线程渲染，渲染在主线程，同样满足）。
 #include <GLES3/gl3.h>
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>

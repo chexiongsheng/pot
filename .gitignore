@@ -33,6 +33,7 @@ third_party/glslang/
 third_party/SPIRV-Cross/
 native/pot_gfx/cfg.txt
 native/pot_gfx/build.txt
+native/pot_gfx/build-android/
 games/*/.pot/
 runner/Assets/PotGame/
 runner/Builds/
@@ -48,5 +49,6 @@ shot.png
 
 # 原生插件产物：构建前由 pot CLI 按需从 native/ 编译（meta 保留入库）
 packages/com.pot.core/Plugins/Windows/x86_64/*.dll
+packages/com.pot.core/Plugins/Android/arm64-v8a/*.so
 
 /*.html

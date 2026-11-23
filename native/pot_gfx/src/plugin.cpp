@@ -2,8 +2,8 @@
 //
 // 两种构建：
 // - 桌面（CMake）：带 glslang/SPIRV-Cross 编译器和编译缓存（D3D11 需要先转 HLSL）；
-// - WebGL（__EMSCRIPTEN__，由 Unity 的 emscripten 编译 Plugins/WebGL 下的源码）：不带编译器，
-//   GLES3 后端直接把游戏源码交给驱动编译。WebGL 没有动态库加载，C# 先调 PotGfx_RegisterPlugin 注册渲染插件。
+// - WebGL（__EMSCRIPTEN__，由 Unity 的 emscripten 编译 Plugins/WebGL 下的源码）与 Android（NDK + CMake 精简构建）：
+//   不带编译器，GLES3 后端直接把游戏源码交给驱动编译。WebGL 没有动态库加载，C# 先调 PotGfx_RegisterPlugin 注册渲染插件。
 // Unity 头文件用引号：WebGL 版的头文件和源码在同一目录（桌面版由 CMake 按 UNITY_PLUGIN_API 提供）。
 #include "IUnityGraphics.h"
 #include "IUnityInterface.h"
@@ -17,7 +17,7 @@
 #include "backend.h"
 #include "compiler.h"
 
-#if !defined(__EMSCRIPTEN__)
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #define POT_GFX_COMPILER 1
 #include "cache.h"
 #endif

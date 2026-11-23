@@ -4,7 +4,7 @@
  *
  *   win64    Plugins/Windows/x86_64/pot_gfx.dll        ← CMake + MSVC 编译 native/pot_gfx（不入库）
  *   webgl    Plugins/WebGL/pot_gfx/*.cpp|*.h           ← sync-webgl.js 从 native/pot_gfx/src 同步源码（Unity 用 emscripten 编译）
- *   android  暂无 pot_gfx（GLES/Vulkan 后端未接入 Android 构建），不检查
+ *   android  Plugins/Android/arm64-v8a/libpot_gfx.so   ← CMake + Unity 自带 NDK + Ninja 精简构建（只有 GLES3 后端，不入库）
  *
  * 只检查是否存在，不比较新旧：改了 native/pot_gfx/src 后用 `pot native --platform win64 --force` 重建。
  */
@@ -16,6 +16,7 @@ const REPO = path.resolve(__dirname, '../..')
 const NATIVE = path.join(REPO, 'native/pot_gfx')
 const PLUGINS = path.join(REPO, 'packages/com.pot.core/Plugins')
 const WIN64_DLL = path.join(PLUGINS, 'Windows/x86_64/pot_gfx.dll')
+const ANDROID_SO = path.join(PLUGINS, 'Android/arm64-v8a/libpot_gfx.so')
 /** 仓库内自带的 Unity PluginAPI 头文件（IUnityInterface.h / IUnityGraphics.h），找不到 Unity 时用它 */
 const BUNDLED_PLUGIN_API = path.join(PLUGINS, 'WebGL/pot_gfx')
 
@@ -28,6 +29,7 @@ function webglFiles() {
 function requiredFiles(platform) {
   if (platform === 'win64') return [WIN64_DLL]
   if (platform === 'webgl') return webglFiles()
+  if (platform === 'android') return [ANDROID_SO]
   return []
 }
 
@@ -71,6 +73,33 @@ function syncWebgl(unity) {
   require('../../native/pot_gfx/sync-webgl').sync(api === BUNDLED_PLUGIN_API ? [] : ['--plugin-api', api])
 }
 
+/** NDK 根目录：环境变量 ANDROID_NDK_ROOT / ANDROID_NDK_HOME，否则 Unity 自带的 PlaybackEngines/AndroidPlayer/NDK */
+function findNdk(unity) {
+  const candidates = [process.env.ANDROID_NDK_ROOT, process.env.ANDROID_NDK_HOME]
+  if (unity) candidates.push(path.join(path.dirname(unity), 'Data/PlaybackEngines/AndroidPlayer/NDK'))
+  const ndk = candidates.find((d) => d && fs.existsSync(path.join(d, 'build/cmake/android.toolchain.cmake')))
+  if (!ndk) throw new Error('找不到 Android NDK：安装 Unity 的 Android Build Support（含 NDK），或设置 ANDROID_NDK_ROOT')
+  return ndk
+}
+
+/** Android arm64-v8a：NDK 工具链 + Ninja，只编 GLES3 后端（CMakeLists 的 if(ANDROID) 分支，不拉 glslang） */
+function buildAndroid(unity, say) {
+  const ndk = findNdk(unity).replace(/\\/g, '/')
+  const build = path.join(NATIVE, 'build-android')
+  const api = pluginApiDir(unity).replace(/\\/g, '/')
+  run('cmake', [
+    '-S', NATIVE, '-B', build, '-G', 'Ninja',
+    `-DCMAKE_TOOLCHAIN_FILE=${ndk}/build/cmake/android.toolchain.cmake`,
+    '-DANDROID_ABI=arm64-v8a', '-DANDROID_PLATFORM=android-24', '-DANDROID_STL=c++_static',
+    '-DCMAKE_BUILD_TYPE=Release', `-DUNITY_PLUGIN_API=${api}`,
+  ], say)
+  run('cmake', ['--build', build, '--target', 'pot_gfx'], say)
+  const so = path.join(build, 'libpot_gfx.so')
+  if (!fs.existsSync(so)) throw new Error(`构建完成但没找到 libpot_gfx.so（${build}）`)
+  fs.mkdirSync(path.dirname(ANDROID_SO), { recursive: true })
+  fs.copyFileSync(so, ANDROID_SO)
+}
+
 /**
  * 确保平台对应的原生库存在。options：{ unity, force, quiet }
  * 返回 { platform, built, files }
@@ -84,10 +113,11 @@ function ensureNative(platform, options = {}) {
   const started = Date.now()
   if (platform === 'win64') buildWin64(options.unity, say)
   else if (platform === 'webgl') syncWebgl(options.unity)
+  else if (platform === 'android') buildAndroid(options.unity, say)
   const still = missingFiles(platform)
   if (still.length) throw new Error(`原生库构建后仍缺少：${still.map(rel).join('、')}`)
   say(`[native] ${platform} 完成（${Math.round((Date.now() - started) / 1000)} 秒）`)
   return { platform, built: true, files: requiredFiles(platform) }
 }
 
-module.exports = { ensureNative, requiredFiles, missingFiles, WIN64_DLL }
+module.exports = { ensureNative, requiredFiles, missingFiles, WIN64_DLL, ANDROID_SO }
