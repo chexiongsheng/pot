@@ -62,7 +62,9 @@ namespace Pot
 
         /// <summary>
         /// 各字族的字面表：“字重:字面名”，字面名为空表示字族本身（700 为空时表示字族自带的粗体，用 FontStyle.Bold 取）。
-        /// Windows 把细体、中黑、特粗等非 RIBBI 字面注册成独立字族名（如 “Microsoft YaHei UI Light”），按名字取。
+        /// 非 RIBBI 字面（细体、中黑、特粗）按独立名字取，且只在 Font.GetOSInstalledFontNames 列出时才用。实测 Unity 2022 在 Windows 上
+        /// 只枚举、只能加载常规与粗体（“Microsoft YaHei Light”“Noto Sans SC Medium”按名创建会回退到默认字体），所以 Windows 上实际只有 400/700 两档，
+        /// 与 Chrome 在 Windows 雅黑下的表现一致（500 常规、600/900 粗体）；表里其余字面留给能枚举到它们的平台。
         /// 不在表里的字族只有 400 一档。
         /// </summary>
         static readonly string[][] FaceTable =
