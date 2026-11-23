@@ -4037,6 +4037,7 @@ var pot = (() => {
         const i8 = (v) => Math.max(-128, Math.min(127, Math.round(v))) & 255;
         flags |= i8(f) << 16 | i8(u) << 24;
       }
+      if (options.sceneDepth ?? (queue === "opaque" && (flags & 4) !== 0 && options.depthTest !== false)) flags |= 512;
       const shadows = options.shadows ?? queue === "opaque";
       engine.gfxBind(this.id, typeof shader === "string" ? shader : shader.name, flags, queue === "transparent" ? 1 : 0, shadows ? 1 : 0);
       if (options.uniforms) this.uniforms(options.uniforms);

@@ -267,7 +267,7 @@ export async function apply(ctx: Context) {
     scene.mesh('jimao/gulls', () => gullMesh(), meshKey)
     const gullShader = ctx.gfx.shader({ vertex: 'shaders/gull.vert', fragment: 'shaders/gull.frag', name: 'jimao/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
     scene.spawn({ shape: 'mesh:jimao/gulls', name: 'gulls', position: [0, 0, 0], collider: false })
-      .shader(gullShader, { cull: 'none', frustumCull: false, shadows: false, uniforms: { uColor: [0.2, 0.21, 0.23] } })
+      .shader(gullShader, { cull: 'none', frustumCull: false, shadows: false, sceneDepth: false, uniforms: { uColor: [0.2, 0.21, 0.23] } })
   }
   await step('布置灯光', 0.67)
   // 原版点光源：three 物理单位（坎德拉）直接传，由 Runner 换算；distance 为 0（不截断）时 URP 仍需有限范围，取 15 米

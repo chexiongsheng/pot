@@ -454,6 +454,8 @@ namespace Pot
             if (go == null) return;
             var renderer = go.GetComponent<Renderer>();
             if (renderer == null) return;
+            // 绑定了运行时着色器的对象可能挂着深度材质副本：先换回原材质再判断模式，最后按绑定重新套用
+            PotGfx.RestoreMaterials(renderer);
             if (!string.IsNullOrEmpty(mode) || cull >= 0)
             {
                 var cur = renderer.sharedMaterial;
@@ -474,6 +476,7 @@ namespace Pot
                 }
             }
             if (castShadows >= 0) renderer.shadowCastingMode = castShadows > 0 ? UnityEngine.Rendering.ShadowCastingMode.On : UnityEngine.Rendering.ShadowCastingMode.Off;
+            PotGfx.Reapply(id, renderer);
         }
 
         /// <summary>PBR 参数：metallic、smoothness（0 到 1），传负数表示不变</summary>

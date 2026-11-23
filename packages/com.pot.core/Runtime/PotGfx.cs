@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -63,6 +63,8 @@ namespace Pot
         const int F_NoDepthTest = 1 << 7;
         /// <summary>仅 C# 使用：不做视锥剔除（顶点着色器重算位置时，网格包围盒不可信）</summary>
         const int F_NoFrustumCull = 1 << 8;
+        /// <summary>仅 C# 使用：由 Unity 渲染器把网格写进深度预渲染（_CameraDepthTexture、SSAO 的深度法线），颜色仍由 pot_gfx 画</summary>
+        const int F_SceneDepth = 1 << 9;
         /// <summary>深度偏移：bit16-23 int8 factor，bit24-31 int8 units（同 glPolygonOffset，负数朝相机）</summary>
         const int F_OffsetMask = unchecked((int)0xFFFF0000);
         /// <summary>JS 传入的 flags 只占低 5 位（剔除、写深度、混合）、bit7（关深度测试）与高 16 位（深度偏移）</summary>
@@ -220,6 +222,7 @@ namespace Pot
             public int queue;
             public bool shadows;
             public bool noFrustumCull;
+            public bool sceneDepth;
             public readonly Dictionary<string, float[]> uniforms = new Dictionary<string, float[]>();
             public readonly Dictionary<string, int> textures = new Dictionary<string, int>();
             // 实例缓冲（entity.instances）：交错的 Float32，每实例 instStride 字节；instNames/instOffsets/instSizes 为布局
@@ -243,7 +246,7 @@ namespace Pot
 
         /// <summary>
         /// 让对象用运行时着色器绘制。program 为空串表示解除（恢复普通材质）。
-        /// flags：bit0-1 剔除（0 背面 1 正面 2 不剔除）、bit2 写深度、bit3-4 混合（0 无 1 alpha 2 叠加 3 预乘）、bit7 关深度测试、bit8 不做视锥剔除、bit16-23 / bit24-31 深度偏移 factor / units（int8）。
+        /// flags：bit0-1 剔除（0 背面 1 正面 2 不剔除）、bit2 写深度、bit3-4 混合（0 无 1 alpha 2 叠加 3 预乘）、bit7 关深度测试、bit8 不做视锥剔除、bit9 网格写进深度预渲染（sceneDepth）、bit16-23 / bit24-31 深度偏移 factor / units（int8）。
         /// queue：0 不透明之后，1 透明之后（由远到近）。shadows：1 仍用网格投射阴影。
         /// </summary>
         [Preserve]
@@ -260,6 +263,7 @@ namespace Pot
                     bindings.Remove(id);
                     if (r != null)
                     {
+                        RestoreMaterials(r);
                         r.forceRenderingOff = false;
                         r.shadowCastingMode = ShadowCastingMode.On;
                     }
@@ -271,6 +275,7 @@ namespace Pot
             b.program = program;
             b.flags = flags & F_UserMask;
             b.noFrustumCull = (flags & F_NoFrustumCull) != 0;
+            b.sceneDepth = (flags & F_SceneDepth) != 0;
             b.queue = queue;
             b.shadows = shadows != 0;
             ApplyRenderer(b, r);
@@ -278,16 +283,79 @@ namespace Pot
             if (mf != null && mf.sharedMesh != null && uploaded.Add(mf.sharedMesh)) mf.sharedMesh.UploadMeshData(false);
         }
 
-        /// <summary>保留 Unity 渲染器只为投射阴影；正常绘制由 pot_gfx 完成。实例化绘制时网格阴影只会投出一份，一律关闭</summary>
+        /// <summary>
+        /// 正常绘制由 pot_gfx 完成，Unity 渲染器只留作：投射阴影；sceneDepth 时还参与深度预渲染（DepthOnly / DepthNormals），
+        /// 让 _CameraDepthTexture、SSAO 和后处理的 depth 看得到 gfx 物体。做法是换成关掉前向 pass 的材质副本（保留贴图与 alpha 裁剪）。
+        /// 实例化绘制时网格只有一份，阴影与深度一律关闭
+        /// </summary>
         static void ApplyRenderer(Binding b, Renderer r)
         {
             if (r == null) return;
+            if (b.instCount == 0 && b.sceneDepth)
+            {
+                SetDepthMaterials(r);
+                r.forceRenderingOff = false;
+                r.shadowCastingMode = b.shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
+                return;
+            }
+            RestoreMaterials(r);
             if (b.shadows && b.instCount == 0)
             {
                 r.forceRenderingOff = false;
                 r.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
             }
             else r.forceRenderingOff = true;
+        }
+
+        /// <summary>原材质 → 只剩阴影与深度 pass 的副本（按材质共享）；反查表用于恢复</summary>
+        static readonly Dictionary<Material, Material> depthMats = new Dictionary<Material, Material>();
+        static readonly Dictionary<Material, Material> depthMatSource = new Dictionary<Material, Material>();
+
+        static Material DepthMaterial(Material m)
+        {
+            if (m == null || depthMatSource.ContainsKey(m)) return m;
+            Material d;
+            if (depthMats.TryGetValue(m, out d) && d != null) return d;
+            d = new Material(m) { name = m.name + " (pot depth)" };
+            d.SetShaderPassEnabled("UniversalForward", false);
+            d.SetShaderPassEnabled("UniversalForwardOnly", false);
+            d.SetShaderPassEnabled("SRPDefaultUnlit", false);
+            depthMats[m] = d;
+            depthMatSource[d] = m;
+            return d;
+        }
+
+        static void SetDepthMaterials(Renderer r)
+        {
+            var mats = r.sharedMaterials;
+            var changed = false;
+            for (var i = 0; i < mats.Length; i++)
+            {
+                var d = DepthMaterial(mats[i]);
+                if (d != mats[i]) { mats[i] = d; changed = true; }
+            }
+            if (changed) r.sharedMaterials = mats;
+        }
+
+        /// <summary>把深度材质副本换回原材质（解除绑定、改材质模式前调用）</summary>
+        internal static void RestoreMaterials(Renderer r)
+        {
+            if (r == null || depthMatSource.Count == 0) return;
+            var mats = r.sharedMaterials;
+            var changed = false;
+            for (var i = 0; i < mats.Length; i++)
+            {
+                Material src;
+                if (mats[i] != null && depthMatSource.TryGetValue(mats[i], out src)) { mats[i] = src; changed = true; }
+            }
+            if (changed) r.sharedMaterials = mats;
+        }
+
+        /// <summary>材质被外部改动（material() 换模式、开关阴影）后，按绑定重新套用渲染器状态</summary>
+        internal static void Reapply(int id, Renderer r)
+        {
+            Binding b;
+            if (r != null && bindings.TryGetValue(id, out b)) ApplyRenderer(b, r);
         }
 
         /// <summary>
@@ -444,8 +512,25 @@ namespace Pot
             f.cull = rd.cullResults;
             f.shadow = rd.shadowData;
             f.shadowMap = Shader.GetGlobalTexture(shadowMapId);
-            f.depth = Shader.GetGlobalTexture(depthTexId);
+            f.depth = CameraDepthTexture(cd.renderer);
             f.color = cd.renderer.cameraColorTargetHandle.nameID;
+        }
+
+        /// <summary>
+        /// 本相机的 _CameraDepthTexture。不能用 Shader.GetGlobalTexture：URP 用命令缓冲设置全局纹理，Execute 时 CPU 侧的全局值
+        /// 还是上一个提交的相机（平面反射相机）的，后处理和 pot_SceneDepth 会读到倒影的深度。URP 14 没有公开接口，按字段名反射取
+        /// </summary>
+        static readonly System.Reflection.FieldInfo depthTexField =
+            typeof(UniversalRenderer).GetField("m_DepthTexture", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        static Texture CameraDepthTexture(ScriptableRenderer renderer)
+        {
+            if (depthTexField != null && renderer is UniversalRenderer ur)
+            {
+                var h = depthTexField.GetValue(ur) as RTHandle;
+                if (h != null && h.rt != null) return h.rt;
+            }
+            return Shader.GetGlobalTexture(depthTexId);
         }
 #endif
 

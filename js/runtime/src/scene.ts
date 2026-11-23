@@ -502,6 +502,11 @@ export interface ShaderBinding {
   polygonOffset?: [number, number]
   /** 用网格投射阴影（opaque 默认 true）；实例化绘制时不投射 */
   shadows?: boolean
+  /**
+   * 网格写进相机深度纹理（深度预渲染：SSAO、后处理的 'depth'、透明物体的 pot_SceneDepth 都靠它），opaque 且写深度时默认 true。
+   * 写的是 Unity 网格本身：顶点着色器挪动了顶点（顶点动画、粒子）时设 false，否则深度对不上；实例化绘制时不写
+   */
+  sceneDepth?: boolean
   /** 绑定后立即设置实例缓冲，同 entity.instances(layout, data, count) */
   instances?: InstanceData
 }
@@ -725,6 +730,7 @@ export class Entity {
       const i8 = (v: number) => Math.max(-128, Math.min(127, Math.round(v))) & 255
       flags |= (i8(f) << 16) | (i8(u) << 24)
     }
+    if (options.sceneDepth ?? (queue === 'opaque' && (flags & 4) !== 0 && options.depthTest !== false)) flags |= 512
     const shadows = options.shadows ?? queue === 'opaque'
     engine.gfxBind(this.id, typeof shader === 'string' ? shader : shader.name, flags, queue === 'transparent' ? 1 : 0, shadows ? 1 : 0)
     if (options.uniforms) this.uniforms(options.uniforms)
