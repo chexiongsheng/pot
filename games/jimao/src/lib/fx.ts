@@ -9,7 +9,7 @@
  *     color    = rgb（HDR）+ a；Runner 会把 rgb 当 sRGB 转线性，着色器里逆变换取回原值
  *   展开、朝向、拉伸宽度都在 shaders/fx.vert 里按原版 HR 计算。
  * - 模拟、发射全部在原版 three 坐标下进行（与原版逐句对照），只在打包时把 z 取反。
- * - 原版 soft particle（读场景深度）未移植：gfx 普通网格拿不到场景深度。
+ * - 原版 soft particle（读场景深度）：两个片元着色器用 <pot/depth> 的 pot_SoftFade，淡出距离同原版 clamp(size·.4, .04, .7)。
  */
 import type { Context, Entity, Vec3 } from '@pot/core'
 

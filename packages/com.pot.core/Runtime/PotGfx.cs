@@ -362,6 +362,8 @@ namespace Pot
             {
                 this.queue = queue;
                 renderPassEvent = evt;
+                // 透明队列可读场景深度（pot_SceneDepth）：让 URP 生成 _CameraDepthTexture（不透明拷贝完成后才可用）
+                if (queue == 1) ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
             static void Draw(int queue, FrameIn f, CommandBuffer cmd)
@@ -377,7 +379,7 @@ namespace Pot
             {
                 public int queue;
                 public FrameIn input;
-                public TextureHandle color, depth, shadow;
+                public TextureHandle color, depth, shadow, sceneDepth;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -390,15 +392,18 @@ namespace Pot
                 d.color = res.activeColorTexture;
                 d.depth = res.activeDepthTexture;
                 d.shadow = res.mainShadowsTexture;
+                d.sceneDepth = queue == 1 ? res.cameraDepthTexture : TextureHandle.nullHandle;
                 builder.UseTexture(d.color, AccessFlags.ReadWrite);
                 if (d.depth.IsValid()) builder.UseTexture(d.depth, AccessFlags.ReadWrite);
                 if (d.shadow.IsValid()) builder.UseTexture(d.shadow);
+                if (d.sceneDepth.IsValid()) builder.UseTexture(d.sceneDepth);
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 builder.SetRenderFunc((PassData p, UnsafeGraphContext ctx) =>
                 {
                     var f = p.input;
                     f.shadowMap = p.shadow.IsValid() ? (Texture)p.shadow : null;
+                    f.depth = p.sceneDepth.IsValid() ? (Texture)p.sceneDepth : null;
                     var cmd = CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd);
                     if (p.depth.IsValid()) cmd.SetRenderTarget((RenderTargetIdentifier)p.color, (RenderTargetIdentifier)p.depth);
                     else cmd.SetRenderTarget((RenderTargetIdentifier)p.color);
@@ -462,6 +467,8 @@ namespace Pot
         static readonly MemoryStream frame = new MemoryStream(4096);
         static readonly BinaryWriter writer = new BinaryWriter(frame);
         static readonly List<Binding> drawList = new List<Binding>();
+        /// <summary>当前打包可读的场景深度（pot_SceneDepth），仅透明队列打包期间非空</summary>
+        static Texture sceneDepth;
         static readonly List<float> drawDist = new List<float>();
         static readonly Plane[] planes = new Plane[6];
         static byte[] block = new byte[256];
@@ -803,6 +810,8 @@ namespace Pot
             LightBuiltins(f);
             var frameFlags = (flipped ? F_FrontCCW : 0) | (SystemInfo.usesReversedZBuffer ? F_ReversedZ : 0);
             var env = PotRender.EnvTexture;
+            // 不透明队列在深度拷贝之前执行，只给透明队列绑真实深度，避免读到上一帧或未初始化的内容
+            sceneDepth = queue == 1 ? f.depth : null;
 
             frame.SetLength(0);
             writer.Write(0);
@@ -817,6 +826,7 @@ namespace Pot
                 ObjectLights(go.GetComponent<Renderer>(), go.transform.position);
                 if (WriteDraw(b, programs[b.program], mesh, b.flags | frameFlags, env, shadowMap)) count++;
             }
+            sceneDepth = null;
             return Finish(count);
         }
 
@@ -864,13 +874,15 @@ namespace Pot
                 if (t.Key == "pot_EnvMap") tex = env;
                 else if (t.Key == "pot_ShadowMap") tex = shadowMap != null ? shadowMap : Texture2D.whiteTexture;
                 else if (t.Key == "pot_PlanarMap") tex = PotRender.PlanarTexture != null ? PotRender.PlanarTexture : Texture2D.blackTexture;
+                // 没有场景深度时视为无限远：reversed Z 远处为 0，否则为 1
+                else if (t.Key == "pot_SceneDepth") tex = sceneDepth != null ? sceneDepth : SystemInfo.usesReversedZBuffer ? Texture2D.blackTexture : Texture2D.whiteTexture;
                 else if (inputs != null && inputs.TryGetValue(t.Key, out tex)) { }
                 else if (b.textures.TryGetValue(t.Key, out texId) || (shared != null && shared.textures.TryGetValue(t.Key, out texId))) tex = PotScene.GetTexture(texId);
                 if (tex == null) continue;
                 var ptr = tex.GetNativeTexturePtr();
                 if (ptr == IntPtr.Zero) continue;
                 writer.Write(t.Value);
-                writer.Write(t.Key == "pot_EnvMap" || t.Key == "pot_PlanarMap" ? (1 | (2 << 1)) : t.Key == "pot_ShadowMap" ? 1 : SamplerBits(tex));
+                writer.Write(t.Key == "pot_EnvMap" || t.Key == "pot_PlanarMap" ? (1 | (2 << 1)) : t.Key == "pot_ShadowMap" || t.Key == "pot_SceneDepth" ? 1 : SamplerBits(tex));
                 writer.Write(ptr.ToInt64());
                 nt++;
             }

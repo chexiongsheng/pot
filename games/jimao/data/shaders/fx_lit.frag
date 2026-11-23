@@ -1,6 +1,7 @@
 // 原版受光粒子片元（pretty.js VR）机械移植：烟团 / 水柱 / 水雾。预乘 alpha 输出（绑定 blend: premultiplied）。
-// 原版 softFade（读场景深度）未移植；色调映射交给全局后处理。
+// softFade 读场景深度（pot/depth，透明队列）；色调映射交给全局后处理。
 #include <pot/varyings>
+#include <pot/depth>
 
 uniform sampler2D uTex;
 uniform vec3 uSun, uSunDir, uAmbLo, uAmbHi;
@@ -10,6 +11,7 @@ in vec3 vToCam;
 in vec3 vInfo;
 in vec3 vT;
 in vec3 vB;
+in float vSoftD;
 
 out vec4 fragColor;
 
@@ -17,7 +19,7 @@ void main() {
   vec4 t = texture(uTex, vUV);
   float er = vInfo.y * 0.45;
   float a = smoothstep(er, er + (vInfo.z > 1.5 ? 0.38 : 0.6), t.a) * vColor.a;
-  a *= smoothstep(0.2, 0.9, vInfo.x);
+  a *= pot_SoftFade(vWorldPos, vSoftD) * smoothstep(0.2, 0.9, vInfo.x);
   if (a < 0.004) discard;
   vec3 V = normalize(vToCam);
   vec3 q = vOff * 2.0; float r2 = min(dot(q, q), 1.0);

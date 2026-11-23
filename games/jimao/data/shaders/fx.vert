@@ -11,6 +11,7 @@ out vec3 vToCam;
 out vec3 vInfo;     // 视深, age, shade
 out vec3 vT;
 out vec3 vB;
+out float vSoftD;   // 软粒子淡出距离（原版 clamp(size·.4, .04, .7)）
 
 vec3 rawCol(vec3 l) {
   vec3 lo = l * 12.92, hi = 1.055 * pow(max(l, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
@@ -64,4 +65,5 @@ void main() {
   vToCam = toCam;
   vInfo = vec3(abs(mv.z), mode < 0.5 ? pot_Normal.y : 0.0, mode < 0.5 ? pot_Normal.z : 1.0);
   vT = T; vB = B;
+  vSoftD = clamp(size * 0.4, 0.04, 0.7);
 }

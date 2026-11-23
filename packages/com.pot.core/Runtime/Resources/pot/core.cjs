@@ -5805,6 +5805,36 @@ vec3 pot_WorldToUv(vec3 p) {
 }
 #endif
 `,
+    "pot/depth": `#ifndef POT_DEPTH
+#define POT_DEPTH
+// 普通网格读场景深度（pot_SceneDepth = 不透明物体写出的 _CameraDepthTexture）
+// 只在透明队列（shader 选项 queue: 'transparent'）可用；不透明队列与无深度纹理时读到"无限远"
+// 世界坐标 → 屏幕 uv（与深度纹理同约定，已处理平台差异）
+vec2 pot_SceneUv(vec3 worldPos) {
+  vec4 c = pot_ScreenVP * vec4(worldPos, 1.0);
+  return c.xy / max(abs(c.w), 1e-6) * 0.5 + 0.5;
+}
+// 原始深度 → 0（近）..1（远）
+float pot_SceneDepth01(vec2 uv) {
+  float raw = textureLod(pot_SceneDepth, uv, 0.0).r;
+  return pot_DepthParams.z > 0.5 ? 1.0 - raw : raw;
+}
+// 该屏幕位置上不透明场景的视空间距离（米，透视相机）
+float pot_SceneEyeDepth(vec2 uv) {
+  float n = pot_DepthParams.x, f = pot_DepthParams.y;
+  return n * f / (f - pot_SceneDepth01(uv) * (f - n));
+}
+// 世界坐标自身的视空间距离（米）
+float pot_EyeDepthOf(vec3 worldPos) {
+  return (pot_ScreenVP * vec4(worldPos, 1.0)).w;
+}
+// 软粒子：片元距背后不透明表面越近越透明，distance 为完全不透明所需的距离（米）
+float pot_SoftFade(vec3 worldPos, float distance) {
+  float d = pot_SceneEyeDepth(pot_SceneUv(worldPos)) - pot_EyeDepthOf(worldPos);
+  return clamp(d / max(distance, 1e-4), 0.0, 1.0);
+}
+#endif
+`,
     "pot/lit": `#ifndef POT_LIT
 #define POT_LIT
 // 输出到 HDR 线性缓冲（后处理负责色调映射）；颜色常量多为 sRGB，用 pot_ToLinear 转换
@@ -6048,7 +6078,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     out.push(BUILTIN_UNIFORMS.trimEnd());
     if (stage === "vertex") {
       if (!three) out.push(VERTEX_INPUTS.trimEnd());
-    } else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;");
+    } else out.push("uniform samplerCube pot_EnvMap;\nuniform highp sampler2D pot_ShadowMap;\nuniform sampler2D pot_PlanarMap;\nuniform highp sampler2D pot_SceneDepth;");
     const expand = (name, text, depth, stack) => {
       if (depth > 16) throw new Error(`#include 嵌套过深：${stack.join(" → ")}`);
       const index = files.length;
