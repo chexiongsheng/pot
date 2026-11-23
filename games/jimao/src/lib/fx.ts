@@ -296,6 +296,8 @@ function ro(i: V3, e: number, t: V3) {
 export interface Fx {
   /** 原版 fx.splash(T)：p 为 Unity 坐标，B 为强度（子弹 1，脚步 .4/.55，落地 .9） */
   splash(p: Vec3, B?: number): void
+  /** 原版 fx.impact（非敌人）：p、n、dir 为 Unity 坐标；按表面出烟尘团 / 火花 / 闪光 */
+  impact(p: Vec3, n: Vec3, surface: string, dir?: Vec3): void
   clear(): void
   stats(): { lit: number; add: number }
   readonly atlasMs: number
@@ -366,6 +368,102 @@ export function createFx(ctx: Context, opts: { mask?: number } = {}): Fx | undef
     if (oe >= 0) c.fin[oe] = 0.35
   }
 
+  /** 原版 M：add 池拉伸火花（随寿命由白热变红） */
+  function M(ee: number, B: number, P: number, V: number, Y: number, L: number, Z: number, J: number, oe: number, fe: number, le: number, R: number) {
+    const I = c.emit(ee, B, P, V, Y, L, Z, J, J * 0.5)
+    if (I < 0) return -1
+    c.mode[I] = 1; c.frame[I] = FRAME.streak; c.stretch[I] = 0.03; c.grav[I] = 9.81; c.drag[I] = 0.9; c.ramp[I] = 1
+    c.r[I] = oe * 0.6; c.g[I] = fe * 0.6; c.b[I] = le * 0.6; c.fout[I] = 0.55; c.flags[I] = R; c.sk[I] = 1
+    return I
+  }
+  /** 原版 E：沿方向 B 锥内发射 P 个火花 */
+  function E(ee: V3, B: V3, P: number, V: number, Y: number, L: number, Z: number, J: number, oe: number, fe: number, le: number, R: number) {
+    for (let I = 0; I < P; I++) {
+      ro(B, L, qe)
+      const se = Ze(V, Y) * (0.35 + 0.65 * ht())
+      M(ee.x, ee.y, ee.z, qe.x * se, qe.y * se, qe.z * se, Ze(Z, J), Ze(0.01, 0.02), oe * Ze(0.6, 1.2), fe * Ze(0.6, 1.2), le, R)
+    }
+  }
+  /** 原版 w：add 池静止闪光精灵 */
+  function w(ee: number, B: number, P: number, V: number, Y: number, L: number, Z: number, J: number, oe: number, fe: number) {
+    const le = c.emit(ee, B, P, 0, 0, 0, V, Y, L)
+    if (le < 0) return -1
+    c.frame[le] = fe; c.r[le] = Z; c.g[le] = J; c.b[le] = oe; c.fout[le] = 0.2; c.rot[le] = ht() * 6.283; c.sk[le] = 1.5
+    return le
+  }
+  /** 原版 q（fx.dust）：命中点冒出的烟尘团（8 个快速喷出 + 2 个缓慢飘散），返回太阳遮挡系数 */
+  function q(ee: V3, Et: V3, P = 1, V = 0.5, Y = 0.48, L = 0.45) {
+    const Z = m(ee, Et)
+    for (let J = 0; J < 8; J++) {
+      ro(Et, 0.5, qe)
+      const oe = Ze(1, 4.5) * P, fe = Ze(0.85, 1.1)
+      _(ee.x + Et.x * 0.03, ee.y + Et.y * 0.03, ee.z + Et.z * 0.03, qe.x * oe, qe.y * oe, qe.z * oe, Ze(0.5, 1.1), 0.08 * P, Ze(0.35, 0.7) * P, V * fe, Y * fe, L * fe, 0.9, Z, 3.5, 0.15, 0.6, J < 3 ? 7 : -1)
+    }
+    for (let J = 0; J < 2; J++)
+      _(ee.x + Et.x * 0.15, ee.y + Et.y * 0.15, ee.z + Et.z * 0.15, Et.x * 0.5 + (ht() - 0.5) * 0.3, Et.y * 0.5 + 0.1, Et.z * 0.5 + (ht() - 0.5) * 0.3, Ze(2.2, 3.6), 0.25 * P, Ze(0.9, 1.5) * P, V, Y, L, 0.28, Z, 1.5, 0.1, 1, -1)
+    return Z
+  }
+  /** 原版 C（fx.impact）的非敌人分支；碎屑（原版 $1 实体碎块）与命中点光源闪光未移植，弹孔由调用方负责 */
+  function C(L: V3, nrm: V3, P: string, dir: V3 | null) {
+    const Et: V3 = { x: nrm.x, y: nrm.y, z: nrm.z }
+    { const k = Math.hypot(Et.x, Et.y, Et.z); if (k < 1e-3) { Et.x = 0; Et.y = 1; Et.z = 0 } else { Et.x /= k; Et.y /= k; Et.z /= k } }
+    const zt: V3 = { x: -Et.x, y: -Et.y, z: -Et.z }
+    if (dir) { const k = Math.hypot(dir.x, dir.y, dir.z); if (k > 1e-3) { zt.x = dir.x / k; zt.y = dir.y / k; zt.z = dir.z / k } }
+    const d2 = 2 * (zt.x * Et.x + zt.y * Et.y + zt.z * Et.z)
+    const J1: V3 = { x: zt.x - Et.x * d2, y: zt.y - Et.y * d2, z: zt.z - Et.z * d2 }
+    { const k = Math.hypot(J1.x, J1.y, J1.z) || 1; J1.x /= k; J1.y /= k; J1.z /= k }
+    const cp = scene.camera.position
+    const far = (cp[0] - L.x) ** 2 + (cp[1] - L.y) ** 2 + (-cp[2] - L.z) ** 2 > 3025, oe = far ? 0.5 : 1
+    const fe = Et.x, le = Et.y, R = Et.z
+    const mix = (a: V3, b: V3, s: number, o: V3) => { o.x = a.x + b.x * s; o.y = a.y + b.y * s; o.z = a.z + b.z * s; const k = Math.hypot(o.x, o.y, o.z) || 1; o.x /= k; o.y /= k; o.z /= k; return o }
+    switch (P) {
+      case 'metal': {
+        mix(J1, Et, 0.6, zt)
+        E(L, zt, Math.round(18 * oe), 6, 24, 0.55, 0.1, 0.38, 40, 25, 10.5, 0)
+        E(L, zt, 2 + (ht() * 2 | 0), 9, 18, 0.9, 0.7, 1.3, 32, 18, 7, BOUNCE)
+        w(L.x + fe * 0.03, L.y + le * 0.03, L.z + R * 0.03, 0.05, 0.25, 0.45, 16, 11, 5.5, FRAME.glow)
+        w(L.x + fe * 0.04, L.y + le * 0.04, L.z + R * 0.04, 0.04, 0.35, 0.5, 9, 6, 2.6, FRAME.star0 + (ht() * 2 | 0))
+        const I = m(L, Et)
+        for (let se = 0; se < 2; se++) _(L.x + fe * 0.04, L.y + le * 0.04, L.z + R * 0.04, fe * 0.8 + (ht() - 0.5) * 0.5, le * 0.8 + 0.2, R * 0.8 + (ht() - 0.5) * 0.5, Ze(0.5, 0.9), 0.06, Ze(0.3, 0.5), 0.4, 0.4, 0.41, 0.4, I, 2.5, 0.3, 0.8, -1)
+        break
+      }
+      case 'wood': {
+        const I = q(L, Et, 0.75, 0.5, 0.42, 0.32)
+        if (I > 0.5 && ht() < 0.3) w(L.x, L.y, L.z, 0.04, 0.1, 0.2, 3, 2, 1, FRAME.glow)
+        break
+      }
+      case 'water': T(L, 1); break
+      case 'rubber': case 'dirt': {
+        const I = m(L, Et), dirt = P === 'dirt', ae = dirt ? 0.3 : 0.14, k = dirt ? 0.25 : 0.14, ce = dirt ? 0.19 : 0.14
+        for (let ve = 0; ve < 5; ve++) {
+          ro(Et, 0.6, qe)
+          const s = Ze(0.6, 2.6)
+          _(L.x + fe * 0.03, L.y + le * 0.03, L.z + R * 0.03, qe.x * s, qe.y * s, qe.z * s, Ze(0.5, 1), 0.07, Ze(0.3, 0.55), ae, k, ce, 0.85, I, 3.5, 0.1, 0.6, ve < 2 ? 7 : -1)
+        }
+        break
+      }
+      case 'glass': {
+        for (let I = 0; I < 12; I++) {
+          ro(Et, 0.9, qe)
+          const se = Ze(1.5, 6), ae = c.emit(L.x, L.y, L.z, qe.x * se, qe.y * se, qe.z * se, Ze(0.4, 0.9), Ze(0.012, 0.02), 0.008)
+          if (ae >= 0) { c.mode[ae] = 1; c.frame[ae] = FRAME.dot; c.stretch[ae] = 0.01; c.grav[ae] = 9.81; c.r[ae] = 2.6; c.g[ae] = 2.7; c.b[ae] = 2.8; c.flags[ae] = KILL; c.ramp[ae] = 3 }
+        }
+        _(L.x, L.y, L.z, fe * 0.6, le * 0.6 + 0.2, R * 0.6, 0.6, 0.08, 0.4, 0.75, 0.8, 0.82, 0.2, m(L, Et), 2.5, 0.2, 0.8, -1)
+        break
+      }
+      default: {
+        q(L, Et, 1, 0.52, 0.5, 0.47)
+        mix(J1, Et, 0.7, zt)
+        for (let I = 0; I < 4; I++) {
+          ro(zt, 0.5, qe)
+          const se = Ze(3, 9), ae = _(L.x, L.y, L.z, qe.x * se, qe.y * se, qe.z * se, Ze(0.25, 0.45), 0.03, 0.09, 0.6, 0.58, 0.54, 0.7, 1, 2, -6, 0.2, 7)
+          if (ae >= 0) l.turb[ae] = 0
+        }
+        if (ht() < 0.3) E(L, zt, 3, 4, 10, 0.6, 0.08, 0.2, 26, 15, 6, 0)
+      }
+    }
+  }
+
   const cam = scene.camera
   ctx.on('update', (dt) => {
     if (!(dt > 0)) dt = 0
@@ -380,6 +478,7 @@ export function createFx(ctx: Context, opts: { mask?: number } = {}): Fx | undef
   return {
     atlasMs: at.ms,
     splash(p, B = 1) { T({ x: p[0], y: p[1], z: -p[2] }, B) },
+    impact(p, n, surface, dir) { C({ x: p[0], y: p[1], z: -p[2] }, { x: n[0], y: n[1], z: -n[2] }, surface, dir ? { x: dir[0], y: dir[1], z: -dir[2] } : null) },
     clear() { l.clear(); c.clear(); r.begin(); r.end(); a.begin(); a.end() },
     stats() { return { lit: l.n, add: c.n } },
   }

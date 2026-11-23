@@ -96,17 +96,20 @@ export function apply(ctx: Context) {
     if (s !== 'water' && n[1] > 0.7 && pt[1] < 0.08 && isPuddle(pt[0], -pt[2], interior)) return 'water'
     return s
   }
-  /** 非敌人命中：水面 → 水花（原版 fx.splash）+ 水声；其他 → 火花、烟、弹孔 */
-  const impact = (point: Vec3, n: Vec3, surface: string) => {
+  /** 非敌人命中：水面 → 水花（原版 fx.splash）+ 水声；其他 → 原版 fx.impact（烟尘团、火花、闪光）+ 弹孔 */
+  const impact = (point: Vec3, n: Vec3, surface: string, dir?: Vec3) => {
     if (surface === 'water' && fx) {
       fx.splash(point, 1)
       ctx.audio.play(sfx('water'), { volume: 0.5, position: point })
       return
     }
     ctx.audio.play(sfx('impact'), { volume: 0.4, position: point })
-    const at: Vec3 = [point[0] + n[0] * 0.02, point[1] + n[1] * 0.02, point[2] + n[2] * 0.02]
-    scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffb060', intensity: 8, count: 12, speed: 5.5, speedJitter: 0.6, spread: 0.45, size: 0.018, life: 0.35, lifeJitter: 0.5 })
-    scene.burst({ kind: 'smoke', position: at, direction: n, color: '#8f8a84', count: 4, speed: 0.8, spread: 0.6, size: 0.22, sizeJitter: 0.5, life: 1.1 })
+    if (fx) fx.impact(point, n, surface, dir)
+    else {
+      const at: Vec3 = [point[0] + n[0] * 0.02, point[1] + n[1] * 0.02, point[2] + n[2] * 0.02]
+      scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffb060', intensity: 8, count: 12, speed: 5.5, speedJitter: 0.6, spread: 0.45, size: 0.018, life: 0.35, lifeJitter: 0.5 })
+      scene.burst({ kind: 'smoke', position: at, direction: n, color: '#8f8a84', count: 4, speed: 0.8, spread: 0.6, size: 0.22, sizeJitter: 0.5, life: 1.1 })
+    }
     const dk = decals && decalFor(surface)
     if (dk) decals!.add(point, n, dk[0], dk[1], dk[2], dk[3])
   }
@@ -116,9 +119,10 @@ export function apply(ctx: Context) {
     if (at) { fx?.splash(at, 1); log.info(`调试水花 ${at.join(',')} 积水 ${isPuddle(at[0], -at[2], interior)} 粒子 ${JSON.stringify(fx?.stats())}`); return }
     const p = player(ctx)
     if (!p) return
-    const hit = bulletRay(eyeOf(p), forward(p.yaw, p.pitch))
+    const fwd = forward(p.yaw, p.pitch)
+    const hit = bulletRay(eyeOf(p), fwd)
     const s = hit ? surfaceOf(hit.point, hit.normal, hit.surface) : '-'
-    if (hit) impact(hit.point, hit.normal, s)
+    if (hit) impact(hit.point, hit.normal, s, fwd)
     log.info(`调试射线 ${hit ? hit.point.map(v => v.toFixed(2)).join(',') : '未命中'} 表面 ${s} 弹孔 ${decals?.count ?? 0} 粒子 ${JSON.stringify(fx?.stats())}`)
   })
 
@@ -289,7 +293,7 @@ export function apply(ctx: Context) {
         scene.burst({ kind: 'glow', position: at, direction: n, color: info.weak ? '#ff5a40' : '#ffd890', intensity: 6, count: 10, speed: 2.5, spread: 0.6, size: 0.05, life: 0.18 })
         scene.burst({ kind: 'spark', position: at, direction: n, color: '#ffc070', intensity: 8, count: 8, speed: 5, spread: 0.5, size: 0.02, life: 0.3 })
       } else {
-        impact(hit.point, n, surfaceOf(hit.point, n, hit.surface))
+        impact(hit.point, n, surfaceOf(hit.point, n, hit.surface), dir)
       }
     }
     // 枪口火光
