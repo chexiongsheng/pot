@@ -484,8 +484,35 @@ export interface ShaderBinding {
    * 贴花、共面叠加层防 z-fighting。各取整并限制在 -128 到 127；reversed Z 平台由宿主取反
    */
   polygonOffset?: [number, number]
-  /** 用网格投射阴影（opaque 默认 true） */
+  /** 用网格投射阴影（opaque 默认 true）；实例化绘制时不投射 */
   shadows?: boolean
+  /** 绑定后立即设置实例缓冲，同 entity.instances(layout, data, count) */
+  instances?: InstanceData
+}
+
+/** 实例数据：layout 按顺序列出每实例的属性与分量数（1 到 4），data 为交错的 Float32，count 省略时按长度推出 */
+export interface InstanceData {
+  layout: Record<string, number>
+  data: ArrayLike<number>
+  count?: number
+}
+
+const INSTANCE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** 校验实例布局，返回宿主格式（"名字:分量;..."）与每实例 float 数 */
+export function instanceLayout(layout: Record<string, number>): { text: string, stride: number } {
+  const names = Object.keys(layout ?? {})
+  if (names.length === 0 || names.length > 11) throw new Error(`instances：layout 应有 1 到 11 项，给了 ${names.length} 项`)
+  let stride = 0
+  const parts: string[] = []
+  for (const name of names) {
+    if (!INSTANCE_NAME.test(name) || name.startsWith('pot_') || name.startsWith('gl_')) throw new Error(`instances：属性名无效 ${name}`)
+    const size = layout[name]
+    if (!Number.isInteger(size) || size < 1 || size > 4) throw new Error(`instances：${name} 的分量数应为 1 到 4，收到 ${size}`)
+    parts.push(`${name}:${size}`)
+    stride += size
+  }
+  return { text: parts.join(';'), stride }
 }
 
 function srgbToLinear(v: number) {
@@ -676,6 +703,33 @@ export class Entity {
     const shadows = options.shadows ?? queue === 'opaque'
     engine.gfxBind(this.id, typeof shader === 'string' ? shader : shader.name, flags, queue === 'transparent' ? 1 : 0, shadows ? 1 : 0)
     if (options.uniforms) this.uniforms(options.uniforms)
+    if (options.instances) this.instances(options.instances.layout, options.instances.data, options.instances.count)
+    return this
+  }
+
+  /**
+   * 实例化绘制（先调用 shader）：网格画 count 次，着色器里 gfx.shader({ instanced }) 声明的同名输入每实例读一次。
+   * layout 如 { aOffset: 3, aColor: 4 }，data 按此顺序交错；data 可以是预分配的大数组，只上传前 count 个实例。
+   * 实例化时不做视锥剔除、不投射网格阴影。传 null 或 count 0 恢复单次绘制
+   */
+  instances(layout: Record<string, number> | null, data?: ArrayLike<number>, count?: number) {
+    const engine = this._engine
+    if (!engine.gfxInstances) throw new Error('当前 Runner 不支持实例化（宿主缺少 gfxInstances），请更新 Runner')
+    if (!layout || count === 0) {
+      engine.gfxInstances(this.id, 0, '', new ArrayBuffer(0))
+      return this
+    }
+    const { text, stride } = instanceLayout(layout)
+    if (!data) throw new Error('instances：缺少 data')
+    const n = count ?? Math.floor(data.length / stride)
+    if (!Number.isInteger(n) || n < 0) throw new Error(`instances：count 无效 ${count}`)
+    if (n * stride > data.length) throw new Error(`instances：${n} 个实例需要 ${n * stride} 个 float，data 只有 ${data.length} 个`)
+    if (n === 0) {
+      engine.gfxInstances(this.id, 0, '', new ArrayBuffer(0))
+      return this
+    }
+    const err = engine.gfxInstances(this.id, n, text, bytesOf(data, Float32Array))
+    if (err) throw new Error(`instances：${err}`)
     return this
   }
 

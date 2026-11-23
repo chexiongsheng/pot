@@ -133,6 +133,8 @@ export interface Engine {
   gfxUniform(id: number, name: string, n: number, x: number, y: number, z: number, w: number): void
   gfxUniformArray(id: number, name: string, data: ArrayBuffer): void
   gfxTexture(id: number, name: string, tex: number): void
+  /** 实例缓冲：layout 为 "名字:分量数;..."，data 为 count 个实例交错的 Float32；count 0 释放。成功返回空串；旧宿主可不实现 */
+  gfxInstances?(id: number, count: number, layout: string, data: ArrayBuffer): string
   /** 开始烘焙：返回临时绑定 id（负数），可用 gfxUniform/gfxUniformArray/gfxTexture 设参数 */
   gfxBakeBegin(): number
   /** 画全屏四边形到新贴图；targets 见 PotGfx.Bake；返回逗号分隔的贴图 id，出错以 ! 开头 */

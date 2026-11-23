@@ -222,6 +222,20 @@ namespace Pot
             public bool noFrustumCull;
             public readonly Dictionary<string, float[]> uniforms = new Dictionary<string, float[]>();
             public readonly Dictionary<string, int> textures = new Dictionary<string, int>();
+            // 实例缓冲（entity.instances）：交错的 Float32，每实例 instStride 字节；instNames/instOffsets/instSizes 为布局
+            public GraphicsBuffer instBuf;
+            public int instCount, instStride, instCapacity;
+            public string[] instNames;
+            public int[] instOffsets, instSizes;
+            public float[] instScratch;
+
+            public void ReleaseInstances()
+            {
+                if (instBuf != null) instBuf.Release();
+                instBuf = null;
+                instCount = instStride = instCapacity = 0;
+                instNames = null; instOffsets = instSizes = null; instScratch = null;
+            }
         }
 
         static readonly Dictionary<int, Binding> bindings = new Dictionary<int, Binding>();
@@ -239,10 +253,16 @@ namespace Pot
             var r = go != null ? go.GetComponent<Renderer>() : null;
             if (string.IsNullOrEmpty(program))
             {
-                if (bindings.Remove(id) && r != null)
+                Binding old;
+                if (bindings.TryGetValue(id, out old))
                 {
-                    r.forceRenderingOff = false;
-                    r.shadowCastingMode = ShadowCastingMode.On;
+                    old.ReleaseInstances();
+                    bindings.Remove(id);
+                    if (r != null)
+                    {
+                        r.forceRenderingOff = false;
+                        r.shadowCastingMode = ShadowCastingMode.On;
+                    }
                 }
                 return;
             }
@@ -253,18 +273,72 @@ namespace Pot
             b.noFrustumCull = (flags & F_NoFrustumCull) != 0;
             b.queue = queue;
             b.shadows = shadows != 0;
-            if (r != null)
-            {
-                // 保留 Unity 渲染器只为投射阴影；正常绘制由 pot_gfx 完成
-                if (b.shadows)
-                {
-                    r.forceRenderingOff = false;
-                    r.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
-                }
-                else r.forceRenderingOff = true;
-            }
+            ApplyRenderer(b, r);
             var mf = go != null ? go.GetComponent<MeshFilter>() : null;
             if (mf != null && mf.sharedMesh != null && uploaded.Add(mf.sharedMesh)) mf.sharedMesh.UploadMeshData(false);
+        }
+
+        /// <summary>保留 Unity 渲染器只为投射阴影；正常绘制由 pot_gfx 完成。实例化绘制时网格阴影只会投出一份，一律关闭</summary>
+        static void ApplyRenderer(Binding b, Renderer r)
+        {
+            if (r == null) return;
+            if (b.shadows && b.instCount == 0)
+            {
+                r.forceRenderingOff = false;
+                r.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            }
+            else r.forceRenderingOff = true;
+        }
+
+        /// <summary>
+        /// 设置实例缓冲（先 Bind）：layout 为 "名字:分量数;..."（分量 1-4，按顺序交错），data 为 count 个实例的 Float32。
+        /// 着色器里用 // pot:instance 标记的同名输入（gfx.shader 的 instanced）每实例读一次；count 为 0 时释放，恢复单次绘制。
+        /// 成功返回空串，否则返回错误。
+        /// </summary>
+        [Preserve]
+        public static string Instances(int id, int count, string layout, Puerts.ArrayBuffer data)
+        {
+            Binding b;
+            if (!bindings.TryGetValue(id, out b)) return "实体没有绑定运行时着色器，先调用 shader()";
+            var go = PotScene.GetObject(id);
+            var r = go != null ? go.GetComponent<Renderer>() : null;
+            if (count <= 0)
+            {
+                b.ReleaseInstances();
+                ApplyRenderer(b, r);
+                return "";
+            }
+            var parts = (layout ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0 || parts.Length > AttrCount - BuiltinAttrs) return "实例布局应有 1 到 " + (AttrCount - BuiltinAttrs) + " 项：" + layout;
+            var names = new string[parts.Length];
+            var offsets = new int[parts.Length];
+            var sizes = new int[parts.Length];
+            var floats = 0;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var kv = parts[i].Split(':');
+                int size;
+                if (kv.Length != 2 || kv[0].Length == 0 || !int.TryParse(kv[1], out size) || size < 1 || size > 4) return "实例布局项无效：" + parts[i];
+                names[i] = kv[0]; offsets[i] = floats * 4; sizes[i] = size;
+                floats += size;
+            }
+            var total = floats * count;
+            if (data == null || data.Bytes == null || data.Count < total * 4) return "实例数据长度不足：需要 " + total + " 个 float";
+            if (b.instBuf == null || b.instCapacity < total)
+            {
+                if (b.instBuf != null) b.instBuf.Release();
+                b.instCapacity = Mathf.NextPowerOfTwo(Mathf.Max(total, 64));
+                b.instBuf = new GraphicsBuffer(GraphicsBuffer.Target.Vertex, b.instCapacity, 4) { name = "pot_instances" };
+                b.instScratch = new float[b.instCapacity];
+            }
+            Buffer.BlockCopy(data.Bytes, 0, b.instScratch, 0, total * 4);
+            b.instBuf.SetData(b.instScratch, 0, 0, total);
+            var was = b.instCount;
+            b.instCount = count;
+            b.instStride = floats * 4;
+            b.instNames = names; b.instOffsets = offsets; b.instSizes = sizes;
+            if (was == 0) ApplyRenderer(b, r);
+            return "";
         }
 
         /// <summary>设置标量或向量统一变量（n 为分量数 1-4）</summary>
@@ -306,6 +380,7 @@ namespace Pot
             if (available == true)
                 foreach (var p in programs.Values) PotGfx_Destroy(p.id);
             programs.Clear();
+            foreach (var b in bindings.Values) b.ReleaseInstances();
             bindings.Clear();
             bakes.Clear();
             uploaded.Clear();
@@ -754,14 +829,34 @@ namespace Pot
             return MeshInput(p, mesh, i, out a) ? AttrFormat(mesh.GetVertexAttributeFormat(a), mesh.GetVertexAttributeDimension(a)) : 0;
         }
 
-        static int InstanceOffset(Binding b, string name) { return 0; }
-        static int InstanceFormat(Binding b, string name) { return 0; }
+        static int InstanceIndex(Binding b, string name)
+        {
+            if (b.instCount <= 0 || b.instNames == null || name == null) return -1;
+            for (var i = 0; i < b.instNames.Length; i++) if (b.instNames[i] == name) return i;
+            return -1;
+        }
+
+        static int InstanceOffset(Binding b, string name)
+        {
+            var i = InstanceIndex(b, name);
+            return i < 0 ? 0 : b.instOffsets[i];
+        }
+
+        /// <summary>实例属性格式：Float1-4 加 AF_Instance；布局里没有该名字时为 0（读缺省值 0）</summary>
+        static int InstanceFormat(Binding b, string name)
+        {
+            var i = InstanceIndex(b, name);
+            if (i < 0) return 0;
+            var s = b.instSizes[i];
+            return (s == 1 ? 7 : s == 2 ? 1 : s == 3 ? 2 : 3) | AF_Instance;
+        }
 
         static void WriteInstances(Binding b)
         {
-            writer.Write(0L);
-            writer.Write(0);
-            writer.Write(0);
+            var ptr = b.instBuf != null && b.instCount > 0 ? b.instBuf.GetNativeBufferPtr() : IntPtr.Zero;
+            writer.Write(ptr.ToInt64());
+            writer.Write(ptr == IntPtr.Zero ? 0 : b.instStride);
+            writer.Write(ptr == IntPtr.Zero ? 0 : b.instCount);
         }
 
         static int SamplerBits(Texture t)
@@ -838,12 +933,13 @@ namespace Pot
                 var b = kv.Value;
                 if (b.queue != queue) continue;
                 var go = PotScene.GetObject(b.obj);
-                if (go == null) { (dead ??= new List<int>()).Add(kv.Key); continue; }
+                if (go == null) { b.ReleaseInstances(); (dead ??= new List<int>()).Add(kv.Key); continue; }
                 if (!go.activeInHierarchy || !programs.ContainsKey(b.program)) continue;
                 var r = go.GetComponent<Renderer>();
                 // visible(false)：Unity 渲染器被禁用，运行时着色器这条路径也要跟着不画
                 if (r != null && !r.enabled) continue;
-                if (r != null && !b.noFrustumCull && !GeometryUtility.TestPlanesAABB(planes, r.bounds)) continue;
+                // 实例化时网格包围盒不含各实例的位置，不做视锥剔除
+                if (r != null && !b.noFrustumCull && b.instCount == 0 && !GeometryUtility.TestPlanesAABB(planes, r.bounds)) continue;
                 drawList.Add(b);
                 drawDist.Add(queue == 1 ? (go.transform.position - camPos).sqrMagnitude : 0);
             }

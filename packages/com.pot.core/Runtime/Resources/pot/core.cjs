@@ -90,6 +90,7 @@ var pot = (() => {
     getPropertyDescriptor: () => getPropertyDescriptor,
     getTraceable: () => getTraceable,
     hash: () => hash,
+    instanceLayout: () => instanceLayout,
     isBailed: () => isBailed,
     isConstructor: () => isConstructor,
     isObject: () => isObject,
@@ -3849,6 +3850,21 @@ var pot = (() => {
       else engine.gfxUniformArray(id, name, bytesOf(v, Float32Array));
     }
   }
+  var INSTANCE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  function instanceLayout(layout) {
+    const names = Object.keys(layout ?? {});
+    if (names.length === 0 || names.length > 11) throw new Error(`instances：layout 应有 1 到 11 项，给了 ${names.length} 项`);
+    let stride = 0;
+    const parts = [];
+    for (const name of names) {
+      if (!INSTANCE_NAME.test(name) || name.startsWith("pot_") || name.startsWith("gl_")) throw new Error(`instances：属性名无效 ${name}`);
+      const size = layout[name];
+      if (!Number.isInteger(size) || size < 1 || size > 4) throw new Error(`instances：${name} 的分量数应为 1 到 4，收到 ${size}`);
+      parts.push(`${name}:${size}`);
+      stride += size;
+    }
+    return { text: parts.join(";"), stride };
+  }
   function srgbToLinear(v) {
     return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   }
@@ -4015,6 +4031,32 @@ var pot = (() => {
       const shadows = options.shadows ?? queue === "opaque";
       engine.gfxBind(this.id, typeof shader === "string" ? shader : shader.name, flags, queue === "transparent" ? 1 : 0, shadows ? 1 : 0);
       if (options.uniforms) this.uniforms(options.uniforms);
+      if (options.instances) this.instances(options.instances.layout, options.instances.data, options.instances.count);
+      return this;
+    }
+    /**
+     * 实例化绘制（先调用 shader）：网格画 count 次，着色器里 gfx.shader({ instanced }) 声明的同名输入每实例读一次。
+     * layout 如 { aOffset: 3, aColor: 4 }，data 按此顺序交错；data 可以是预分配的大数组，只上传前 count 个实例。
+     * 实例化时不做视锥剔除、不投射网格阴影。传 null 或 count 0 恢复单次绘制
+     */
+    instances(layout, data, count) {
+      const engine = this._engine;
+      if (!engine.gfxInstances) throw new Error("当前 Runner 不支持实例化（宿主缺少 gfxInstances），请更新 Runner");
+      if (!layout || count === 0) {
+        engine.gfxInstances(this.id, 0, "", new ArrayBuffer(0));
+        return this;
+      }
+      const { text, stride } = instanceLayout(layout);
+      if (!data) throw new Error("instances：缺少 data");
+      const n2 = count ?? Math.floor(data.length / stride);
+      if (!Number.isInteger(n2) || n2 < 0) throw new Error(`instances：count 无效 ${count}`);
+      if (n2 * stride > data.length) throw new Error(`instances：${n2} 个实例需要 ${n2 * stride} 个 float，data 只有 ${data.length} 个`);
+      if (n2 === 0) {
+        engine.gfxInstances(this.id, 0, "", new ArrayBuffer(0));
+        return this;
+      }
+      const err = engine.gfxInstances(this.id, n2, text, bytesOf(data, Float32Array));
+      if (err) throw new Error(`instances：${err}`);
       return this;
     }
     /**
@@ -6932,6 +6974,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
         gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
         gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
+        gfxInstances: (id, count, layout, data) => G.Instances(id, count, layout, data) ?? "",
         gfxBakeBegin: () => G.BakeBegin(),
         gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
         gfxPost: (json) => G.Post(json) ?? "",

@@ -174,6 +174,14 @@ class MockEngine {
   gfxUniform(id, name, n, x, y, z, w) { const g = this._gfx(id); if (g) g.uniforms[name] = [x, y, z, w].slice(0, n) }
   gfxUniformArray(id, name, data) { const g = this._gfx(id); if (g) g.uniforms[name] = [...new Float32Array(data)] }
   gfxTexture(id, name, tex) { const g = this._gfx(id); if (g) g.textures[name] = tex }
+  gfxInstances(id, count, layout, data) {
+    const g = this._gfx(id)
+    if (!g) return '实体没有绑定运行时着色器，先调用 shader()'
+    if (count <= 0) { delete g.instances; return '' }
+    const stride = layout.split(';').reduce((s, p) => s + Number(p.split(':')[1]), 0)
+    g.instances = { count, layout, data: [...new Float32Array(data).subarray(0, count * stride)] }
+    return ''
+  }
   _gfx(id) { return id < 0 ? this.bakeBinds?.get(id) : this._get(id).gfx }
   gfxBakeBegin() { this.bakeBinds ??= new Map(); const id = -((this.bakeId = (this.bakeId ?? 0) + 1)); this.bakeBinds.set(id, { uniforms: {}, textures: {} }); return id }
   gfxPost(json) { this.post = json ? JSON.parse(json) : null; this.postCalls = (this.postCalls ?? 0) + 1; this.postDisabled = new Set(); return '' }

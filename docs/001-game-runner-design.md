@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 45 |
+| ✅ 已完成 | 46 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 10 |
+| ❌ 未完成 | 9 |
 
 #### 渲染与着色器（gfx）
 
@@ -190,7 +190,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ⚠️ | 雷电只作用于后处理 | 后处理 | 与原版一致，但没有闪电对物体的直射光和闪电几何 |
 | ❌ | gfx 物体不进平面反射 | 地面 | 镜像相机也要挂 GfxPass 并用其矩阵打包 |
 | ❌ | 附加光阴影 | 地面 | 路灯光斑不会被集装箱挡住，需复算附加光阴影图集矩阵 |
-| ❌ | 实例化 `instances` | 雨 | 现在把实例展开成普通网格，顶点数与上传量 4 倍；建议 `DrawIndexedInstanced` |
+| ✅ | 实例化 `instances` | 雨 | `entity.instances({ iPos: 4, iCol: 4 }, data, count)`（或 `shader(s, { instances })`）：交错 Float32 上传到 C# 复用的 GraphicsBuffer（容量按 2 的幂增长，可只传预分配数组的前 count 个），着色器用 `gfx.shader({ instanced: { iPos: 'vec4' } })` 声明，运行时生成带 `// pot:instance` 标记的输入；D3D11 走输入槽 2 + `DrawIndexedInstanced`，GLES3 用 divisor 1 + `glDrawElementsInstanced`。实例化绘制不做视锥剔除、不投射网格阴影；着色器没声明实例属性时仍画一次 |
 | ✅ | 自定义顶点属性 `attributes` | 雨 | `scene.mesh` 的 `attributes: { name: { size, data } }`（或直接给数组，size 按长度推出）按名字排序写进网格 UV1–7，Float32 原样传、不做色彩空间转换；着色器用 `shader(s, { attributes: { name: 'vec4' } })` 声明，运行时生成 `layout(location = 5+) in` 并按名字找到网格通道，网格缺该属性时读到 0。参与 `key: true` 的内容哈希；不能与蒙皮同用 |
 | ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
 | ❌ | 后处理 pass 读阴影图 | 后处理 | 体积光（god rays）因此未移植 |
