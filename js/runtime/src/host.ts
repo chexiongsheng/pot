@@ -165,6 +165,13 @@ export interface Host {
   log(level: LogLevel, text: string): void
   /** 读游戏文件（游戏目录相对路径，如 manifest.json、src/plugins/player.ts、data/levels/1.json）。不存在返回 null */
   readText(path: string): string | null
+  /**
+   * 持久缓存（Unity：persistentDataPath/cache/<bucket>/<key>.txt，可随时整体删除）。
+   * bucket、key 只能含字母、数字、_、-，最长 64；不存在返回 null。旧宿主与 node 可不实现
+   */
+  cacheRead?(bucket: string, key: string): string | null
+  /** 写持久缓存；失败静默忽略 */
+  cacheWrite?(bucket: string, key: string, text: string): void
   /** 请求一次 GC。Unity 中在下一帧生效，调用方应等待帧后再检查 WeakRef */
   gc?(): void
   /** 开发通道：向 Dev Server 发送消息（仅开发期，未连接时丢弃） */

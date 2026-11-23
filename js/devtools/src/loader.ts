@@ -67,13 +67,53 @@ export function transpile(code: string, path: string) {
   }
 }
 
+/** 转译器版本：transpile() 或 sucrase、multi-export 的行为变了就改它，旧缓存自动失效 */
+export const TRANSPILER_ID = 'sucrase-3.35.1/multi-export-1'
+/** 宿主持久缓存的 bucket */
+export const TRANSPILE_BUCKET = 'js'
+
+/** 缓存 key：两个顺序不同的 32 位 FNV 拼成 64 位，降低碰撞；条目里还带头部做二次校验 */
+export function transpileKey(code: string, path: string) {
+  return hash(TRANSPILER_ID, path, code) + hash(code, path, TRANSPILER_ID)
+}
+
+const header = (code: string, path: string) => `//pot-transpile ${TRANSPILER_ID} ${code.length} ${path}\n`
+
 export class SourceLoader implements UnitLoader {
   /** 已执行的共享模块（单元文件不进缓存） */
   readonly cache = new Map<string, ModuleRecord>()
   /** 单元 → 上次加载时的依赖闭包（含单元文件本身） */
   readonly unitDeps = new Map<string, Set<string>>()
+  /** 每个文件最近一次的转译结果（单元文件热重载时每次重新执行，源码没变就不再转译） */
+  private _transpiled = new Map<string, { key: string; out: string }>()
+  /** 转译统计：memory 内存命中、disk 宿主持久缓存命中、compiled 实际转译次数 */
+  readonly transpileStats = { memory: 0, disk: 0, compiled: 0 }
 
   constructor(private _host: Host) {}
+
+  /** 转译（带缓存）：先查内存，再查宿主持久缓存，都没有才调 sucrase 并写回 */
+  transpileCached(code: string, path: string) {
+    if (path.endsWith('.json')) return transpile(code, path)
+    const key = transpileKey(code, path)
+    const mem = this._transpiled.get(path)
+    if (mem && mem.key === key) {
+      this.transpileStats.memory++
+      return mem.out
+    }
+    const head = header(code, path)
+    let out: string | undefined
+    const stored = this._host.cacheRead?.(TRANSPILE_BUCKET, key)
+    if (typeof stored === 'string' && stored.startsWith(head)) {
+      out = stored.slice(head.length)
+      this.transpileStats.disk++
+    } else {
+      out = transpile(code, path)
+      this.transpileStats.compiled++
+      this._host.cacheWrite?.(TRANSPILE_BUCKET, key, head + out)
+    }
+    this._transpiled.set(path, { key, out })
+    return out
+  }
 
   private _read(path: string) {
     const text = this._host.readText(path)
@@ -98,7 +138,7 @@ export class SourceLoader implements UnitLoader {
     // 先登记再执行，支持循环依赖（与 Node 一致：拿到的是尚未执行完的 exports）
     if (shared) this.cache.set(path, record)
     try {
-      const factory = compileModule(transpile(code, path), path)
+      const factory = compileModule(this.transpileCached(code, path), path)
       const require = (id: string) => {
         if (id in modules) return modules[id]
         if (id.startsWith('./') || id.startsWith('../')) {
@@ -180,6 +220,7 @@ export class SourceLoader implements UnitLoader {
     return {
       modules: [...this.cache.values()].map((r) => ({ path: r.path, deps: [...r.deps] })),
       units: Object.fromEntries([...this.unitDeps].map(([n, d]) => [n, [...d]])),
+      transpile: { ...this.transpileStats },
     }
   }
 }

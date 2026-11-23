@@ -4,6 +4,6 @@
  */
 export { attach, changed, handle, toPlain } from './agent'
 export { reload, checkLeaks } from './hmr'
-export { createLoader, SourceLoader, transpile, unitNameOf, normalizePath } from './loader'
+export { createLoader, SourceLoader, transpile, transpileKey, TRANSPILER_ID, unitNameOf, normalizePath } from './loader'
 export { splitMultiExports, bindingNames } from './multi-export'
 export type { ReloadOptions, ReloadResult } from './hmr'

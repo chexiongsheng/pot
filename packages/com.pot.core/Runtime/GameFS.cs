@@ -59,5 +59,86 @@ if (path.Length == 0 || path == ".." || path.StartsWith("../") || path.Contains(
             }
             return null;
         }
+
+        // ---- 持久缓存：persistentDataPath/cache/<bucket>/<key>.txt（devtools 转译结果等，可随时删除） ----
+
+        /// <summary>缓存根目录（persistentDataPath/cache）</summary>
+        public static string CacheRoot { get { return Path.Combine(Application.persistentDataPath, "cache"); } }
+
+        /// <summary>多久没被读到的缓存条目在本进程第一次写入时清掉</summary>
+        const double CacheMaxAgeDays = 14;
+
+        static int cacheHits, cacheReads;
+        static readonly System.Collections.Generic.HashSet<string> prunedBuckets = new System.Collections.Generic.HashSet<string>();
+
+        static bool SafeName(string s)
+        {
+            if (string.IsNullOrEmpty(s) || s.Length > 64) return false;
+            foreach (var c in s)
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
+            return true;
+        }
+
+        static string CachePath(string bucket, string key)
+        {
+            if (!SafeName(bucket) || !SafeName(key)) return null;
+            return Path.Combine(CacheRoot, bucket, key + ".txt");
+        }
+
+        /// <summary>读缓存；不存在或名字非法返回 null。命中时刷新修改时间（清理按它判断）</summary>
+        [Preserve]
+        public static string CacheRead(string bucket, string key)
+        {
+            var path = CachePath(bucket, key);
+            if (path == null) return null;
+            cacheReads++;
+            try
+            {
+                if (!File.Exists(path)) return null;
+                var text = File.ReadAllText(path);
+                cacheHits++;
+                try { File.SetLastWriteTimeUtc(path, System.DateTime.UtcNow); } catch (IOException) { } catch (System.UnauthorizedAccessException) { }
+                return text;
+            }
+            catch (IOException) { return null; }
+            catch (System.UnauthorizedAccessException) { return null; }
+        }
+
+        /// <summary>写缓存（先写临时文件再改名，避免读到半截）；失败静默忽略</summary>
+        [Preserve]
+        public static void CacheWrite(string bucket, string key, string text)
+        {
+            var path = CachePath(bucket, key);
+            if (path == null || text == null) return;
+            try
+            {
+                var dir = Path.GetDirectoryName(path);
+                Directory.CreateDirectory(dir);
+                if (prunedBuckets.Add(bucket)) PruneCache(dir);
+                var tmp = path + "." + System.Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllText(tmp, text);
+                if (File.Exists(path)) File.Delete(path);
+                File.Move(tmp, path);
+            }
+            catch (IOException) { }
+            catch (System.UnauthorizedAccessException) { }
+        }
+
+        static void PruneCache(string dir)
+        {
+            var limit = System.DateTime.UtcNow.AddDays(-CacheMaxAgeDays);
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                try { if (File.GetLastWriteTimeUtc(file) < limit) File.Delete(file); }
+                catch (IOException) { }
+                catch (System.UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>本进程持久缓存命中情况（"命中/读取次数"）；没读过返回空串</summary>
+        public static string CacheInfo()
+        {
+            return cacheReads == 0 ? "" : cacheHits + "/" + cacheReads;
+        }
     }
 }

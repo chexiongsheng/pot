@@ -6942,6 +6942,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const text = FS2.ReadText(path);
         return text === null || text === void 0 ? null : text;
       },
+      cacheRead: (bucket, key) => {
+        const text = FS2.CacheRead(bucket, key);
+        return text === null || text === void 0 ? null : text;
+      },
+      cacheWrite: (bucket, key, text) => FS2.CacheWrite(bucket, key, text),
       gc: () => H.RequestGC(),
       send: (message) => H.Send(message),
       frames: true,

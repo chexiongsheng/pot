@@ -25,6 +25,11 @@ export function createUnityHost(): Host {
       const text = FS.ReadText(path)
       return text === null || text === undefined ? null : text
     },
+    cacheRead: (bucket, key) => {
+      const text = FS.CacheRead(bucket, key)
+      return text === null || text === undefined ? null : text
+    },
+    cacheWrite: (bucket, key, text) => FS.CacheWrite(bucket, key, text),
     gc: () => H.RequestGC(),
     send: (message) => H.Send(message),
     frames: true,

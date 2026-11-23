@@ -1123,6 +1123,7 @@ var __potDevtools = (() => {
   var index_exports = {};
   __export(index_exports, {
     SourceLoader: () => SourceLoader,
+    TRANSPILER_ID: () => TRANSPILER_ID,
     attach: () => attach,
     bindingNames: () => bindingNames,
     changed: () => changed,
@@ -1134,6 +1135,7 @@ var __potDevtools = (() => {
     splitMultiExports: () => splitMultiExports,
     toPlain: () => toPlain,
     transpile: () => transpile,
+    transpileKey: () => transpileKey,
     unitNameOf: () => unitNameOf
   });
 
@@ -22059,6 +22061,13 @@ ${namesToRegister.map(
       throw new SyntaxError(`${path}${loc} ${error?.message ?? error}`);
     }
   }
+  var TRANSPILER_ID = "sucrase-3.35.1/multi-export-1";
+  var TRANSPILE_BUCKET = "js";
+  function transpileKey(code, path) {
+    return (0, import_core3.hash)(TRANSPILER_ID, path, code) + (0, import_core3.hash)(code, path, TRANSPILER_ID);
+  }
+  var header = (code, path) => `//pot-transpile ${TRANSPILER_ID} ${code.length} ${path}
+`;
   var SourceLoader = class {
     constructor(_host) {
       __publicField(this, "_host", _host);
@@ -22066,6 +22075,33 @@ ${namesToRegister.map(
       __publicField(this, "cache", /* @__PURE__ */ new Map());
       /** 单元 → 上次加载时的依赖闭包（含单元文件本身） */
       __publicField(this, "unitDeps", /* @__PURE__ */ new Map());
+      /** 每个文件最近一次的转译结果（单元文件热重载时每次重新执行，源码没变就不再转译） */
+      __publicField(this, "_transpiled", /* @__PURE__ */ new Map());
+      /** 转译统计：memory 内存命中、disk 宿主持久缓存命中、compiled 实际转译次数 */
+      __publicField(this, "transpileStats", { memory: 0, disk: 0, compiled: 0 });
+    }
+    /** 转译（带缓存）：先查内存，再查宿主持久缓存，都没有才调 sucrase 并写回 */
+    transpileCached(code, path) {
+      if (path.endsWith(".json")) return transpile(code, path);
+      const key = transpileKey(code, path);
+      const mem = this._transpiled.get(path);
+      if (mem && mem.key === key) {
+        this.transpileStats.memory++;
+        return mem.out;
+      }
+      const head = header(code, path);
+      let out;
+      const stored = this._host.cacheRead?.(TRANSPILE_BUCKET, key);
+      if (typeof stored === "string" && stored.startsWith(head)) {
+        out = stored.slice(head.length);
+        this.transpileStats.disk++;
+      } else {
+        out = transpile(code, path);
+        this.transpileStats.compiled++;
+        this._host.cacheWrite?.(TRANSPILE_BUCKET, key, head + out);
+      }
+      this._transpiled.set(path, { key, out });
+      return out;
     }
     _read(path) {
       const text = this._host.readText(path);
@@ -22087,7 +22123,7 @@ ${namesToRegister.map(
       const module = { exports: record.exports };
       if (shared) this.cache.set(path, record);
       try {
-        const factory = (0, import_core3.compileModule)(transpile(code, path), path);
+        const factory = (0, import_core3.compileModule)(this.transpileCached(code, path), path);
         const require2 = (id) => {
           if (id in modules) return modules[id];
           if (id.startsWith("./") || id.startsWith("../")) {
@@ -22162,7 +22198,8 @@ ${namesToRegister.map(
     info() {
       return {
         modules: [...this.cache.values()].map((r) => ({ path: r.path, deps: [...r.deps] })),
-        units: Object.fromEntries([...this.unitDeps].map(([n, d]) => [n, [...d]]))
+        units: Object.fromEntries([...this.unitDeps].map(([n, d]) => [n, [...d]])),
+        transpile: { ...this.transpileStats }
       };
     }
   };
