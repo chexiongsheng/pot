@@ -452,19 +452,23 @@ namespace Pot
         class GfxPass : ScriptableRenderPass
         {
             readonly int queue;
+            /// <summary>平面反射相机用：不要求 URP 生成深度纹理，pot_SceneDepth 视为无限远</summary>
+            readonly bool planar;
             readonly FrameIn frameIn = new FrameIn();
 
-            public GfxPass(int queue, RenderPassEvent evt)
+            public GfxPass(int queue, RenderPassEvent evt, bool planar = false)
             {
                 this.queue = queue;
+                this.planar = planar;
                 renderPassEvent = evt;
                 // 透明队列可读场景深度（pot_SceneDepth）：让 URP 生成 _CameraDepthTexture（不透明拷贝完成后才可用）
-                if (queue == 1) ConfigureInput(ScriptableRenderPassInput.Depth);
+                if (queue == 1 && !planar) ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
             static void Draw(int queue, FrameIn f, CommandBuffer cmd)
             {
                 var len = Pack(queue, f);
+                packingPlanar = false;
                 if (len <= 0) return;
                 var slot = PotGfx_Submit(frame.GetBuffer(), len);
                 cmd.IssuePluginEventAndData(PotGfx_RenderEvent(), 0, (IntPtr)slot);
@@ -488,7 +492,7 @@ namespace Pot
                 d.color = res.activeColorTexture;
                 d.depth = res.activeDepthTexture;
                 d.shadow = res.mainShadowsTexture;
-                d.sceneDepth = queue == 1 ? res.cameraDepthTexture : TextureHandle.nullHandle;
+                d.sceneDepth = queue == 1 && !planar ? res.cameraDepthTexture : TextureHandle.nullHandle;
                 builder.UseTexture(d.color, AccessFlags.ReadWrite);
                 if (d.depth.IsValid()) builder.UseTexture(d.depth, AccessFlags.ReadWrite);
                 if (d.shadow.IsValid()) builder.UseTexture(d.shadow);
@@ -516,6 +520,8 @@ namespace Pot
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
                 FillFrameIn(frameIn, ref renderingData);
+                // 全局 _CameraDepthTexture 此时是别的相机（主相机上一帧）的
+                if (planar) frameIn.depth = null;
                 var cmd = CommandBufferPool.Get("PotGfx");
                 Draw(queue, frameIn, cmd);
                 context.ExecuteCommandBuffer(cmd);
@@ -524,13 +530,28 @@ namespace Pot
 #endif
         }
 
-        static GfxPass opaquePass, transparentPass;
+        static GfxPass opaquePass, transparentPass, planarOpaquePass, planarTransparentPass;
         static PostPass postPass;
         static bool urpPostSuppressed;
 
         internal static void BeginCamera(ScriptableRenderContext ctx, Camera cam)
         {
             if (available != true || string.IsNullOrEmpty(backendName)) return;
+            // 平面反射相机：gfx 物体也画进倒影（按其 cullingMask 过滤，scene.reflection 的 exclude 同样生效），不挂后处理链
+            if (cam != null && cam == PotRender.PlanarCamera)
+            {
+                if (bindings.Count == 0) return;
+                var pd = cam.GetUniversalAdditionalCameraData();
+                if (pd == null || pd.scriptableRenderer == null) return;
+                if (planarOpaquePass == null)
+                {
+                    planarOpaquePass = new GfxPass(0, RenderPassEvent.AfterRenderingOpaques, true);
+                    planarTransparentPass = new GfxPass(1, RenderPassEvent.AfterRenderingTransparents, true);
+                }
+                pd.scriptableRenderer.EnqueuePass(planarOpaquePass);
+                pd.scriptableRenderer.EnqueuePass(planarTransparentPass);
+                return;
+            }
             if (cam != PotScene.Camera) return;
             var data = cam.GetUniversalAdditionalCameraData();
             if (data == null || data.scriptableRenderer == null) return;
@@ -565,6 +586,8 @@ namespace Pot
         static readonly List<Binding> drawList = new List<Binding>();
         /// <summary>当前打包可读的场景深度（pot_SceneDepth），仅透明队列打包期间非空</summary>
         static Texture sceneDepth;
+        /// <summary>当前打包的是平面反射相机（倒影里不绑定正在写的 pot_PlanarMap）</summary>
+        static bool packingPlanar;
         static readonly List<float> drawDist = new List<float>();
         static readonly Plane[] planes = new Plane[6];
         static byte[] block = new byte[256];
@@ -927,6 +950,8 @@ namespace Pot
             drawDist.Clear();
             GeometryUtility.CalculateFrustumPlanes(cam, planes);
             var camPos = cam.transform.position;
+            var mask = cam.cullingMask;
+            packingPlanar = cam == PotRender.PlanarCamera;
             List<int> dead = null;
             foreach (var kv in bindings)
             {
@@ -935,6 +960,8 @@ namespace Pot
                 var go = PotScene.GetObject(b.obj);
                 if (go == null) { b.ReleaseInstances(); (dead ??= new List<int>()).Add(kv.Key); continue; }
                 if (!go.activeInHierarchy || !programs.ContainsKey(b.program)) continue;
+                // 相机不渲染的层（例如倒影排除的层）不画
+                if ((mask & (1 << go.layer)) == 0) continue;
                 var r = go.GetComponent<Renderer>();
                 // visible(false)：Unity 渲染器被禁用，运行时着色器这条路径也要跟着不画
                 if (r != null && !r.enabled) continue;
@@ -1029,7 +1056,7 @@ namespace Pot
                 int texId;
                 if (t.Key == "pot_EnvMap") tex = env;
                 else if (t.Key == "pot_ShadowMap") tex = shadowMap != null ? shadowMap : Texture2D.whiteTexture;
-                else if (t.Key == "pot_PlanarMap") tex = PotRender.PlanarTexture != null ? PotRender.PlanarTexture : Texture2D.blackTexture;
+                else if (t.Key == "pot_PlanarMap") tex = PotRender.PlanarTexture != null && !packingPlanar ? PotRender.PlanarTexture : Texture2D.blackTexture;
                 // 没有场景深度时视为无限远：reversed Z 远处为 0，否则为 1
                 else if (t.Key == "pot_SceneDepth") tex = sceneDepth != null ? sceneDepth : SystemInfo.usesReversedZBuffer ? Texture2D.blackTexture : Texture2D.whiteTexture;
                 else if (inputs != null && inputs.TryGetValue(t.Key, out tex)) { }
