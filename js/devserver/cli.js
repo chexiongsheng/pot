@@ -11,7 +11,7 @@
  *                                           出包：TS 编译 → 暂存 → Unity -batchmode 打包（通用工程 player/），不用打开编辑器
  *   pot runner [--platform win64|android[,…]] [--unity Unity.exe] [--out 目录]
  *                                           构建 Runner（runner/ 工程），默认输出 release/runner/<平台>/PotRunner.exe|.apk
- *   pot native [--platform win64|webgl[,…]] [--force] [--unity Unity.exe]
+ *   pot native [--platform win64|webgl|android[,…]] [--force] [--unity Unity.exe]
  *                                           检查/构建原生库 pot_gfx（release、runner 构建前会自动检查，缺了才编；--force 强制重建）
  *   pot stage <游戏目录> <暂存目录>           只暂存（game/ + release.json + 图标），供 Unity 菜单 pot/Build Game 使用
  *   pot mcp [--port 7788]                   以 stdio MCP 方式暴露调试工具
