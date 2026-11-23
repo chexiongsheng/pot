@@ -6462,11 +6462,13 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     /**
      * 设置每帧后处理链：相机画面（HDR 线性）渲染完成后、URP 后处理之前依次执行各 pass（全屏程序）。
      * 链生效期间自动关闭 URP 自带后处理（色调映射、bloom 等由游戏自己实现）；最后一个写 'screen' 的 pass 应输出线性颜色。
+     * `after: 'urp'` 时改为挂在 URP 后处理之后，不关闭 URP 后处理（与 scene.post 的景深、bloom 等共存）。
      * 随调用方插件卸载而关闭。
      */
     post(options) {
       const engine = this._host.engine;
       if (!options.passes?.length) throw new Error("gfx.post：至少需要一个 pass");
+      if (options.after !== void 0 && options.after !== "scene" && options.after !== "urp") throw new Error(`gfx.post：after 只能是 'scene' 或 'urp'，收到 ${String(options.after)}`);
       const targets = options.targets ?? {};
       for (const name of Object.keys(targets)) {
         if (name === "scene" || name === "depth" || name === "screen") throw new Error(`gfx.post：目标名 ${name} 是保留名`);
@@ -6503,6 +6505,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         });
         const json = JSON.stringify({
           shared: chain._shared,
+          stage: options.after === "urp" ? 1 : 0,
           targets: Object.entries(targets).map(([name, t]) => ({
             name,
             width: Math.round(t.width ?? 0),

@@ -139,6 +139,14 @@ export interface PostChainOptions {
   passes: PostPass[]
   /** 所有 pass 共享的 uniform（可用 PostChain.set 每帧更新） */
   uniforms?: Record<string, UniformValue>
+  /**
+   * 挂点，默认 'scene'：
+   * - 'scene'：URP 后处理之前执行，并关闭 URP 后处理（色调映射、bloom、景深等由链自己实现；SSAO 这类渲染特性不受影响）。
+   *   'scene' 输入是 HDR 线性画面；写 'screen' 的 pass 应输出已色调映射的线性颜色（最终 blit 负责转 sRGB）。
+   * - 'urp'：URP 后处理（含 scene.post 的景深、bloom、色调映射等）之后执行，二者共存。
+   *   此时 'scene' 是已色调映射的 LDR 线性画面（0..1），适合描边、扫描线、UI 前的叠加特效。
+   */
+  after?: 'scene' | 'urp'
 }
 
 /** 每帧后处理链句柄（同一时刻只有一条链生效，后建的替换先建的） */
@@ -869,11 +877,13 @@ export class GfxService extends Service {
   /**
    * 设置每帧后处理链：相机画面（HDR 线性）渲染完成后、URP 后处理之前依次执行各 pass（全屏程序）。
    * 链生效期间自动关闭 URP 自带后处理（色调映射、bloom 等由游戏自己实现）；最后一个写 'screen' 的 pass 应输出线性颜色。
+   * `after: 'urp'` 时改为挂在 URP 后处理之后，不关闭 URP 后处理（与 scene.post 的景深、bloom 等共存）。
    * 随调用方插件卸载而关闭。
    */
   post(options: PostChainOptions): PostChain {
     const engine = this._host.engine
     if (!options.passes?.length) throw new Error('gfx.post：至少需要一个 pass')
+    if (options.after !== undefined && options.after !== 'scene' && options.after !== 'urp') throw new Error(`gfx.post：after 只能是 'scene' 或 'urp'，收到 ${String(options.after)}`)
     const targets = options.targets ?? {}
     for (const name of Object.keys(targets)) {
       if (name === 'scene' || name === 'depth' || name === 'screen') throw new Error(`gfx.post：目标名 ${name} 是保留名`)
@@ -908,6 +918,7 @@ export class GfxService extends Service {
       })
       const json = JSON.stringify({
         shared: chain._shared,
+        stage: options.after === 'urp' ? 1 : 0,
         targets: Object.entries(targets).map(([name, t]) => ({
           name,
           width: Math.round(t.width ?? 0),

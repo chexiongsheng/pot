@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 51 |
+| ✅ 已完成 | 52 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 4 |
+| ❌ 未完成 | 3 |
 
 #### 渲染与着色器（gfx）
 
@@ -194,7 +194,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 自定义顶点属性 `attributes` | 雨 | `scene.mesh` 的 `attributes: { name: { size, data } }`（或直接给数组，size 按长度推出）按名字排序写进网格 UV1–7，Float32 原样传、不做色彩空间转换；着色器用 `shader(s, { attributes: { name: 'vec4' } })` 声明，运行时生成 `layout(location = 5+) in` 并按名字找到网格通道，网格缺该属性时读到 0。参与 `key: true` 的内容哈希；不能与蒙皮同用 |
 | ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
 | ✅ | 后处理 pass 读阴影图 | 后处理 | 阴影函数拆成独立库 `<pot/shadow>`（`<pot/lit>` 内部包含它），后处理 pass 用 `<pot/post>` 的 `pot_WorldPos` 重建世界坐标后即可调用 `pot_Shadow`（PCF）或 `pot_SunVisibility`（单次采样，raymarch 用）；`gfx.post` 原本就绑定了 `pot_ShadowMap` 与级联 uniform。jimao 已移植原版体积光的太阳光柱部分（`shaders/post/vol.frag`，半分辨率 24 步，环境散射仍交给高度雾），D3D11 实机编译通过 |
-| ❌ | 后处理链与 `scene.post` 可共存 | 后处理 | 链生效时 SSAO、景深一起失效；建议提供 URP 后处理之后的挂点 |
+| ✅ | 后处理链与 `scene.post` 可共存 | 后处理 | `gfx.post({ after: 'urp' })` 把链挂在 URP 后处理之后（`AfterRenderingPostProcessing`），不关闭 URP 后处理，`scene.post` 的景深、bloom、色调映射照常生效，`scene` 输入此时是已色调映射的 LDR 线性画面；默认 `after: 'scene'` 保持原行为（接管色调映射并关闭 URP 后处理）。jimao 临时切到 `urp` 挂点实机截图画面正常 |
 | ✅ | 后处理 pass 单独开关 | 后处理 | pass 可带 `name` / `enabled`，`chain.enable(下标 | 名字 | 数组, on)` 成组开关、`chain.enabled()` 查询；关闭的 pass 在 C# 侧直接跳过，它写的普通目标清成透明黑，history 目标保留。jimao 画质关 bloom 时跳过 5 个上采样和 2 个光斑 pass（降采样链要给自动曝光测光，保留），实机截图确认开关前后泛光消失与恢复 |
 
 #### 内置材质与场景

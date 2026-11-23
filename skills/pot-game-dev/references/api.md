@@ -106,7 +106,7 @@ ent.material({ map: albedo, maskMap: mask, metallic: 1, smoothness: 1 })
 
 #### 自定义后处理链（gfx.post）
 
-整条后处理由游戏的全屏程序组成，替换 URP 自带后处理（链存在期间 `scene.post` 无效，卸载后恢复）。
+整条后处理由游戏的全屏程序组成，默认替换 URP 自带后处理（链存在期间 `scene.post` 无效，卸载后恢复）。只想在 URP 后处理之后叠加效果（与 `scene.post` 的 SSAO、景深、bloom 共存）时传 `after: 'urp'`：链挂在 URP 后处理之后，`scene` 输入变成已色调映射的 LDR 线性画面（0..1）。
 
 ```ts
 const fs = (f: string) => ctx.gfx.shader({ fullscreen: true, fragment: `shaders/post/${f}.frag` })

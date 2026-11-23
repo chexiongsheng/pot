@@ -61,3 +61,29 @@ test('gfx.post：后处理链的目标、输入与 uniform 传到引擎，卸载
   await run(ctx.runtime, ctx.runtime.stop())
   assert.equal(ctx.engine.post, null, '卸载后关闭')
 })
+
+function stageGame(after) {
+  const opt = after === undefined ? '' : `, after: ${JSON.stringify(after)}`
+  return new Map([
+    ['manifest.json', JSON.stringify({ id: 'post', plugins: ['fx'] })],
+    ['data/shaders/post/a.frag', PASS],
+    ['src/plugins/fx.js', `export const name = 'fx'
+export function apply(ctx) {
+  const a = ctx.gfx.shader({ fragment: 'shaders/post/a.frag', fullscreen: true })
+  ctx.gfx.post({ passes: [{ shader: a, output: 'screen', inputs: { tScene: 'scene', tDepth: 'depth' } }]${opt} })
+}
+`],
+  ])
+}
+
+test("gfx.post after：默认挂在 URP 后处理之前（stage 0），after: 'urp' 挂在之后（stage 1）", async () => {
+  const def = await startGame(stageGame())
+  assert.deepEqual(def.runtime.failures, [])
+  assert.equal(def.engine.post.stage, 0)
+  const urp = await startGame(stageGame('urp'))
+  assert.deepEqual(urp.runtime.failures, [])
+  assert.equal(urp.engine.post.stage, 1)
+  const bad = await startGame(stageGame('bloom'))
+  assert.equal(bad.engine.post, undefined)
+  assert.match(String(bad.runtime.failures[0]?.error ?? bad.runtime.failures[0]), /after 只能是/)
+})

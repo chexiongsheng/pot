@@ -557,9 +557,19 @@ namespace Pot
             if (data == null || data.scriptableRenderer == null) return;
             if (post != null)
             {
-                // 游戏自己的后处理链接管色调映射等：关掉 URP 后处理（SSAO 等渲染特性不受影响）
-                if (data.renderPostProcessing) { data.renderPostProcessing = false; urpPostSuppressed = true; }
                 postPass ??= new PostPass();
+                if (post.cfg.stage == 1)
+                {
+                    // 挂在 URP 后处理之后：与 scene.post（景深、bloom、色调映射等）共存，URP 会因此把后处理结果留在中间缓冲
+                    if (urpPostSuppressed) { data.renderPostProcessing = true; urpPostSuppressed = false; }
+                    postPass.renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
+                }
+                else
+                {
+                    // 游戏自己的后处理链接管色调映射等：关掉 URP 后处理（SSAO 等渲染特性不受影响）
+                    if (data.renderPostProcessing) { data.renderPostProcessing = false; urpPostSuppressed = true; }
+                    postPass.renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+                }
                 data.scriptableRenderer.EnqueuePass(postPass);
             }
             else if (urpPostSuppressed)
@@ -1231,7 +1241,8 @@ namespace Pot
 
         [Serializable] class PostTargetCfg { public string name; public int width, height; public float scale = 1; public string format = "rgba16f"; public int filter = 1; public int history; }
         [Serializable] class PostPassCfg { public string program; public string output; public string[] inputs; public int bind; public int blend; }
-        [Serializable] class PostChainCfg { public PostTargetCfg[] targets; public PostPassCfg[] passes; public int shared; }
+        /// <summary>stage：0 = URP 后处理之前（并关闭 URP 后处理），1 = URP 后处理之后（共存）</summary>
+        [Serializable] class PostChainCfg { public PostTargetCfg[] targets; public PostPassCfg[] passes; public int shared; public int stage; }
 
         class PostTarget
         {
