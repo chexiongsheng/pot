@@ -265,10 +265,10 @@ export function createDecals(ctx: Context, cap = 160): Decals | undefined {
   const baseA = new Float32Array(cap)
   const indices = new Uint32Array(cap * 6)
   for (let k = 0; k < cap; k++) { const c = k * 4; indices.set([c, c + 1, c + 2, c, c + 2, c + 3], k * 6) }
-  const MESH = 'jimao/decals'
+  const MESH = 'saltline/decals'
   const upload = () => scene.mesh(MESH, { positions, normals, uvs: uv, colors, indices, tangents })
   upload()
-  const shader = gfx.shader({ fragment: 'shaders/decal.frag', name: 'jimao/decal' })
+  const shader = gfx.shader({ fragment: 'shaders/decal.frag', name: 'saltline/decal' })
   const ent: Entity = scene.spawn({ shape: `mesh:${MESH}`, name: 'fx_decals', position: [0, 0, 0], collider: false })
     .shader(shader, { queue: 'transparent', blend: 'alpha', cull: 'none', depthWrite: false, shadows: false, frustumCull: false, polygonOffset: [-4, -4], uniforms: { uMap: map, uOrm: orm, uNrm: nrm } })
   ent.active(false)

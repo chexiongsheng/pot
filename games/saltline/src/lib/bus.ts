@@ -14,28 +14,28 @@ export interface BulletHit {
 
 export interface Events {
   /** 重新开始（keep 为 true 时保留中继进度） */
-  'jimao/reset'(keep: boolean): void
+  'saltline/reset'(keep: boolean): void
   /** 调试：沿视线做一次开枪检测并落弹孔；给坐标时直接在该点放水花（devserver eval 用） */
-  'jimao/debug'(at?: Vec3): void
+  'saltline/debug'(at?: Vec3): void
   /** 玩家开枪（听觉警觉） */
-  'jimao/shot'(pos: Vec3): void
-  'jimao/bullet'(hit: BulletHit): void
-  'jimao/damage-player'(amount: number, from: Vec3 | null): void
-  'jimao/kill'(type: EnemyType, weak: boolean, pos: Vec3): void
-  'jimao/spawn'(type: EnemyType, pos: Vec3, pursuit: boolean): void
-  'jimao/clear-enemies'(): void
+  'saltline/shot'(pos: Vec3): void
+  'saltline/bullet'(hit: BulletHit): void
+  'saltline/damage-player'(amount: number, from: Vec3 | null): void
+  'saltline/kill'(type: EnemyType, weak: boolean, pos: Vec3): void
+  'saltline/spawn'(type: EnemyType, pos: Vec3, pursuit: boolean): void
+  'saltline/clear-enemies'(): void
   /** 敌人发现玩家 */
-  'jimao/alert'(pos: Vec3): void
-  'jimao/relay-cut'(index: number): void
-  'jimao/radio'(text: string): void
-  'jimao/warn'(text: string): void
-  'jimao/message'(text: string): void
-  'jimao/feed'(text: string, weak: boolean): void
-  'jimao/hitmarker'(kill: boolean, weak: boolean): void
+  'saltline/alert'(pos: Vec3): void
+  'saltline/relay-cut'(index: number): void
+  'saltline/radio'(text: string): void
+  'saltline/warn'(text: string): void
+  'saltline/message'(text: string): void
+  'saltline/feed'(text: string, weak: boolean): void
+  'saltline/hitmarker'(kill: boolean, weak: boolean): void
   /** 后处理的游戏参数（uDamage、uLowHealth、uAds、uFade、uSaturation 等），world 转给后处理链 */
-  'jimao/post'(values: Record<string, number>): void
+  'saltline/post'(values: Record<string, number>): void
   /** 菜单命令：start 开始、resume 继续、retry 重新部署、restart 重新开始、title 返回标题 */
-  'jimao/command'(cmd: 'start' | 'resume' | 'retry' | 'restart' | 'title'): void
+  'saltline/command'(cmd: 'start' | 'resume' | 'retry' | 'restart' | 'title'): void
 }
 
 export function emit<K extends keyof Events>(ctx: Context, name: K, ...args: Parameters<Events[K]>) {

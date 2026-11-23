@@ -8,23 +8,23 @@
 
 ```powershell
 # 单个平台
-node js/devserver/cli.js release games/jimao --platform win64
+node js/devserver/cli.js release games/saltline --platform win64
 
 # 三个平台依次出包
-node js/devserver/cli.js release games/jimao --platform win64,android,webgl
+node js/devserver/cli.js release games/saltline --platform win64,android,webgl
 
 # 显式指定 Unity、输出目录（多平台时自动附加平台子目录）
-node js/devserver/cli.js release games/jimao --platform win64,android,webgl `
+node js/devserver/cli.js release games/saltline --platform win64,android,webgl `
   --unity "D:\Program Files\Unity\Hub\Editor\2022.3.62f1c1\Editor\Unity.exe" `
-  --out D:\build\jimao
+  --out D:\build\saltline
 ```
 
 也可以用 `tools/release.cmd`，参数完全相同。`--unity` 可省略：脚本读取 `POT_UNITY`、`UNITY_PATH`，或按 `player/ProjectSettings/ProjectVersion.txt` 在 Unity Hub 安装目录中查找。
 
 默认产物在 `release/<游戏名>/<平台>/`：
 
-- `win64`：`jimao.exe` 及配套数据目录（IL2CPP，含 `GameAssembly.dll`）。
-- `android`：`jimao-<版本>.apk`（ARM64、IL2CPP，最低 Android 7.0）。
+- `win64`：`saltline.exe` 及配套数据目录（IL2CPP，含 `GameAssembly.dll`）。
+- `android`：`saltline-<版本>.apk`（ARM64、IL2CPP，最低 Android 7.0）。
 - `webgl`：可部署到静态 HTTP 服务器的目录，入口为 `index.html`。
 
 Unity 的完整日志在 `<游戏目录>/.pot/release/unity-<平台>.log`，脚本同时转发关键构建行。编译失败、产物缺失或 Puerts WebGL 后处理缺失都会返回非零退出码。
@@ -52,18 +52,18 @@ node js/devserver/cli.js runner --platform win64,android --out D:\build\runner
 
 ```json
 {
-  "id": "pot.jimao",
-  "name": "几猫 · 港区突击",
+  "id": "pot.saltline",
+  "name": "Saltline",
   "version": "0.1.0",
   "apiVersion": "0.1",
   "plugins": ["game"],
   "icon": "icon.png",
   "release": {
     "company": "pot",
-    "packageId": "com.pot.jimao",
+    "packageId": "com.pot.saltline",
     "versionCode": 100,
     "orientation": "landscape",
-    "fileName": "jimao",
+    "fileName": "saltline",
     "window": { "width": 1600, "height": 900, "fullscreen": false, "resizable": true }
   }
 }
@@ -73,7 +73,7 @@ node js/devserver/cli.js runner --platform win64,android --out D:\build\runner
 
 ### 内置字体
 
-发布包会带一份中文字体子集，WebGL 拿不到系统字体，没有它中文就不显示。暂存时脚本收集游戏文件（`bundle.cjs`、`data/**` 中的文本）里出现过的全部字符，加上 ASCII 和常用中文标点，从开源字体裁出子集，jimao 约 630 字、172 KB。
+发布包会带一份中文字体子集，WebGL 拿不到系统字体，没有它中文就不显示。暂存时脚本收集游戏文件（`bundle.cjs`、`data/**` 中的文本）里出现过的全部字符，加上 ASCII 和常用中文标点，从开源字体裁出子集，saltline 约 630 字、172 KB。
 
 - 字体来源依次为 `release.font`（相对游戏目录的 ttf/otf）、环境变量 `POT_FONT`、本机已安装的 Noto Sans SC 或思源黑体。只用 OFL 等可再分发的字体，微软雅黑等系统字体不能随包分发。
 - 找不到字体源时照常出包，但会打印警告，此时 WebGL 中文无法显示。
@@ -104,6 +104,6 @@ node js/devserver/cli.js runner --platform win64,android --out D:\build\runner
 
 ## GitHub Pages 演示站点
 
-CI 用 `tools/build-pages.js` 把 `games/` 下所有游戏打成 WebGL 并汇总成静态站点。各游戏的引擎文件（`*.wasm.unityweb`、`*.framework.js.unityweb`、`*.loader.js`）只取决于 Unity 版本和 player 工程，逐字节相同，脚本按内容哈希把它们移到 `_shared/`，并改写各游戏 `index.html` 的 `loaderUrl`/`frameworkUrl`/`codeUrl`。打开过一个游戏后再开另一个，约 9 MB 的引擎走浏览器缓存，只需下载游戏自己的 `.data`（hello 约 5 MB，jimao 约 5.6 MB）。
+CI 用 `tools/build-pages.js` 把 `games/` 下所有游戏打成 WebGL 并汇总成静态站点。各游戏的引擎文件（`*.wasm.unityweb`、`*.framework.js.unityweb`、`*.loader.js`）只取决于 Unity 版本和 player 工程，逐字节相同，脚本按内容哈希把它们移到 `_shared/`，并改写各游戏 `index.html` 的 `loaderUrl`/`frameworkUrl`/`codeUrl`。打开过一个游戏后再开另一个，约 9 MB 的引擎走浏览器缓存，只需下载游戏自己的 `.data`（hello 约 5 MB，saltline 约 5.6 MB）。
 
-GitHub Pages 不会给 `.unityweb` 加 `Content-Encoding`，由 Unity 加载器在浏览器里解压（`decompressionFallback`），控制台里的 “You can reduce startup time…” 提示可以忽略。首次打开 jimao 共约 14.6 MB，国内网络访问 GitHub Pages 可能很慢（实测有 20 KB/s 左右），进度条停住多半是还在下载，不是出错。
+GitHub Pages 不会给 `.unityweb` 加 `Content-Encoding`，由 Unity 加载器在浏览器里解压（`decompressionFallback`），控制台里的 “You can reduce startup time…” 提示可以忽略。首次打开 saltline 共约 14.6 MB，国内网络访问 GitHub Pages 可能很慢（实测有 20 KB/s 左右），进度条停住多半是还在下载，不是出错。

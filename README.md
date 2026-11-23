@@ -56,9 +56,9 @@ MCP：`node js/devserver/cli.js mcp --port 7788`（stdio）。
 发布（自动编译 TS、读取 manifest 配置并调用 Unity 批处理，无需打开编辑器）：
 
 ```powershell
-node js/devserver/cli.js release games/jimao --platform win64
-node js/devserver/cli.js release games/jimao --platform win64,android,webgl
-# 可选：--unity "D:\...\Unity.exe" --out D:\build\jimao
+node js/devserver/cli.js release games/saltline --platform win64
+node js/devserver/cli.js release games/saltline --platform win64,android,webgl
+# 可选：--unity "D:\...\Unity.exe" --out D:\build\saltline
 ```
 
 产物默认在 `release/<游戏名>/<平台>/`。manifest 字段、平台要求与限制见 [自动发布打包](docs/003-release.md)。

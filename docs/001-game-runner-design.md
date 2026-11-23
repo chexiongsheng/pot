@@ -141,8 +141,8 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 绘制：在 URP 的 `AfterRenderingOpaques` / `AfterRenderingTransparents` 两个 pass 中，由原生插件用 URP 当前的颜色和深度目标直接绘制，因此与普通物体正确遮挡，透明物体按由远到近排序；后处理照常作用。物体仍由普通 Renderer 投射阴影（ShadowsOnly）。
 - 内置 uniform 与库：`pot_Model/View/Proj/...`、`pot_Time`、太阳光、环境光、雾、反射探针；`<pot/varyings>`、`<pot/standard.vert>`、`<pot/lit>`（GGX + 半球环境光 + 环境反射 + 雾）。只写片元着色器即可得到与场景一致的光照。
 - 出错不丢画面：编译失败时保留同名旧程序，错误按 `#line` 映射回游戏源文件和行号。
-- 烘焙：`ctx.gfx.bake()` 用全屏程序画到新建的 RenderTexture（支持 MRT、sRGB/浮点格式、mip 与过滤设置），对应网页上 `WebGLRenderTarget` + 全屏 pass 的用法，程序化材质、查找表、法线生成都由游戏自己写，Runner 不需要为新材质升级。几猫的 27 种原版材质就是这样机械移植的。
-- 代价：编译器约 3 MB；首次编译在加载时发生，单个程序几十到几百毫秒（jimao 40 个程序合计约 4 秒）。编译结果按源码哈希缓存到 `persistentDataPath/cache/shaders`，第二次打开直接加载。暂不接收阴影，暂不进入 URP 的深度预通道和 SSAO。
+- 烘焙：`ctx.gfx.bake()` 用全屏程序画到新建的 RenderTexture（支持 MRT、sRGB/浮点格式、mip 与过滤设置），对应网页上 `WebGLRenderTarget` + 全屏 pass 的用法，程序化材质、查找表、法线生成都由游戏自己写，Runner 不需要为新材质升级。Saltline 的 27 种原版材质就是这样机械移植的。
+- 代价：编译器约 3 MB；首次编译在加载时发生，单个程序几十到几百毫秒（saltline 40 个程序合计约 4 秒）。编译结果按源码哈希缓存到 `persistentDataPath/cache/shaders`，第二次打开直接加载。暂不接收阴影，暂不进入 URP 的深度预通道和 SSAO。
 
 备用：着色器即数据。固定的解释器着色器读取 Buffer 或贴图中的表达式字节码，在某平台无法运行时编译时（例如受限的小游戏环境）作为降级方案。
 
@@ -150,7 +150,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 普通材质（uber 材质加参数和开关）继续保留，用于不需要自定义效果的物体。变体管理：`core` 自带 `ShaderVariantCollection` 和 Always Included 配置；`build` 根据 `capabilities` 裁剪变体，并预热 PSO。
 
-### 复刻几猫发现的 Runner 能力缺口
+### 复刻 Saltline 发现的 Runner 能力缺口
 
 通过机械移植原版网页（three.js r180）逐项找出 Runner 缺的通用能力。状态说明：✅ 已完成，❌ 未完成，⚠️ 可用但与原版有出入，➖ 原版不需要、暂不做（以后有游戏要用再做）。
 
@@ -181,7 +181,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ✅ | 自定义后处理链 `gfx.post` | 后处理 | 全屏 pass 链、按比例或固定尺寸目标、`history` 双缓冲、内置 `scene` / `depth` |
 | ✅ | three 方言 `gfx.standard` / `dialect: 'three'` | 枪模、场景材质 | three r180 的 meshphysical 原文与 ShaderChunk 直接编译，支持 `onBeforeCompile` 补丁（`threeChunks`）；光照、阴影、雾、环境改读 pot 内置。枪模 Bf 与场景 sl 材质 h3 已换回原版原文，D3D11 上 60fps |
 | ✅ | `pot_gfx` GLES3 / WebGL2 后端 | WebGL 版 | 源码直通驱动（不经 glslang），`glGetActiveUniform` 反射；程序化材质、three 方言、`gfx.bake`、`gfx.post` 在 WebGL 上均已生效。注意：Unity GL 的 `SetRenderTarget` 惰性生效，post 的输出目标由后端自行绑定 FBO；`gl_FragCoord` 原点随后端不同（D3D 左上、GL 左下）；GL 下正面绕序为 `GL_CW`（与 Unity 一致，写反会剔掉地面和集装箱外侧面）；Android GLES 已能出包但未在真机上实测（出包关闭多线程渲染）；Metal、Vulkan 未做 |
-| ✅ | 发布包内置中文字体子集 | WebGL 菜单、HUD | `pot release` 按游戏文件里出现过的字符从 Noto Sans SC / 思源黑体（OFL，可再分发）裁子集随包，jimao 634 字 172 KB；运行时 UI、文字贴图、Canvas 优先用它，缺字回退系统字体。UI 文字按参考字“国”的包围盒和参考行高 1.32em 竖直对齐，换字体布局不变 |
+| ✅ | 发布包内置中文字体子集 | WebGL 菜单、HUD | `pot release` 按游戏文件里出现过的字符从 Noto Sans SC / 思源黑体（OFL，可再分发）裁子集随包，saltline 634 字 172 KB；运行时 UI、文字贴图、Canvas 优先用它，缺字回退系统字体。UI 文字按参考字“国”的包围盒和参考行高 1.32em 竖直对齐，换字体布局不变 |
 | ✅ | 平台缺能力显式化 | WebGL / Android | 启动日志写明运行时着色器后端（`d3d11` / `gles3` / 不可用）；不可用时 C# 与 JS 各警告一次并说明原因（`ctx.gfx.unsupported`）；打包时按目标平台输出 `[pot] 平台能力` 警告，并把 Win64 固定为 D3D11、WebGL 固定为 WebGL2、Android 固定为 GLES3 |
 | ✅ | Android 包含 `pot_gfx` | Android 版 | `pot native --platform android` 用 Unity 自带 NDK + Ninja 构建 `Plugins/Android/arm64-v8a/libpot_gfx.so`（与 WebGL 同样只带 GLES3 后端，不带 glslang，约 370 KB，16KB 页对齐）；出包时 Android 固定 OpenGLES3 并关闭多线程渲染，保证程序在 GL 上下文所在线程编译。Runner APK 已能出包，真机渲染尚未验证 |
 | ✅ | 屏幕空间内置量 | 后处理 | `pot_ScreenVP/InvVP`、`pot_DepthParams`、`<pot/post>` 的深度与世界坐标重建 |
@@ -193,10 +193,10 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ➖ | 附加光阴影 | 地面 | 原版只有太阳投影：码头 4 盏点光显式 `castShadow=false`，枪火/爆炸 6 盏闪光点光不投影，没有聚光灯，`light_mast` 的 `userData.lamps` 只是数据、不生成灯。复刻版原先自行添加的 `mast` 聚光、`crane`/`quay` 点光已删除，与原版对齐。内置 PotLit 已能接收 URP 附加光阴影，gfx 着色器的 `pot_AdditionalLights` 不采样阴影。以后要做：URP 不公开附加光阴影图集分块与矩阵，需照 `AdditionalLightsShadowCasterPass` 复算（URP14/17 两套）；gfx 光源顺序映射到阴影 slice；点光 6 面；帧协议加矩阵；D3D11 与 GLES3 后端加图集贴图和比较采样。可先只做聚光 |
 | ✅ | 实例化 `instances` | 雨 | `entity.instances({ iPos: 4, iCol: 4 }, data, count)`（或 `shader(s, { instances })`）：交错 Float32 上传到 C# 复用的 GraphicsBuffer（容量按 2 的幂增长，可只传预分配数组的前 count 个），着色器用 `gfx.shader({ instanced: { iPos: 'vec4' } })` 声明，运行时生成带 `// pot:instance` 标记的输入；D3D11 走输入槽 2 + `DrawIndexedInstanced`，GLES3 用 divisor 1 + `glDrawElementsInstanced`。实例化绘制不做视锥剔除、不投射网格阴影；着色器没声明实例属性时仍画一次 |
 | ✅ | 自定义顶点属性 `attributes` | 雨 | `scene.mesh` 的 `attributes: { name: { size, data } }`（或直接给数组，size 按长度推出）按名字排序写进网格 UV1–7，Float32 原样传、不做色彩空间转换；着色器用 `shader(s, { attributes: { name: 'vec4' } })` 声明，运行时生成 `layout(location = 5+) in` 并按名字找到网格通道，网格缺该属性时读到 0。参与 `key: true` 的内容哈希；不能与蒙皮同用 |
-| ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；jimao 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
-| ✅ | 后处理 pass 读阴影图 | 后处理 | 阴影函数拆成独立库 `<pot/shadow>`（`<pot/lit>` 内部包含它），后处理 pass 用 `<pot/post>` 的 `pot_WorldPos` 重建世界坐标后即可调用 `pot_Shadow`（PCF）或 `pot_SunVisibility`（单次采样，raymarch 用）；`gfx.post` 原本就绑定了 `pot_ShadowMap` 与级联 uniform。jimao 已移植原版体积光的太阳光柱部分（`shaders/post/vol.frag`，半分辨率 24 步，环境散射仍交给高度雾），D3D11 实机编译通过 |
-| ✅ | 后处理链与 `scene.post` 可共存 | 后处理 | `gfx.post({ after: 'urp' })` 把链挂在 URP 后处理之后（`AfterRenderingPostProcessing`），不关闭 URP 后处理，`scene.post` 的景深、bloom、色调映射照常生效，`scene` 输入此时是已色调映射的 LDR 线性画面；默认 `after: 'scene'` 保持原行为（接管色调映射并关闭 URP 后处理）。jimao 临时切到 `urp` 挂点实机截图画面正常 |
-| ✅ | 后处理 pass 单独开关 | 后处理 | pass 可带 `name` / `enabled`，`chain.enable(下标 | 名字 | 数组, on)` 成组开关、`chain.enabled()` 查询；关闭的 pass 在 C# 侧直接跳过，它写的普通目标清成透明黑，history 目标保留。jimao 画质关 bloom 时跳过 5 个上采样和 2 个光斑 pass（降采样链要给自动曝光测光，保留），实机截图确认开关前后泛光消失与恢复 |
+| ✅ | 相机内置量 `fov`、渲染分辨率 | 雨 | 新增 `pot_Camera`（竖直视野弧度、宽高比、tan(fov/2)、正交半高）与 `pot_Resolution`（相机实际渲染尺寸，含 renderScale，后处理 pass 里也不变）；saltline 雨和粒子的像素尺寸改用 `2·pot_Camera.z·pot_Resolution.w` |
+| ✅ | 后处理 pass 读阴影图 | 后处理 | 阴影函数拆成独立库 `<pot/shadow>`（`<pot/lit>` 内部包含它），后处理 pass 用 `<pot/post>` 的 `pot_WorldPos` 重建世界坐标后即可调用 `pot_Shadow`（PCF）或 `pot_SunVisibility`（单次采样，raymarch 用）；`gfx.post` 原本就绑定了 `pot_ShadowMap` 与级联 uniform。saltline 已移植原版体积光的太阳光柱部分（`shaders/post/vol.frag`，半分辨率 24 步，环境散射仍交给高度雾），D3D11 实机编译通过 |
+| ✅ | 后处理链与 `scene.post` 可共存 | 后处理 | `gfx.post({ after: 'urp' })` 把链挂在 URP 后处理之后（`AfterRenderingPostProcessing`），不关闭 URP 后处理，`scene.post` 的景深、bloom、色调映射照常生效，`scene` 输入此时是已色调映射的 LDR 线性画面；默认 `after: 'scene'` 保持原行为（接管色调映射并关闭 URP 后处理）。saltline 临时切到 `urp` 挂点实机截图画面正常 |
+| ✅ | 后处理 pass 单独开关 | 后处理 | pass 可带 `name` / `enabled`，`chain.enable(下标 | 名字 | 数组, on)` 成组开关、`chain.enabled()` 查询；关闭的 pass 在 C# 侧直接跳过，它写的普通目标清成透明黑，history 目标保留。saltline 画质关 bloom 时跳过 5 个上采样和 2 个光斑 pass（降采样链要给自动曝光测光，保留），实机截图确认开关前后泛光消失与恢复 |
 
 #### 内置材质与场景
 
@@ -205,19 +205,19 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | ⚠️ | 内置材质世界空间效果 | 初始移植 | 宏观亮度/粗糙度变化、雨痕水珠、远距离抖动镂空只覆盖了湿润 |
 | ✅ | 远景顶点动画（闪灯、海鸥） | 远景 | 没有给内置材质加顶点钩子，改用 gfx 自定义着色器 + 自定义顶点属性：闪灯网格带上原版 `blink`（周期、相位、占空比）与线性 HDR 顶点色 `aLamp`，`lamp.vert` 按 `pot_Time.x` 算闪烁系数；海鸥取原版 `wb` 的几何（`aOrbit`/`aPar`），`gull.vert` 在 three 坐标下算盘旋与扑翼后 z 取反，双面、关视锥剔除。gfx 不可用时闪灯退回常亮的 unlit 顶点色、海鸥不画。实机截图确认海鸥盘旋 |
 | ✅ | HDR 顶点色 | 远景 | 远景灯带用大于 1 的顶点色发光，Bloom 是否吃到待确认。已确认：顶点色以 Float32 存储不截断，PotLit/PotUnlit 乘顶点色不做 saturate，Bloom 吃到 HDR 值；`MeshData.colorSpace: 'linear'` 可直接传 three 的线性顶点色，跳过 sRGB 来回转换 |
-| ✅ | 批量变换同步 `scene.setTransforms` | 远景、机器狗 | 一次跨语言调用写一批实体，每个 10 个数（位置、四元数、缩放），可只写部分分量，可选世界或本地空间；传 `Int32Array` 的 id 时不产生分配。jimao 每只敌人每帧的同步从约 0.087 ms 降到约 0.015 ms（含蒙皮带来的部件减少）；远景动态网格只下发本帧变化的那几个 |
-| ⚠️ | 蒙皮网格 | 机器狗 | 已支持：`scene.mesh` 带 `boneIndices` / `boneWeights` / `bindPoses`，`spawn({ shape: 'mesh:x', bones })` 建成蒙皮网格；三平面贴图按静止姿态采样。机器狗每只的网格渲染器从约 30 个降到 4 个（[hound.ts](games/jimao/src/lib/hound.ts)）。剩余出入：每顶点多根骨骼的软权重只有单元测试，没在实机上验证过；蒙皮实体不能用运行时着色器（gfx），所以飞鸥仍是刚性分件；蒙皮实体没有碰撞体，命中体另挂在骨骼下 |
+| ✅ | 批量变换同步 `scene.setTransforms` | 远景、机器狗 | 一次跨语言调用写一批实体，每个 10 个数（位置、四元数、缩放），可只写部分分量，可选世界或本地空间；传 `Int32Array` 的 id 时不产生分配。saltline 每只敌人每帧的同步从约 0.087 ms 降到约 0.015 ms（含蒙皮带来的部件减少）；远景动态网格只下发本帧变化的那几个 |
+| ⚠️ | 蒙皮网格 | 机器狗 | 已支持：`scene.mesh` 带 `boneIndices` / `boneWeights` / `bindPoses`，`spawn({ shape: 'mesh:x', bones })` 建成蒙皮网格；三平面贴图按静止姿态采样。机器狗每只的网格渲染器从约 30 个降到 4 个（[hound.ts](games/saltline/src/lib/hound.ts)）。剩余出入：每顶点多根骨骼的软权重只有单元测试，没在实机上验证过；蒙皮实体不能用运行时着色器（gfx），所以飞鸥仍是刚性分件；蒙皮实体没有碰撞体，命中体另挂在骨骼下 |
 | ✅ | 只碰撞不渲染的实体 `visible: false` | 机器狗 | `spawn({ visible: false, collider: true })` 或 `entity.visible(false)`：只关渲染，碰撞体与子节点照常工作，运行时着色器那条绘制路径也跟着不画。机器狗头、身、腿三个命中体已改用，原来是画一层全黑的叠加材质 |
-| ✅ | 半透明材质双面 `MaterialOptions.cull` | 飞鸥 | `material({ cull })`，取值 back / front / none / default：Cull 是渲染状态，C# 按（模式, 剔除）各缓存一份共享材质变体，只传 cull 时沿用当前模式、换模式时沿用已设的 cull；PotLit 背面按翻转法线受光（`lit-twosided` 同样受益）。jimao 旋翼残影盘改回单片 `unlit-fade` + `cull: 'none'`（原来正反各建一片） |
-| ✅ | 点光源物理单位选项 | 远景 | `scene.light({ units: 'three', intensity, distance })`：强度按 three 物理单位（坎德拉 / 勒克斯）传，运行时按 1/π 换算，`entity.intensity()` 沿用同一单位；`distance` > 0 当作 range。jimao 原版点光源改为直接传原版数值，手写的 /π 删除 |
+| ✅ | 半透明材质双面 `MaterialOptions.cull` | 飞鸥 | `material({ cull })`，取值 back / front / none / default：Cull 是渲染状态，C# 按（模式, 剔除）各缓存一份共享材质变体，只传 cull 时沿用当前模式、换模式时沿用已设的 cull；PotLit 背面按翻转法线受光（`lit-twosided` 同样受益）。saltline 旋翼残影盘改回单片 `unlit-fade` + `cull: 'none'`（原来正反各建一片） |
+| ✅ | 点光源物理单位选项 | 远景 | `scene.light({ units: 'three', intensity, distance })`：强度按 three 物理单位（坎德拉 / 勒克斯）传，运行时按 1/π 换算，`entity.intensity()` 沿用同一单位；`distance` > 0 当作 range。saltline 原版点光源改为直接传原版数值，手写的 /π 删除 |
 | ✅ | Canvas 2D 绘制 `scene.canvas` | 初始、地面、弹孔 | 软件光栅（路径、渐变、描边、clip、evenodd、合成模式），文字由宿主 OS 字体栅格化；弹孔图集 1024×512×3 约 128 ms |
 | ✅ | 退化网格不建碰撞体 | 弹孔 | 动态池初始全零，原来 `mesh:` spawn 总挂 MeshCollider，PhysX 报错且每次更新重烘焙 |
-| ✅ | gfx 深度偏移 `polygonOffset` | 弹孔 | `shader(s, { polygonOffset: [factor, units] })`，语义同 three / glPolygonOffset（负数朝相机）；两个 int8 编码进 flags 高 16 位，D3D11 写进光栅化状态的 `SlopeScaledDepthBias` / `DepthBias`，GLES3 用 `glPolygonOffset`，reversed Z 平台由后端取反。`gfx.standard` 的 `polygonOffset*` 选项直通。jimao 弹孔与原版一致：法线外推错层 + `[-4, -4]` |
-| ✅ | 网格切线属性 `tangents` | 弹孔 | `scene.mesh` 的 `tangents`（每顶点 xyzw）原样写进 Unity 网格，自定义着色器的 `pot_Tangent`/`vTangent` 读到它；省略时仍按 UV 自动计算，参与 `key: true` 的内容哈希。jimao 弹孔按贴花朝向写切线，着色器改用 `vTangent`，删掉屏幕导数重建（实机验证集装箱、地面弹孔正常） |
-| ⚠️ | 粒子预设 `scene.burst` 只有 spark/smoke/glow | 水花 | 原版水柱、拉伸水珠、水平涟漪环、预乘混合都没有；jimao 自建粒子池（[fx.ts](games/jimao/src/lib/fx.ts)），每帧把粒子展开成四边形动态网格上传 |
-| ✅ | 普通 gfx 网格读场景深度 `pot_SceneDepth` | 水花 | 透明队列（`queue: 'transparent'`）绑定 URP 的 `_CameraDepthTexture`，`#include <pot/depth>` 提供 `pot_SceneUv`、`pot_SceneEyeDepth`、`pot_SoftFade`；不透明队列和无深度纹理时读到无限远。jimao 水花两个粒子池按原版软粒子公式淡出 |
-| ✅ | 顶点属性通道不足 | 水花 | 帧协议从 5 个属性扩到 16 个 location：0–4 内置（position/normal/uv/color/tangent），5–15 共 11 个给自定义与实例属性（网格自定义属性最多 7 个，占 UV1–7），每个 1 到 4 个 float，Float32 原样传。jimao 粒子改为 position + 角点 uv + `aAxis`/`aCol`/`aMisc` 三个 vec4，不再借用 normal 和 color，HDR 颜色不经 sRGB 转换，着色器里的逆变换删除 |
-| ✅ | 射线可附带无限平面 | 水花 | `scene.raycast(o, d, { planes })`：`{ y }` 或 `{ point, normal }`，可用 `region` 限定范围、`twoSided` 双面，与碰撞体命中一起取最近，平面命中带回 `plane` 与 `tag`。jimao 子弹射线改为传地坪（x≤30，y=0）与海面（码头外，y=-1.6，tag 'water'）两个平面，原来手写的求交删除 |
+| ✅ | gfx 深度偏移 `polygonOffset` | 弹孔 | `shader(s, { polygonOffset: [factor, units] })`，语义同 three / glPolygonOffset（负数朝相机）；两个 int8 编码进 flags 高 16 位，D3D11 写进光栅化状态的 `SlopeScaledDepthBias` / `DepthBias`，GLES3 用 `glPolygonOffset`，reversed Z 平台由后端取反。`gfx.standard` 的 `polygonOffset*` 选项直通。saltline 弹孔与原版一致：法线外推错层 + `[-4, -4]` |
+| ✅ | 网格切线属性 `tangents` | 弹孔 | `scene.mesh` 的 `tangents`（每顶点 xyzw）原样写进 Unity 网格，自定义着色器的 `pot_Tangent`/`vTangent` 读到它；省略时仍按 UV 自动计算，参与 `key: true` 的内容哈希。saltline 弹孔按贴花朝向写切线，着色器改用 `vTangent`，删掉屏幕导数重建（实机验证集装箱、地面弹孔正常） |
+| ⚠️ | 粒子预设 `scene.burst` 只有 spark/smoke/glow | 水花 | 原版水柱、拉伸水珠、水平涟漪环、预乘混合都没有；saltline 自建粒子池（[fx.ts](games/saltline/src/lib/fx.ts)），每帧把粒子展开成四边形动态网格上传 |
+| ✅ | 普通 gfx 网格读场景深度 `pot_SceneDepth` | 水花 | 透明队列（`queue: 'transparent'`）绑定 URP 的 `_CameraDepthTexture`，`#include <pot/depth>` 提供 `pot_SceneUv`、`pot_SceneEyeDepth`、`pot_SoftFade`；不透明队列和无深度纹理时读到无限远。saltline 水花两个粒子池按原版软粒子公式淡出 |
+| ✅ | 顶点属性通道不足 | 水花 | 帧协议从 5 个属性扩到 16 个 location：0–4 内置（position/normal/uv/color/tangent），5–15 共 11 个给自定义与实例属性（网格自定义属性最多 7 个，占 UV1–7），每个 1 到 4 个 float，Float32 原样传。saltline 粒子改为 position + 角点 uv + `aAxis`/`aCol`/`aMisc` 三个 vec4，不再借用 normal 和 color，HDR 颜色不经 sRGB 转换，着色器里的逆变换删除 |
+| ✅ | 射线可附带无限平面 | 水花 | `scene.raycast(o, d, { planes })`：`{ y }` 或 `{ point, normal }`，可用 `region` 限定范围、`twoSided` 双面，与碰撞体命中一起取最近，平面命中带回 `plane` 与 `tag`。saltline 子弹射线改为传地坪（x≤30，y=0）与海面（码头外，y=-1.6，tag 'water'）两个平面，原来手写的求交删除 |
 
 #### 物理与运行时
 
@@ -225,25 +225,25 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 |---|---|---|---|
 | ✅ | `physics.addBox` 接受 `{x,y,z}` | 穿墙 | 原来 557 个碰撞盒有 452 个是 NaN |
 | ✅ | 动态碰撞与 MeshCollider | 远景 | 中继、闸杆等会动的网格挡不住射线，大块静态网格只能用盒子近似。现在 `spawn({ collider: 'mesh' \| 'convex' \| 'box', dynamic: true })`：dynamic 挂运动学刚体，移动不触发静态碰撞体重建；mesh: 形状的碰撞体跟随 `scene.mesh` 更新重新烘焙，网格从退化变为有效时自动补上，`collider: false` 的网格不再烘焙；另加 `scene.sphereCast` 粗射线 |
-| ✅ | 固定步长 `fixedUpdate` | 穿墙 | `ctx.on('fixed-update', (step, fixedTime) => …)`：按 `clock.fixedStep`（默认 1/60 秒）切分游戏时间，在 `update` 前触发；低帧率一帧补多步（`maxFixedSteps` 默认 8，超出计入 `fixedDropped`），`fixedAlpha` 供渲染插值，暂停、冻结、`scale` 与 `update` 一致。jimao 的玩家移动仍用子步（移到固定步需要相机插值，留待实机验证后再改） |
-| ✅ | `state.define` 的 `validate` | 穿墙 | `define(key, { init, validate })`：对沿用下来的数据（读档、冷重启、热重载、migrate 结果）调用，返回 `false`/原因字符串或抛错时用 `init` 重新初始化并告警，尽量原地写回保持引用；可在函数里就地修正字段。jimao 的玩家位置校验已改用它（越界或非有限数回出生点） |
+| ✅ | 固定步长 `fixedUpdate` | 穿墙 | `ctx.on('fixed-update', (step, fixedTime) => …)`：按 `clock.fixedStep`（默认 1/60 秒）切分游戏时间，在 `update` 前触发；低帧率一帧补多步（`maxFixedSteps` 默认 8，超出计入 `fixedDropped`），`fixedAlpha` 供渲染插值，暂停、冻结、`scale` 与 `update` 一致。saltline 的玩家移动仍用子步（移到固定步需要相机插值，留待实机验证后再改） |
+| ✅ | `state.define` 的 `validate` | 穿墙 | `define(key, { init, validate })`：对沿用下来的数据（读档、冷重启、热重载、migrate 结果）调用，返回 `false`/原因字符串或抛错时用 `init` 重新初始化并告警，尽量原地写回保持引用；可在函数里就地修正字段。saltline 的玩家位置校验已改用它（越界或非有限数回出生点） |
 | ✅ | 跨热重载缓存网格 `scene.mesh(name, fn, { key })` | 远景 | key 相同时直接复用 Runner 里的网格，生成函数也不调用；`key: true` 由运行时按内容算哈希。同时着色器程序在源码没变时不再重新编译。world 单元热重载实测从约 6.3 秒降到 0.17 到 0.26 秒。更正原诊断：那 6 秒里网格重建只占约 1 秒，约 4.5 秒花在材质与着色器上 |
 | ✅ | Dev Server 不拒绝第二个 Runner | 性能排查 | 原来两个 Runner 连同一端口会互相顶替并反复重连，画面掉到约 4 fps。现在新连接到来时先 ping 旧 Runner：1.5 秒内有 pong 就以关闭码 4409 拒绝新连接，旧的不受影响，日志写明被拒设备，`pot status` 的 `rejected` 有计数；旧连接已失效则改用新连接。Runner 收到 4409 后停止自动重连，状态栏显示“Dev 被另一个 Runner 占用（F1 可接管）”；在 F1 面板手动点“连接”会带 `?takeover=1` 强制接管，被接管的一方同样停止重连 |
 | ✅ | 加载器支持 `export const a = 1, b = 2` | 水花、飞鸥 | sucrase 的 imports 转换会把它转成 `const a = 1; exports.a = a, b = 2`，后面的变量变成对未声明变量赋值。devtools 转译前先把顶层多变量 export 改写为“声明 + `export { a, b }`”（只把 `export` 换成等长空格并在同一行追加子句，行列号不变），支持 let/var、类型标注与泛型、跨行、解构、模板与正则字面量（[multi-export.ts](js/devtools/src/multi-export.ts)）；发布构建走 esbuild 本来就正确 |
-| ✅ | 启动加载进度与让帧 `ctx.loading` | 启动卡顿 | 启动是一长串同步 JS，窗口不刷新像卡死。单元 apply 可写成 async，在阶段间 `await ctx.loading.step('文字', 进度)`：回报进度给 Runner 外壳画加载界面（标题、进度条、阶段文字、已用秒数），本帧连续执行超过 50 ms 时让出一帧。没报进度的游戏也会显示"加载 单元名"和不确定进度条。jimao 启动期间窗口始终有响应 |
-| ✅ | 着色器编译缓存 | 启动卡顿 | 原生插件按（后端、编译器版本、vs、fs）哈希把反射信息与 DXBC 存到 `persistentDataPath/cache/shaders`，命中时跳过 glslang、SPIRV-Cross 和 D3DCompile。jimao 冷启动 9.8 秒（40 个程序全部编译），第二次打开 3.8 秒（命中 40/40）。启动日志打印耗时与命中数 |
-| ⚠️ | 关卡构建与转译缓存 | 启动卡顿 | 转译结果已按源码 64 位哈希缓存到 persistentDataPath/cache/js（条目带转译器版本与长度头部校验，14 天未用自动清理），jimao 第二次启动命中 35/35，3.31 秒降到 3.09 秒；关卡构建（约 1.3 秒）和网格上传仍每次执行，网格持久化未做 |
+| ✅ | 启动加载进度与让帧 `ctx.loading` | 启动卡顿 | 启动是一长串同步 JS，窗口不刷新像卡死。单元 apply 可写成 async，在阶段间 `await ctx.loading.step('文字', 进度)`：回报进度给 Runner 外壳画加载界面（标题、进度条、阶段文字、已用秒数），本帧连续执行超过 50 ms 时让出一帧。没报进度的游戏也会显示"加载 单元名"和不确定进度条。saltline 启动期间窗口始终有响应 |
+| ✅ | 着色器编译缓存 | 启动卡顿 | 原生插件按（后端、编译器版本、vs、fs）哈希把反射信息与 DXBC 存到 `persistentDataPath/cache/shaders`，命中时跳过 glslang、SPIRV-Cross 和 D3DCompile。saltline 冷启动 9.8 秒（40 个程序全部编译），第二次打开 3.8 秒（命中 40/40）。启动日志打印耗时与命中数 |
+| ⚠️ | 关卡构建与转译缓存 | 启动卡顿 | 转译结果已按源码 64 位哈希缓存到 persistentDataPath/cache/js（条目带转译器版本与长度头部校验，14 天未用自动清理），saltline 第二次启动命中 35/35，3.31 秒降到 3.09 秒；关卡构建（约 1.3 秒）和网格上传仍每次执行，网格持久化未做 |
 
 #### UI
 
 | 状态 | 能力 | 发现场景 | 说明 / 建议 |
 |---|---|---|---|
 | ✅ | 相机滚转 | 菜单 | `lookAt` 后改 `camera.rotation.z` 即可，无需新增 |
-| ✅ | 渐变 `gradient` | 菜单 | `ui.gradient(x, y, w, h, stops, { angle, radius, alpha })`，语义同 CSS linear-gradient（色标位置缺省补齐、预乘插值），角度限 90 的整数倍。宿主新增 `g` 命令，按（方向, 色标）缓存 256 像素 sRGB 渐变贴图，IMGUI 一次绘制并支持圆角；jimao 遮罩由约 180 个条带改为两层渐变，色值照抄原版 |
-| ✅ | 字距 `spacing` | 菜单 | `ui.text(…, { spacing })` 与 `ui.measure(text, size, bold, spacing)`，单位 em（同 CSS letter-spacing）：运行时逐字排版、缓存单字宽度，支持 align/valign、居中与右对齐补回末尾字距、wrap 断行；jimao 菜单手写的 `charW`/逐字绘制删除。实现在 JS 侧逐字提交，宿主 UI 不用改；字很多时提交条数随字数增长 |
+| ✅ | 渐变 `gradient` | 菜单 | `ui.gradient(x, y, w, h, stops, { angle, radius, alpha })`，语义同 CSS linear-gradient（色标位置缺省补齐、预乘插值），角度限 90 的整数倍。宿主新增 `g` 命令，按（方向, 色标）缓存 256 像素 sRGB 渐变贴图，IMGUI 一次绘制并支持圆角；saltline 遮罩由约 180 个条带改为两层渐变，色值照抄原版 |
+| ✅ | 字距 `spacing` | 菜单 | `ui.text(…, { spacing })` 与 `ui.measure(text, size, bold, spacing)`，单位 em（同 CSS letter-spacing）：运行时逐字排版、缓存单字宽度，支持 align/valign、居中与右对齐补回末尾字距、wrap 断行；saltline 菜单手写的 `charW`/逐字绘制删除。实现在 JS 侧逐字提交，宿主 UI 不用改；字很多时提交条数随字数增长 |
 | ✅ | 字重档位、等宽字体 | 菜单 | `ui.text` / `ui.measure` 支持 `weight`（100–900）与 `mono`：按 CSS 字重匹配规则在 Unity 能枚举到的系统字面中选，字面不够粗时合成粗体；菜单按原版用 900/600/500。Unity 在 Windows 上只能取到常规与粗体，所以实际是 500 常规、600/900 粗体，与 Chrome 在 Windows 雅黑下一致。内置字体发布包只有一个字面，≥600 为合成粗体 |
 | ✅ | `rgba()` 颜色 | 菜单 | scene、ui、uniform 的 Color 字符串与 Canvas 共用一份 CSS 解析（[color.ts](js/runtime/src/color.ts)）：#rgb/#rgba/#rrggbb/#rrggbbaa、`rgb()`/`rgba()`（逗号或空格加 `/ alpha`、百分比）、`hsl()`/`hsla()`（deg/turn/rad）、常用颜色名；原来写错会静默变成 NaN 黑色，现在抛“无法解析颜色”并指出分量 |
-| ✅ | 行/列布局辅助 | 菜单 | `ui.flow(x, y, { dir, gap, align })` 增量排布（`next(w, h)` 返回矩形并前移，适合边画边量），`ui.layout(sizes, box, { dir, gap, justify, align })` 已知尺寸时在容器内分布（start/center/end/between，交叉轴可 stretch）；只算矩形不绘制。jimao 菜单的按钮行与统计格改用 `ui.flow` |
+| ✅ | 行/列布局辅助 | 菜单 | `ui.flow(x, y, { dir, gap, align })` 增量排布（`next(w, h)` 返回矩形并前移，适合边画边量），`ui.layout(sizes, box, { dir, gap, justify, align })` 已知尺寸时在容器内分布（start/center/end/between，交叉轴可 stretch）；只算矩形不绘制。saltline 菜单的按钮行与统计格改用 `ui.flow` |
 
 ## 9. 资产即代码
 
@@ -251,7 +251,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 - 不适合生成的内容：角色动画、配音、音乐、写实贴图等，以压缩格式放进 `assets/` 或通过 CDN 按需下载。
 - 生成耗时：分帧生成，优先生成玩家附近的内容。生成结果缓存到本地（原始网格和贴图数据），第二次启动直接读缓存。
 - 发布时可选烘焙：在编辑器里用同一份脚本预先生成，产出普通 Unity 资源，交给引擎管线压缩和优化。一份代码两种用法。
-- 资产代码只依赖纯数学库：建模代码只产出顶点、法线、UV、顶点色和索引，不碰渲染器、DOM 和引擎对象。这样同一份代码可以在浏览器、Node 和 Runner 里运行，也能直接搬运现成的 Web 资产代码（例如 Three.js 的几何体与 BufferGeometryUtils，按源文件打成 vendor 放进游戏包）。坐标系与色彩空间的差异在出口统一转换一次，建模代码本身保持原样。jimao 的枪模就是这样从原版机械移植的，改动只有函数名。
+- 资产代码只依赖纯数学库：建模代码只产出顶点、法线、UV、顶点色和索引，不碰渲染器、DOM 和引擎对象。这样同一份代码可以在浏览器、Node 和 Runner 里运行，也能直接搬运现成的 Web 资产代码（例如 Three.js 的几何体与 BufferGeometryUtils，按源文件打成 vendor 放进游戏包）。坐标系与色彩空间的差异在出口统一转换一次，建模代码本身保持原样。saltline 的枪模就是这样从原版机械移植的，改动只有函数名。
 - 外观差距分三层：几何（可直接移植）、材质参数（颜色、粗糙度、金属度，可直接移植）、着色器补丁（原版的 onBeforeCompile，由游戏自带 GLSL 实现，见第 8 节）。
 
 ## 10. 开发闭环
@@ -389,7 +389,7 @@ HTTP：`GET /files/<相对 root 的路径>`，目录返回递归清单 `{files:[
 
 - JS：32 项用例（运行时、源码加载与共享模块、热重载事务与回滚、启动失败单元自动恢复、泄漏检查、Dev Server 转发与 `/files`）。
 - Unity：Win64 Runner 实测：`PotRunner.exe games/hello` 不开 Dev Server 直接运行并热重载；无参数 `pot dev` 后 Runner 自动连上，`pot open` 本地目录、`http://127.0.0.1:7788/files/games/hello/` 镜像（轮询热重载）、`.potg` 均可打开；启动时语法错误的单元修好后自动挂载；截图、eval 正常。
-- 发布：通用 `player/` 壳工程与 `pot release` 已实测 `games/jimao` 三平台构建；Win64 独立 exe 正常启动（启动日志显示从 Resources 加载，着色器缓存命中 37/37），Android 产出 ARM64 APK（真机未验证），WebGL 在浏览器正常进入游戏。WebGL 排查并修复了 Puerts 后端和碰撞体被 IL2CPP 裁剪的问题，以及无原生 gfx 后端时材质回退不完整的问题。
+- 发布：通用 `player/` 壳工程与 `pot release` 已实测 `games/saltline` 三平台构建；Win64 独立 exe 正常启动（启动日志显示从 Resources 加载，着色器缓存命中 37/37），Android 产出 ARM64 APK（真机未验证），WebGL 在浏览器正常进入游戏。WebGL 排查并修复了 Puerts 后端和碰撞体被 IL2CPP 裁剪的问题，以及无原生 gfx 后端时材质回退不完整的问题。
 - 运行时着色器（D3D11）：`PotRunner.exe games/shaders` 实测，水面（alpha）、全息球（add）、顶点变形方块（自定义 vert + frag）均正确绘制，与普通材质的柱子遮挡正确，方块正常投影；修改 `.frag` 后热重载生效，故意写错时浮层显示 `shaders/holo.frag:12` 的错误，画面保持旧程序。JS 用例增至 35 项。
 
 尚未实现：Android/iOS 真机验证、程序化网格与 uber 材质、物理、UI、音频、`record`/`replay`、多设备。

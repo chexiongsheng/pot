@@ -29,11 +29,11 @@ export function apply(ctx: Context) {
   const cam = ctx.scene.camera
   let lastStep = 0
 
-  on(ctx, 'jimao/reset', () => {
+  on(ctx, 'saltline/reset', () => {
     Object.assign(p, fresh())
   })
 
-  on(ctx, 'jimao/damage-player', (amount, from) => {
+  on(ctx, 'saltline/damage-player', (amount, from) => {
     const g = game(ctx)
     if (!g || g.phase !== 'playing' || p.health <= 0) return
     p.health = Math.max(0, p.health - amount)
@@ -147,8 +147,8 @@ export function apply(ctx: Context) {
       p.pos[1] = p.lastSafe[1]
       p.pos[2] = p.lastSafe[2]
       p.vel[0] = p.vel[1] = p.vel[2] = 0
-      emit(ctx, 'jimao/message', flow.rescued)
-      emit(ctx, 'jimao/damage-player', T.rescueDamage, null)
+      emit(ctx, 'saltline/message', flow.rescued)
+      emit(ctx, 'saltline/damage-player', T.rescueDamage, null)
     }
 
     // 生命回复

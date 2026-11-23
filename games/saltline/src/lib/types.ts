@@ -81,10 +81,10 @@ export interface WeaponState {
   spread: number
 }
 
-export const GAME = 'jimao/game'
-export const PLAYER = 'jimao/player'
-export const WEAPON = 'jimao/weapon'
-export const ENEMIES = 'jimao/enemies'
+export const GAME = 'saltline/game'
+export const PLAYER = 'saltline/player'
+export const WEAPON = 'saltline/weapon'
+export const ENEMIES = 'saltline/enemies'
 
 export const game = (ctx: Context) => ctx.state.get<GameState>(GAME)
 export const player = (ctx: Context) => ctx.state.get<PlayerState>(PLAYER)

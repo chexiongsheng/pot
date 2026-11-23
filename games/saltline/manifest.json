@@ -1,13 +1,13 @@
 {
-  "id": "pot.jimao",
-  "name": "几猫 · 港区突击",
+  "id": "pot.saltline",
+  "name": "Saltline",
   "version": "0.1.0",
   "apiVersion": "0.1",
   "plugins": ["game"],
   "icon": "icon.png",
   "release": {
     "company": "pot",
-    "packageId": "com.pot.jimao",
+    "packageId": "com.pot.saltline",
     "orientation": "landscape",
     "window": { "width": 1600, "height": 900 }
   }

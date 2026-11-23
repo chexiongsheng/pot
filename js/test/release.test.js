@@ -6,8 +6,8 @@ const path = require('path')
 const { resolveRelease, stageGame, toPackageId, toVersionCode, normalizePlatform } = require('../devserver/release')
 
 test('release：包名规范化', () => {
-  assert.equal(toPackageId('pot.jimao'), 'pot.jimao')
-  assert.equal(toPackageId('jimao'), 'com.pot.jimao')
+  assert.equal(toPackageId('pot.saltline'), 'pot.saltline')
+  assert.equal(toPackageId('saltline'), 'com.pot.saltline')
   assert.equal(toPackageId('Com.My-Game.3d'), 'com.my_game.g3d')
   assert.equal(toPackageId(''), 'com.pot.game')
 })
@@ -40,18 +40,18 @@ test('release：manifest → 出包配置', () => {
 
     fs.writeFileSync(path.join(dir, 'icon.png'), '')
     const full = resolveRelease({
-      id: 'pot.jimao', name: '几猫', version: '1.0.0',
-      release: { company: 'acme', packageId: 'com.acme.jimao', versionCode: 7, orientation: 'portrait',
-        window: { width: 800, height: 600, fullscreen: true, resizable: false }, fileName: 'JiMao' },
+      id: 'pot.saltline', name: 'Saltline', version: '1.0.0',
+      release: { company: 'acme', packageId: 'com.acme.saltline', versionCode: 7, orientation: 'portrait',
+        window: { width: 800, height: 600, fullscreen: true, resizable: false }, fileName: 'Saltline' },
     }, dir)
     assert.equal(full.iconFile, path.join(dir, 'icon.png'))
     assert.equal(full.config.icon, 'icon.png')
-    assert.equal(full.config.packageId, 'com.acme.jimao')
+    assert.equal(full.config.packageId, 'com.acme.saltline')
     assert.equal(full.config.versionCode, 7)
     assert.equal(full.config.orientation, 'portrait')
     assert.equal(full.config.fullscreen, true)
     assert.equal(full.config.resizable, false)
-    assert.equal(full.config.fileName, 'JiMao')
+    assert.equal(full.config.fileName, 'Saltline')
 
     assert.throws(() => resolveRelease({ id: 'x', icon: 'none.png' }, dir), /图标不存在/)
     fs.writeFileSync(path.join(dir, 'icon.bmp'), '')

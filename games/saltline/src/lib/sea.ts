@@ -48,13 +48,13 @@ const HORIZON_AWAY: [number, number, number] = [0.16, 0.22, 0.3]
 export function createSea(ctx: Context, detail: { detail: Texture; detailN: Texture }): boolean {
   const { scene, gfx } = ctx
   if (!gfx.supported) return false
-  scene.mesh('jimao/sea', seaMesh())
-  const shader = gfx.shader({ vertex: 'shaders/sea.vert', fragment: 'shaders/sea.frag', name: 'jimao/sea' })
+  scene.mesh('saltline/sea', seaMesh())
+  const shader = gfx.shader({ vertex: 'shaders/sea.vert', fragment: 'shaders/sea.frag', name: 'saltline/sea' })
   const uniforms: Record<string, any> = {
     uDetail: detail.detail, uDetailN: detail.detailN,
     uHazeA: HORIZON_AWAY.map(v => v * 0.85), uHazeB: HORIZON.map(v => v * 0.8),
   }
-  scene.spawn({ shape: 'mesh:jimao/sea', name: 'sea', position: [0, 0, 0], collider: false })
+  scene.spawn({ shape: 'mesh:saltline/sea', name: 'sea', position: [0, 0, 0], collider: false })
     .shader(shader, { uniforms, shadows: false })
   return true
 }

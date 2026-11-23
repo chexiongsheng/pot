@@ -355,7 +355,7 @@ export const LABELS = { model: [8, 8, 330, 84], maker: [8, 100, 560, 40], cal: [
 const C0 = [196 / 255, 198 / 255, 194 / 255, 0.92], RED = [205 / 255, 60 / 255, 40 / 255, 0.95]
 export const LABEL_TEXT = {
   model: { text: 'PAC-9', size: 78, color: C0, align: 'left' },
-  maker: { text: '几猫兵工厂 · 港区装备', size: 30, color: C0, align: 'left' },
+  maker: { text: 'LONGSHORE ARMS · SALTLINE', size: 30, color: C0, align: 'left' },
   cal: { text: 'CAL 5.8×40   SN PA-004217', size: 27, color: C0, align: 'left' },
   prop: { text: '港务局装备 · 四号泊位武器库', size: 28, color: C0, align: 'left' },
   safe: { text: 'S', size: 30, color: C0 },

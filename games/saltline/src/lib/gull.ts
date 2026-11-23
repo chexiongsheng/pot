@@ -220,7 +220,7 @@ export function buildGull(ctx, name: string, mats?: any) {
   const def = gullDef()
   let cone = null
   if (ctx.gfx?.supported) {
-    const sh = ctx.gfx.shader({ fragment: 'shaders/gullcone.frag', name: 'jimao/gull-cone' })
+    const sh = ctx.gfx.shader({ fragment: 'shaders/gullcone.frag', name: 'saltline/gull-cone' })
     if (sh.ok !== false) cone = sh
   }
   if (!registered.has(ctx)) {

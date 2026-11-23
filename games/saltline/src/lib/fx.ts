@@ -237,7 +237,7 @@ function createBatch(ctx: Context, name: string, cap: number, shader: unknown, b
   const P = new Float32Array(cap * 12), U = new Float32Array(cap * 8), A = new Float32Array(cap * 16), C = new Float32Array(cap * 16), M = new Float32Array(cap * 16)
   const I = new Uint32Array(cap * 6)
   for (let k = 0; k < cap; k++) { const c = k * 4; I.set([c, c + 1, c + 2, c, c + 2, c + 3], k * 6); for (let j = 0; j < 4; j++) U[(c + j) * 2] = j }
-  const mesh = `jimao/fx-${name}`
+  const mesh = `saltline/fx-${name}`
   // 初始一个不可见的非退化四边形（隐藏状态下不会绘制）
   scene.mesh(mesh, { positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1]), indices: new Uint32Array([0, 1, 2]) })
   const ent: Entity = scene.spawn({ shape: `mesh:${mesh}`, name: `fx_${name}`, position: [0, 0, 0], collider: false }).shader(shader as any, bind as any)
@@ -313,8 +313,8 @@ export function createFx(ctx: Context, opts: { mask?: number } = {}): Fx | undef
 
   const LIT_CAP = 1400, ADD_CAP = 3200 - 160
   const attributes = { aAxis: 'vec4', aCol: 'vec4', aMisc: 'vec4' } as const
-  const litShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_lit.frag', name: 'jimao/fx-lit', attributes })
-  const addShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_add.frag', name: 'jimao/fx-add', attributes })
+  const litShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_lit.frag', name: 'saltline/fx-lit', attributes })
+  const addShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_add.frag', name: 'saltline/fx-add', attributes })
   const common = { queue: 'transparent', cull: 'none', depthWrite: false, shadows: false, frustumCull: false }
   const r = createBatch(ctx, 'lit', LIT_CAP, litShader, {
     ...common, blend: 'premultiplied',

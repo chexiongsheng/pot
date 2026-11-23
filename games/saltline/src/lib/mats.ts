@@ -174,7 +174,7 @@ export function createMats(ctx: Context, quality: { tex?: number } = {}) {
   const program = (key: string, source: string) => {
     let name = programs.get(key)
     if (!name) {
-      const sh = gfx.shader({ fullscreen: true, fragmentSource: source, name: `jimao/${key}` })
+      const sh = gfx.shader({ fullscreen: true, fragmentSource: source, name: `saltline/${key}` })
       if (sh.error) throw new Error(`材质着色器 ${key} 编译失败`)
       name = sh.name
       programs.set(key, name)

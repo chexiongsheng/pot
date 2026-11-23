@@ -171,9 +171,9 @@ const CLIPS: Record<string, () => Float32Array> = {
 
 export function registerSfx(ctx: Context) {
   for (const name of Object.keys(CLIPS)) {
-    const id = `jimao.${name}`
+    const id = `saltline.${name}`
     if (!ctx.audio.has(id)) ctx.audio.clip(id, CLIPS[name](), RATE)
   }
 }
 
-export const sfx = (name: keyof typeof CLIPS) => `jimao.${name}`
+export const sfx = (name: keyof typeof CLIPS) => `saltline.${name}`

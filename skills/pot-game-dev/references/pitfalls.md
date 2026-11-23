@@ -14,7 +14,7 @@
 
 - `update` 的 dt 是真实帧间隔，窗口在后台时约 0.25 s（运行时钳到 0.1 s 仍可能跨墙）。自写的 AABB 移动若一帧位移超过"盒厚 + 2×半径"，就会跨过薄盒（空气墙、栏杆）。新代码把移动与碰撞放进 `ctx.on('fixed-update')`（固定 1/60 秒一步，低帧率一帧补多步）；已有代码可按子步推进（每步不超过半径），并加"出了可玩区域就拉回 lastSafe"的兜底。
 - 出界后看到的单层集装箱、薄墙通常是远景面片（只建了朝向关卡的一面），不是建模错误。
-- 存档会原样恢复坏位置：在 `state.define` 里给 `validate`（如“是否在区域内、坐标是否有限”），不通过会自动回到 `init`（见 jimao 的 `player.ts`），不要在 define 之后手写一遍修补。
+- 存档会原样恢复坏位置：在 `state.define` 里给 `validate`（如“是否在区域内、坐标是否有限”），不通过会自动回到 `init`（见 saltline 的 `player.ts`），不要在 define 之后手写一遍修补。
 - 移植的原版代码经常把 three 的 `Vector3` 传给期望数组的适配函数（`addBox(box.min, box.max)`），按下标取会得到 NaN，碰撞盒静默失效。适配层同时接受 `[x,y,z]` 和 `{x,y,z}`，并在启动时统计非有限值。
 
 ### 热重载后旧版本泄漏
@@ -33,17 +33,17 @@
 - 现象：报“不支持 require”或“找不到模块”。
 - 原因：Runner 只解析相对路径（自动补 `.ts`、`.js`、`.json`、`/index.ts`）和 `@pot/core`。
 - 做法：需要的算法自己写进 `src/lib/`。纯计算、无副作用的第三方库（如 Three.js 的几何与数学部分）可以用 esbuild 打成单个 CJS 文件放进 `src/vendor/`，配一个 `.d.ts`，按相对路径 import。打包时只从库的具体源文件导入，不要从主入口导入：主入口常带模块级副作用（three 的 `LoadingManager` 一加载就 `new AbortController`，Puerts 里没有这个全局对象，单元直接启动失败）。参考 `tools/vendor/build-three-geo.js`。
-- 来源：jimao 移植原版枪模。
+- 来源：saltline 移植原版枪模。
 
 ### 移植 Three.js 建模代码后模型镜像、全黑或颜色发灰
 - 原因：Three.js 是右手系、-Z 为前；Unity 是左手系、+Z 为前。原版颜色都是线性值，Runner 的颜色按 sRGB 传入。
 - 做法：建模代码保持原版坐标与数值不动（只改名），最后统一用 `geo.ts` 的 `toMesh()` 转换：Z 取反、三角形绕序反转、顶点色转 sRGB（可大于 1，作亮度倍数；新写的转换可以不转，直接给 `colorSpace: 'linear'`）。材质颜色用 `linearColor()` 转，`smoothness = 1 - roughness`。原版位置 `[x, y, z]` 在 Runner 里是 `[x, y, -z]`，绕 X、Y 轴的旋转取反。
-- 来源：jimao 移植原版枪模。
+- 来源：saltline 移植原版枪模。
 
 ### 枪模大小、位置和原版对不上
 - 原因：原版用独立相机渲染枪模（固定 54° 视角），Runner 只有一个主相机，视角随设置、瞄准、冲刺变化。
 - 做法：枪模挂在一个相机子节点下，每帧把它的缩放设为 `[k, k, 1]`，`k = tan(fov/2) / tan(54°/2)`，屏幕投影与原版一致；近裁面降到 0.02。
-- 来源：jimao 移植原版枪模。
+- 来源：saltline 移植原版枪模。
 
 ### state set 之后插件行为没变
 - 原因：`state set` 整体替换对象，插件闭包里 `define` 拿到的还是旧对象。
@@ -64,7 +64,7 @@
 ### 写实画面偏灰、偏暗或过曝
 - 原因：Runner 是 Linear + HDR，sRGB 0.085 只相当于线性 0.0076；后处理曝光、雾色、环境光三者叠加很敏感。
 - 做法：先关雾和后处理确认基础受光，再逐项加；雾色用暖灰而不是中性灰；改曝光每次 ±0.2 以内，顺光、逆光各截一张对比。
-- 来源：jimao 写实化迭代。
+- 来源：saltline 写实化迭代。
 
 ### 贴图材质发白或像镜子
 - 原因：mask 的金属度、光滑度会和 `metallic`/`smoothness` 相乘；不传 mask 时按参数原值，参数为 1 就是镜面。平整的盒子顶面在掠射角会反射整片天空。
@@ -113,7 +113,7 @@
 - 时间累积（自动曝光、TAA）用 `history: true` 目标，首帧读到透明黑，着色器里把 `prev <= 0` 当作首帧直接取当前值，否则开局会从全黑慢慢亮起来。
 - 深度、世界坐标用 `<pot/post>` 的 `pot_WorldPos`、`pot_IsSky`，不要照搬原版的 `cameraNear/Far` 线性化：Unity 是 reversed Z，且远平面不同。
 - 原版的方向向量（太阳、闪电方向）是 three 坐标，传进来要把 z 取反；太阳屏幕位置用 `pot_WorldToUv(camPos + pot_SunDir * 500)`，z（w）< 0 时在相机后方，要关掉眩光。
-- 链生效时 URP 后处理被关闭，`scene.post` 里的 SSAO、景深、tonemap 全部失效；退路是先查 `ctx.gfx.supported` 和每个着色器的 `ok`，`gfx.post` 出错会抛异常，捕获后再走 `scene.post`（见 jimao 的 `lib/post.ts`）。
+- 链生效时 URP 后处理被关闭，`scene.post` 里的 SSAO、景深、tonemap 全部失效；退路是先查 `ctx.gfx.supported` 和每个着色器的 `ok`，`gfx.post` 出错会抛异常，捕获后再走 `scene.post`（见 saltline 的 `lib/post.ts`）。
 - 热重载中途报 `xxx is not defined`（新加了 import 的模块）多半是编辑过程中保存的中间版本，已自动回滚；以最后一次重载或冷启动的日志为准。
 
 ### 移植原版自定义材质补丁（onBeforeCompile）
@@ -178,19 +178,19 @@
 
 ## 自建粒子：把实例数据塞进普通顶点属性
 
-粒子、广告牌这类每顶点要带很多数据的效果，用 `scene.mesh` 的 `attributes` 加 `gfx.shader` 的 `attributes` 声明自定义顶点属性（最多 7 个 vec4，Float32 原样传），不要再把数据塞进 normal/uv/color：color 的 rgb 会被逐分量 sRGB→线性，HDR 颜色要放进自定义属性。参考 `games/jimao/src/lib/fx.ts` 与 `data/shaders/fx.vert`（aAxis、aCol、aMisc）。
+粒子、广告牌这类每顶点要带很多数据的效果，用 `scene.mesh` 的 `attributes` 加 `gfx.shader` 的 `attributes` 声明自定义顶点属性（最多 7 个 vec4，Float32 原样传），不要再把数据塞进 normal/uv/color：color 的 rgb 会被逐分量 sRGB→线性，HDR 颜色要放进自定义属性。参考 `games/saltline/src/lib/fx.ts` 与 `data/shaders/fx.vert`（aAxis、aCol、aMisc）。
 
 ## 射线打地面"未命中"
 
-地坪若用 `collider: false` 的大平面（如 jimao 的 apron），`scene.raycast` 打不到地面。给射线传 `planes`，例如 `scene.raycast(o, d, { planes: [{ y: 0, region: { maxX: 30 }, tag: 'ground' }, { y: -1.6, region: { minX: 30 }, tag: 'water' }] })`，与碰撞体命中一起取最近，平面命中带回 `tag`（见 jimao 的 `weapon.ts`）。
+地坪若用 `collider: false` 的大平面（如 saltline 的 apron），`scene.raycast` 打不到地面。给射线传 `planes`，例如 `scene.raycast(o, d, { planes: [{ y: 0, region: { maxX: 30 }, tag: 'ground' }, { y: -1.6, region: { minX: 30 }, tag: 'water' }] })`，与碰撞体命中一起取最近，平面命中带回 `tag`（见 saltline 的 `weapon.ts`）。
 
 ## 积水算了涟漪法线，倒影却纹丝不动
 
-`pot_Lit` 只按法线把倒影采样点平移约 0.05·距离，细小涟漪几乎看不出。要让倒影晃动，给 `s.planarOffset` 赋屏幕 uv 偏移（原版 three 的 RR 做法：法线投到视线前方/侧方，乘 `(积水 + 0.03)/(1 + 距离·0.07)`，钳到 ±0.12）。参考 `games/jimao/data/shaders/apron.frag`。
+`pot_Lit` 只按法线把倒影采样点平移约 0.05·距离，细小涟漪几乎看不出。要让倒影晃动，给 `s.planarOffset` 赋屏幕 uv 偏移（原版 three 的 RR 做法：法线投到视线前方/侧方，乘 `(积水 + 0.03)/(1 + 距离·0.07)`，钳到 ±0.12）。参考 `games/saltline/data/shaders/apron.frag`。
 
 ## 刚性多足角色传送后腿被拉直、身体悬空
 
-步态记录的是落脚点的世界坐标，实体被直接改位置（出生、复活、存档恢复、调试传送）后脚还停在旧处，IK 把腿拉到极限。每帧检查脚与机身标准落点的水平距离，超过一步长（jimao 猎犬取 1.2 m）就整体重置落脚点并清步态相位。参考 `games/jimao/src/lib/hound.ts`。
+步态记录的是落脚点的世界坐标，实体被直接改位置（出生、复活、存档恢复、调试传送）后脚还停在旧处，IK 把腿拉到极限。每帧检查脚与机身标准落点的水平距离，超过一步长（saltline 猎犬取 1.2 m）就整体重置落脚点并清步态相位。参考 `games/saltline/src/lib/hound.ts`。
 
 ## 四足/车式移动横着走、倒着走
 
@@ -208,19 +208,19 @@
 
 ## 热重载一次要好几秒
 
-单元每次热重载都会重新执行，里面的 `scene.mesh` 会把网格重新生成并上传一遍。大网格这样写：`scene.mesh(name, () => toMesh(geo), { key })`。key 相同时 Runner 直接复用已有网格，生成函数不会被调用。key 要随内容变化：建模代码放在 `src/lib/*.ts` 里，在模块顶层取一个随机戳（jimao 的 `moduleStamp()`），共享模块只有自己或依赖改动时才重新执行，所以戳正好在"建模代码没动"的热重载之间保持不变。着色器不用处理，源码没变 Runner 不会重编。jimao 的 world 单元由此从约 6.3 秒降到约 0.2 秒。
+单元每次热重载都会重新执行，里面的 `scene.mesh` 会把网格重新生成并上传一遍。大网格这样写：`scene.mesh(name, () => toMesh(geo), { key })`。key 相同时 Runner 直接复用已有网格，生成函数不会被调用。key 要随内容变化：建模代码放在 `src/lib/*.ts` 里，在模块顶层取一个随机戳（saltline 的 `moduleStamp()`），共享模块只有自己或依赖改动时才重新执行，所以戳正好在"建模代码没动"的热重载之间保持不变。着色器不用处理，源码没变 Runner 不会重编。saltline 的 world 单元由此从约 6.3 秒降到约 0.2 秒。
 
 ## 多部件角色每帧同步变换很慢、渲染器很多
 
-刚性分件的角色（机器狗）不要每个"骨骼 × 材质"建一个网格实体再逐个设变换。做法：每种材质合成一个带 `boneIndices` 的网格（jimao 的 `skinMesh()`），`spawn({ shape, bones })` 建成蒙皮网格；每帧把所有骨骼的世界变换写进一个 `Float32Array`，调一次 `scene.setTransforms(ids, data)`。注意：
+刚性分件的角色（机器狗）不要每个"骨骼 × 材质"建一个网格实体再逐个设变换。做法：每种材质合成一个带 `boneIndices` 的网格（saltline 的 `skinMesh()`），`spawn({ shape, bones })` 建成蒙皮网格；每帧把所有骨骼的世界变换写进一个 `Float32Array`，调一次 `scene.setTransforms(ids, data)`。注意：
 - `bones` 的顺序就是 `boneIndices` 里的下标；不给 `bindPoses` 时顶点必须已经在各自骨骼的局部空间里（three 里挂在骨骼下的几何体经 `toMesh` 后正好满足）。
 - 蒙皮实体不能用运行时着色器（`entity.shader` 会抛错），这类部件保持刚性分件，挂在骨骼实体下。
 - 蒙皮实体没有碰撞体。命中体用 `spawn({ visible: false, collider: true, parent: 骨骼 })`，不要再用"全黑叠加材质"假装隐藏，那样仍然会被绘制。
-- `setTransforms` 的四元数是 Unity 坐标系：three 的世界矩阵先做 `S·M·S`（S 为 z 取反）再 decompose，分量可直接使用（jimao 的 `writeUnityTRS()`）。
+- `setTransforms` 的四元数是 Unity 坐标系：three 的世界矩阵先做 `S·M·S`（S 为 z 取反）再 decompose，分量可直接使用（saltline 的 `writeUnityTRS()`）。
 
 ## 启动很慢、窗口像卡死
 
 启动时所有单元的 apply 在一次同步调用里跑完，期间窗口不刷新。做法：把重的单元写成 `async apply`，阶段之间 `await ctx.loading.step('阶段', 进度)`；大循环用 `for` 并在循环体里 step（不要用 `forEach`，回调里不能 await）。父单元按顺序 `await ctx.use('子单元')`。注意：
 - 在 await 之后注册的 `ctx.on('update')`、`ctx.effect` 照常生效，`update` 用到的变量在 await 前后都可访问。
-- 其他单元在启动期间读 `ctx.state` 时，被 await 中的单元可能还没 define 好，读时要判空（jimao 的 `game(ctx)?.`）。
-- 运行时着色器的编译结果缓存在 `persistentDataPath/cache/shaders`（按后端、编译器版本和源码哈希），第二次打开不再编译。怀疑缓存有问题时删掉这个目录即可；启动日志 `[pot] 游戏已启动（X 秒，着色器缓存命中 a/b）` 可以看命中情况。jimao 由此从 9.8 秒降到 3.8 秒。
+- 其他单元在启动期间读 `ctx.state` 时，被 await 中的单元可能还没 define 好，读时要判空（saltline 的 `game(ctx)?.`）。
+- 运行时着色器的编译结果缓存在 `persistentDataPath/cache/shaders`（按后端、编译器版本和源码哈希），第二次打开不再编译。怀疑缓存有问题时删掉这个目录即可；启动日志 `[pot] 游戏已启动（X 秒，着色器缓存命中 a/b）` 可以看命中情况。saltline 由此从 9.8 秒降到 3.8 秒。

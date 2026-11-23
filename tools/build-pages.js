@@ -4,7 +4,7 @@
  *   <out>/index.html        游戏列表首页
  *   <out>/<游戏目录名>/      各游戏的 WebGL 产物（入口 index.html）
  *
- * 用法：node tools/build-pages.js [--out site] [--unity Unity.exe] [--games hello,jimao]
+ * 用法：node tools/build-pages.js [--out site] [--unity Unity.exe] [--games hello,saltline]
  *
  * 依次构建（同一个 player 工程不能并行出包）。单个游戏失败不中断，失败项在首页标注；
  * 全部失败时退出码为 1。在 GitHub Actions 中会输出 ::error:: 注解和 Step Summary。

@@ -62,8 +62,8 @@ const SL: Record<string, { mat: string; uv: 'mesh' | 'world' | 'object'; tint: b
 }
 
 const DECALS: Record<string, { text: string; width: number; height: number; size: number; color: string; letterSpacing?: number }> = {
-  logo: { text: 'C-几猫物流', width: 512, height: 128, size: 84, color: '#f2f0ea', letterSpacing: 4 },
-  code: { text: 'JMLU 204817 3', width: 512, height: 144, size: 64, color: '#f2f0ea', letterSpacing: 6 },
+  logo: { text: 'SALTLINE', width: 512, height: 128, size: 84, color: '#f2f0ea', letterSpacing: 4 },
+  code: { text: 'SLTU 482915 7', width: 512, height: 144, size: 64, color: '#f2f0ea', letterSpacing: 6 },
   lane2: { text: '二号通道', width: 512, height: 152, size: 104, color: '#151515', letterSpacing: 8 },
   lane3: { text: '三号通道', width: 512, height: 152, size: 104, color: '#151515', letterSpacing: 8 },
 }
@@ -240,7 +240,7 @@ export async function apply(ctx: Context) {
   const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
   // 闪灯与海鸥的顶点动画（原版 onBeforeCompile 注入）用 ctx.gfx 自定义着色器 + 自定义顶点属性实现
   const lampShader = ctx.gfx.supported
-    ? ctx.gfx.shader({ vertex: 'shaders/lamp.vert', fragment: 'shaders/lamp.frag', name: 'jimao/lamp', attributes: { blink: 'vec3', aLamp: 'vec3' } })
+    ? ctx.gfx.shader({ vertex: 'shaders/lamp.vert', fragment: 'shaders/lamp.frag', name: 'saltline/lamp', attributes: { blink: 'vec3', aLamp: 'vec3' } })
     : undefined
   for (let k = 0; k < orig.dynamics.length; k++) {
     const d = orig.dynamics[k]
@@ -264,9 +264,9 @@ export async function apply(ctx: Context) {
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
   }
   if (ctx.gfx.supported) {
-    scene.mesh('jimao/gulls', () => gullMesh(), meshKey)
-    const gullShader = ctx.gfx.shader({ vertex: 'shaders/gull.vert', fragment: 'shaders/gull.frag', name: 'jimao/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
-    scene.spawn({ shape: 'mesh:jimao/gulls', name: 'gulls', position: [0, 0, 0], collider: false })
+    scene.mesh('saltline/gulls', () => gullMesh(), meshKey)
+    const gullShader = ctx.gfx.shader({ vertex: 'shaders/gull.vert', fragment: 'shaders/gull.frag', name: 'saltline/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
+    scene.spawn({ shape: 'mesh:saltline/gulls', name: 'gulls', position: [0, 0, 0], collider: false })
       .shader(gullShader, { cull: 'none', frustumCull: false, shadows: false, sceneDepth: false, uniforms: { uColor: [0.2, 0.21, 0.23] } })
   }
   await step('布置灯光', 0.67)
@@ -317,7 +317,7 @@ export async function apply(ctx: Context) {
   await step('编译后处理', 0.7)
   const post = createPost(ctx, { exposure: look.postExposure ?? 1, sunColor: look.sky.sun })
   if (!post) scene.post(look.post)
-  on(ctx, 'jimao/post', (values) => post?.set(values))
+  on(ctx, 'saltline/post', (values) => post?.set(values))
 
   // 原版只有太阳与上面 origLights 里的点光（不投影）；灯杆 light_mast 只是模型，不生成灯
 
@@ -377,7 +377,7 @@ export async function apply(ctx: Context) {
     post?.set({ uFlashDir: [d[0] / l, d[1] / l, -d[2] / l] })
     pendingSounds.push({ at: t + 0.5 + (1 - intensity) * 2 + thunderRand() * 0.6, near: intensity > 0.6, gain: 0.35 + 0.65 * intensity })
   }
-  ;(ctx as any).on('jimao/thunder', (i: number) => strike(i ?? 0.8))
+  ;(ctx as any).on('saltline/thunder', (i: number) => strike(i ?? 0.8))
   const updateThunder = (dt: number, paused: boolean) => {
     if (!paused) {
       thunderNext -= dt

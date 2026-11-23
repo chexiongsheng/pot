@@ -123,7 +123,7 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   const detail = tex(det), detailN = tex(nrm)
   ctx.logger('apron').info('遮罩 %d² %dms，细节 %d² %dms', maskRes, t1 - t0, detailRes, Date.now() - t1)
 
-  const shader = gfx.shader({ fragment: 'shaders/apron.frag', name: 'jimao/apron' })
+  const shader = gfx.shader({ fragment: 'shaders/apron.frag', name: 'saltline/apron' })
   const uniforms: Record<string, any> = {
     uRain: 0.6, uWetG: 1, uMaskRes: maskRes,
     uMask: mask, uDetail: detail, uDetailN: detailN,

@@ -75,9 +75,9 @@ export function apply(ctx: Context) {
   const rand = Math.random
   // ---- 弹孔贴花（原版 Hb 图集 + j1 池）与粒子（原版 Bb/Ob + Rf + Ev：水花等） ----
   const decals = createDecals(ctx)
-  if (decals) ctx.logger('jimao').info(`弹孔图集绘制 ${decals.atlasMs} ms`)
+  if (decals) ctx.logger('saltline').info(`弹孔图集绘制 ${decals.atlasMs} ms`)
   const fx = createFx(ctx, { mask: 1 << LEVEL_LAYER })
-  if (fx) ctx.logger('jimao').info(`粒子图集生成 ${fx.atlasMs} ms`)
+  if (fx) ctx.logger('saltline').info(`粒子图集生成 ${fx.atlasMs} ms`)
   const interior = origLevel().data?.interiorBoxes ?? []
   /** 原版 physics.raycast：碰撞体之外，射线还与地面 y=0（x≤30）或海面 y=-1.6（码头外，记为水面）求交 */
   type Hit = { id: number; point: Vec3; normal: Vec3; distance: number; surface?: string }
@@ -113,9 +113,9 @@ export function apply(ctx: Context) {
     const dk = decals && decalFor(surface)
     if (dk) decals!.add(point, n, dk[0], dk[1], dk[2], dk[3])
   }
-  // 调试：ctx.emit('jimao/debug') 沿视线做一次与开枪相同的检测与命中特效；给坐标时直接在该点放水花。日志报告表面与池数量
-  on(ctx, 'jimao/debug', (at?: Vec3) => {
-    const log = ctx.logger('jimao')
+  // 调试：ctx.emit('saltline/debug') 沿视线做一次与开枪相同的检测与命中特效；给坐标时直接在该点放水花。日志报告表面与池数量
+  on(ctx, 'saltline/debug', (at?: Vec3) => {
+    const log = ctx.logger('saltline')
     if (at) { fx?.splash(at, 1); log.info(`调试水花 ${at.join(',')} 积水 ${isPuddle(at[0], -at[2], interior)} 粒子 ${JSON.stringify(fx?.stats())}`); return }
     const p = player(ctx)
     if (!p) return
@@ -148,7 +148,7 @@ export function apply(ctx: Context) {
     scene.spawn({ shape: `mesh:${mesh}`, name: 'gun', parent, color: m.color, material: m.material, collider: false, layer: VIEW_LAYER, active })
   // 原版枪身材质（MeshStandardMaterial + Bf 补丁原文，three 方言编译）；平台没有运行时着色器时退回内置材质
   const orig = ctx.gfx.supported ? createPac9Materials(ctx) : undefined
-  if (!orig) ctx.logger('jimao').warn('枪模原版材质不可用（运行时着色器不支持或编译失败），使用内置材质近似')
+  if (!orig) ctx.logger('saltline').warn('枪模原版材质不可用（运行时着色器不支持或编译失败），使用内置材质近似')
   const wetParts: Entity[] = []
   const part = (key: string, parent: Entity, m: { color: Vec3; material: MaterialOptions }, three?: StandardMaterial) => {
     const e = meshPart(`pac9-${key}`, parent, m)
@@ -211,7 +211,7 @@ export function apply(ctx: Context) {
   // 原版 N_：程序化枪口火焰（星芒、侧焰、横向喷流、核心光、枪管余热）。不支持运行时着色器的平台不画火焰，只留火光
   let flash: Entity | null = null
   if (ctx.gfx?.supported) {
-    const sh = ctx.gfx.shader({ fragment: 'shaders/muzzle.frag', name: 'jimao/muzzle' })
+    const sh = ctx.gfx.shader({ fragment: 'shaders/muzzle.frag', name: 'saltline/muzzle' })
     if (sh.ok !== false) {
       scene.mesh('muzzle-flash', muzzleFlashMesh)
       flash = scene.spawn({ shape: 'mesh:muzzle-flash', name: 'flash', parent: muzzle, collider: false, layer: VIEW_LAYER, active: false })
@@ -235,7 +235,7 @@ export function apply(ctx: Context) {
   round.active(!boltLocked)
   const tp = new Vector3(), tq = new Quaternion(), tz = new Quaternion(), tm = new Vector3()
 
-  on(ctx, 'jimao/reset', (keep) => {
+  on(ctx, 'saltline/reset', (keep) => {
     const m = w.mag, r = w.reserve
     Object.assign(w, fresh())
     if (keep) { w.mag = Math.max(m, W.mag); w.reserve = Math.max(r, W.reserve) }
@@ -275,16 +275,16 @@ export function apply(ctx: Context) {
     boltT = 0
     if (w.mag <= 0) { boltLocked = true; round.active(false) }
     ctx.audio.play(sfx('shot'), { volume: 0.75, pitch: 0.95 + rand() * 0.1 })
-    emit(ctx, 'jimao/shot', origin)
+    emit(ctx, 'saltline/shot', origin)
 
     const hit = bulletRay(origin, dir)
     const end: Vec3 = hit ? hit.point : [origin[0] + dir[0] * W.range, origin[1] + dir[1] * W.range, origin[2] + dir[2] * W.range]
     if (hit) {
       const info: BulletHit = { id: hit.id, point: hit.point, damage: W.damage, enemy: false, killed: false, weak: false }
-      emit(ctx, 'jimao/bullet', info)
+      emit(ctx, 'saltline/bullet', info)
       if (info.enemy) {
         g.stats.hits++
-        emit(ctx, 'jimao/hitmarker', info.killed, info.weak)
+        emit(ctx, 'saltline/hitmarker', info.killed, info.weak)
         ctx.audio.play(sfx(info.killed ? 'kill' : 'hit'), { volume: 0.5, pitch: info.weak ? 1.25 : 1 })
       }
       const n = hit.normal

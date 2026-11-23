@@ -119,7 +119,7 @@ const world = levelCollision(level, 'enemy')
 
   for (const e of s.list) model(e)
 
-  on(ctx, 'jimao/spawn', (type, pos, pursuit) => {
+  on(ctx, 'saltline/spawn', (type, pos, pursuit) => {
     const T = tuning[type]
     const p = player(ctx)
     const e: Enemy = {
@@ -136,14 +136,14 @@ const world = levelCollision(level, 'enemy')
     sync(e)
   })
 
-  on(ctx, 'jimao/clear-enemies', () => {
+  on(ctx, 'saltline/clear-enemies', () => {
     for (const e of [...s.list]) remove(e)
     s.bolts.length = 0
     s.booms.length = 0
     s.tokenGap = 0
   })
 
-  on(ctx, 'jimao/shot', (pos) => {
+  on(ctx, 'saltline/shot', (pos) => {
     for (const e of s.list) {
       if (e.mode === 'dying' || e.mode === 'combat') continue
       if (dist(e.pos, pos) < E.hearRadius) {
@@ -154,7 +154,7 @@ const world = levelCollision(level, 'enemy')
     }
   })
 
-  on(ctx, 'jimao/bullet', (hit) => {
+  on(ctx, 'saltline/bullet', (hit) => {
     const owner = partOwner.get(hit.id)
     if (!owner) return
     const e = s.list.find((x) => x.id === owner.id)
@@ -186,7 +186,7 @@ const world = levelCollision(level, 'enemy')
     e.mode = 'combat'
     e.lastKnown = [...at]
     e.lost = 0
-    if (was === 'patrol' || was === 'search') emit(ctx, 'jimao/alert', [...e.pos])
+    if (was === 'patrol' || was === 'search') emit(ctx, 'saltline/alert', [...e.pos])
   }
 
   function releaseToken(e: Enemy) {
@@ -219,7 +219,7 @@ const world = levelCollision(level, 'enemy')
       e.vel[0] *= 0.3; e.vel[2] *= 0.3
       for (const x of h.hits) x.active(false)
     }
-    emit(ctx, 'jimao/kill', e.type, weak, [...e.pos])
+    emit(ctx, 'saltline/kill', e.type, weak, [...e.pos])
   }
 
   function explode(pos: Vec3, damage: number, radius: number) {
@@ -228,7 +228,7 @@ const world = levelCollision(level, 'enemy')
     const p = player(ctx)
     if (!p || damage <= 0) return
     const d = dist(chestOf(p), pos)
-    if (d < radius) emit(ctx, 'jimao/damage-player', Math.round(damage * (1 - (d / radius) * 0.5)), pos)
+    if (d < radius) emit(ctx, 'saltline/damage-player', Math.round(damage * (1 - (d / radius) * 0.5)), pos)
     if (d < radius * 4) p.shake = Math.min(1, p.shake + (1 - d / (radius * 4)) * 0.6)
   }
 
@@ -598,7 +598,7 @@ const world = levelCollision(level, 'enemy')
           e.lunge -= dt
           if (dist2d(e.pos, p.pos) < 1.2 && Math.abs(e.pos[1] - p.pos[1]) < 1.5) {
             e.lunge = 0
-            emit(ctx, 'jimao/damage-player', T.lungeDamage, [...e.pos])
+            emit(ctx, 'saltline/damage-player', T.lungeDamage, [...e.pos])
             e.vel[0] *= -0.3; e.vel[2] *= -0.3
           }
         } else {
@@ -641,7 +641,7 @@ const world = levelCollision(level, 'enemy')
       b.life -= dt
       let dead = b.life <= 0
       if (!dead && fighting && p.health > 0 && (segmentDistance(chest, prev, b.pos) < 0.45 || segmentDistance(eye, prev, b.pos) < 0.3)) {
-        emit(ctx, 'jimao/damage-player', b.damage, prev)
+        emit(ctx, 'saltline/damage-player', b.damage, prev)
         dead = true
       }
       if (!dead) {

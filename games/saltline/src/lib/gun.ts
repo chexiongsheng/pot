@@ -1,13 +1,13 @@
 // @ts-nocheck
 /**
- * PAC9 几猫九式突击步枪枪模：机械移植自原版 HTML（mi 常量、w_ 构建函数），只改了函数名，数值一字未动。
+ * PAC-9 Longshore 突击步枪枪模：机械移植自原版 HTML（mi 常量、w_ 构建函数），只改了函数名，数值一字未动。
  * 坐标为原版 Three.js 约定（-Z 为前，单位米）；用 geo.toMesh() 转换后交给 scene.mesh。
  * 返回 7 组几何：ano 阳极氧化铝、gun 磷化钢、poly 聚合物、plain 哑光件、bolt 枪机、mag 弹匣（相对 magPos）、round 弹匣顶弹（相对 magPos）。
  */
 import { box, extrudeX, extrudeZ, lathe, merge, octRect, pin, slot, tint, tube } from './geo'
 
 export const PAC9 = {
-  name: '几猫九式突击步枪', muzzle: [0, 0, -0.531], eject: [0.023, 0.004, -0.028], sightY: 0.069, lensF: 0.0285,
+  name: 'PAC-9 Longshore', muzzle: [0, 0, -0.531], eject: [0.023, 0.004, -0.028], sightY: 0.069, lensF: 0.0285,
   window: [[-0.016, 0.057], [0.016, 0.057], [0.016, 0.0772], [0.0122, 0.081], [-0.0122, 0.081], [-0.016, 0.0772]],
   magPos: [0, -0.02, -0.0665], boltTravel: 0.062, railTop: 0.0435, grip: [0, -0.1, 0.073], handguard: [0, 0, -0.255],
   handguardR: 0.021, handlePos: [-0.026, 0.007, -0.078], squeeze: 0.86,

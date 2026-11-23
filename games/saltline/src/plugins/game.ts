@@ -75,8 +75,8 @@ export async function apply(ctx: Context) {
   }
 
   function deploy(keep: boolean) {
-    emit(ctx, 'jimao/clear-enemies')
-    emit(ctx, 'jimao/reset', keep)
+    emit(ctx, 'saltline/clear-enemies')
+    emit(ctx, 'saltline/reset', keep)
     g.pending.length = 0
     g.interact = -1
     g.progress = 0
@@ -89,7 +89,7 @@ export async function apply(ctx: Context) {
     if (cut > 0 && cut < relayCount) queue(flow.waves[cut - 1], false)
   }
 
-  on(ctx, 'jimao/command', (cmd) => {
+  on(ctx, 'saltline/command', (cmd) => {
     ctx.audio.play(sfx('ui'), { volume: 0.5 })
     g.panel = ''
     if (cmd === 'start' || cmd === 'restart') {
@@ -106,26 +106,26 @@ export async function apply(ctx: Context) {
     } else if (cmd === 'resume') {
       g.phase = g.resume
     } else if (cmd === 'title') {
-      emit(ctx, 'jimao/clear-enemies')
+      emit(ctx, 'saltline/clear-enemies')
       Object.assign(g, fresh(g.settings))
     }
   })
 
-  on(ctx, 'jimao/alert', (pos) => {
+  on(ctx, 'saltline/alert', (pos) => {
     const p = player(ctx)
     if (g.phase !== 'playing' || !p) return
     if (!g.alerted) {
       g.alerted = true
-      emit(ctx, 'jimao/radio', flow.radio.contact)
+      emit(ctx, 'saltline/radio', flow.radio.contact)
     }
     const b = ((yawOf(sub(pos, p.pos)) % 360) + 360) % 360
-    emit(ctx, 'jimao/warn', `发现敌情 · ${flow.directions[Math.round(b / 45) % 8]}`)
+    emit(ctx, 'saltline/warn', `发现敌情 · ${flow.directions[Math.round(b / 45) % 8]}`)
   })
 
-  on(ctx, 'jimao/kill', (type, weak) => {
+  on(ctx, 'saltline/kill', (type, weak) => {
     g.stats.kills++
     if (weak) g.stats.weak++
-    emit(ctx, 'jimao/feed', `${type === 'gull' ? '机械飞鸥' : '机械猎犬'} 已摧毁`, weak)
+    emit(ctx, 'saltline/feed', `${type === 'gull' ? '机械飞鸥' : '机械猎犬'} 已摧毁`, weak)
   })
 
   function cutRelay(i: number) {
@@ -134,12 +134,12 @@ export async function apply(ctx: Context) {
     g.progress = 0
     const n = cutCount()
     ctx.audio.play(sfx('cut'), { volume: 0.8 })
-    emit(ctx, 'jimao/relay-cut', i)
-    emit(ctx, 'jimao/message', `${points.relays[i].label} 已断开`)
+    emit(ctx, 'saltline/relay-cut', i)
+    emit(ctx, 'saltline/message', `${points.relays[i].label} 已断开`)
     if (n >= relayCount) {
-      emit(ctx, 'jimao/radio', flow.radio.all)
+      emit(ctx, 'saltline/radio', flow.radio.all)
     } else {
-      emit(ctx, 'jimao/radio', flow.radio.cut[n - 1] ?? flow.radio.cut[flow.radio.cut.length - 1])
+      emit(ctx, 'saltline/radio', flow.radio.cut[n - 1] ?? flow.radio.cut[flow.radio.cut.length - 1])
     }
     const wave = flow.waves[Math.min(n - 1, flow.waves.length - 1)]
     if (wave) queue(wave, true)
@@ -205,7 +205,7 @@ export async function apply(ctx: Context) {
       if (g.phaseTime >= total) {
         setPhase('playing')
         g.fade = 0
-        if (g.retries === 0 && cutCount() === 0) emit(ctx, 'jimao/radio', flow.radio.intro)
+        if (g.retries === 0 && cutCount() === 0) emit(ctx, 'saltline/radio', flow.radio.intro)
       }
       return
     }
@@ -230,7 +230,7 @@ export async function apply(ctx: Context) {
     }
     if (p.health < 35 && !g.lowWarned) {
       g.lowWarned = true
-      emit(ctx, 'jimao/radio', flow.radio.low)
+      emit(ctx, 'saltline/radio', flow.radio.low)
     }
     if (p.health > 70) g.lowWarned = false
 
@@ -265,7 +265,7 @@ export async function apply(ctx: Context) {
     for (const item of g.pending) item.delay -= dt
     while (g.pending.length && g.pending[0].delay <= 0 && living + 1 <= flow.maxAlive) {
       const item = g.pending.shift()!
-      emit(ctx, 'jimao/spawn', item.type, pickSpawn(item.type), item.pursuit)
+      emit(ctx, 'saltline/spawn', item.type, pickSpawn(item.type), item.pursuit)
       break
     }
 
@@ -287,11 +287,11 @@ export async function apply(ctx: Context) {
     if (dist2d(p.pos, points.extraction.pos) < points.extraction.radius) {
       if (cut >= relayCount) {
         setPhase('complete')
-        emit(ctx, 'jimao/radio', flow.radio.done)
-        emit(ctx, 'jimao/clear-enemies')
+        emit(ctx, 'saltline/radio', flow.radio.done)
+        emit(ctx, 'saltline/clear-enemies')
       } else if (warnBlockT <= 0) {
         warnBlockT = 4
-        emit(ctx, 'jimao/warn', flow.extractBlocked)
+        emit(ctx, 'saltline/warn', flow.extractBlocked)
       }
     }
   })

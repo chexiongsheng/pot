@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * 机械移植：几猫原版的建模辅助、道具库（$g）、关卡（cv）与远景（backdrop）。
+ * 机械移植：Saltline 原版的建模辅助、道具库（$g）、关卡（cv）与远景（backdrop）。
  * 由 _orig/extract-level.cjs 从原版美化代码按行号抽取，只在文件头补齐 three.js 名字映射；正文改动：C1、pv 去掉 async（体内无 await），跳过海鸥 wb。
  * 原版行号：17182–17378（建模辅助）、19796–22547（道具库与关卡）、22549–23489（远景）。
  * 适配层（材质、物理、场景图展平、输出给 Runner）见 ../origlevel.ts。
@@ -1057,7 +1057,7 @@ function N3(i, e = {}) {
     }
     for (let b of [0.12, 0.22, 0.32]) t.cyl(a, b, b, 6e-3, d + 0.1, y, x, { seg: 20, open: true, rot: [0, 0, wi / 2] });
   }
-  t.decal(Mi(i, "几猫船用制冷", { color: "black", font: "sans", distress: 0.2 }), 0.05, 0.2505, 2.255, 0, [0, wi / 2, 0], 1.2);
+  t.decal(Mi(i, "KELVAR  MARINE  REFRIGERATION", { color: "black", font: "sans", distress: 0.2 }), 0.05, 0.2505, 2.255, 0, [0, wi / 2, 0], 1.2);
   for (let g of [-1, 1]) {
     t.add(o, je(cn(0.98, 0.44), d + 4e-3, 1.16, g * 0.53, [0, wi / 2, 0]), p);
     for (let x = 0; x < 9; x++) t.box(o, 0.06, 6e-3, 0.98, d + 0.035, 0.965 + x * 0.049, g * 0.53, { r: 0, rot: [0, 0, -0.75] });
@@ -1628,7 +1628,7 @@ function GA(i, e) {
 }
 function qA(i, e) {
   let t = new Kn(i, "crate_stack", e.seed || 0), n = t.rng;
-  E1(t, 1.2, 0.95, 1, { label: "重物", code: "几猫04" + t.seed % 2 });
+  E1(t, 1.2, 0.95, 1, { label: "重物", code: "SLT 04" + t.seed % 2 });
   let s = { x: n.range(-0.1, 0.02), z: n.range(-0.05, 0.05), th: (n() < 0.5 ? -1 : 1) * n.range(0.1, 0.16), L: 0.86, W: 0.72 };
   t.push({ p: [s.x, 0.95, s.z], r: [0, s.th, 0] }), E1(t, s.L, 0.6, s.W, { detail: false, skids: false, label: "易碎物品", code: "B4-204" }), t.pop();
   let o = { x: s.x + n.range(-0.05, 0.05), z: s.z + n.range(-0.04, 0.04), th: n.range(-0.12, 0.12) };
@@ -1701,7 +1701,7 @@ function YA(i, e) {
       let m = b * At / 3 + 0.3;
       t.add("steel_galv", ot(0.017, 0.017, 0.014, 6), { p: [Math.cos(m) * 0.3, Math.sin(m) * 0.3, y * (r + 6e-3)], r: [tt, 0, 0] }, n.range(0.5, 0.9));
     }
-    t.label(y > 0 ? "NYY-J 4x95 mm2  500 m" : "几猫港区", { color: "white", font: "stencil", distress: 0.45 }, 0.7, 0.085, { p: [0, 0.4, y * (r + 6e-3)], r: [0, y > 0 ? 0 : At, 0] }), y > 0 && t.decal(i.mats.decal("arrow"), 0.2, { p: [0.36, -0.2, r + 6e-3], r: [0, 0, -1.2] });
+    t.label(y > 0 ? "NYY-J 4x95 mm2  500 m" : "SALTLINE TERMINAL", { color: "white", font: "stencil", distress: 0.45 }, 0.7, 0.085, { p: [0, 0.4, y * (r + 6e-3)], r: [0, y > 0 ? 0 : At, 0] }), y > 0 && t.decal(i.mats.decal("arrow"), 0.2, { p: [0.36, -0.2, r + 6e-3], r: [0, 0, -1.2] });
   }
   let u = 16, h = r - a, f = 2 * h / u, p = 0.47, d = [];
   for (let y = 0; y <= u; y++) d.push([p - 0.017, -h + y * f]), y < u && d.push([p, -h + (y + 0.5) * f]);
@@ -2064,7 +2064,7 @@ function oR(i, e) {
       K.x += 0.03 * ie * (K.x < 0 ? 1 : 0);
     }
   }), t.add(a, gr(A), { p: [-1.39, 0.915, 0] }, c(0.97)), t.add(a, Ge(0.56, 0.37, 0.64, 0.05), { p: [-1.4, 0.43, 0] }, c(0.85)), t.add("hazard_stripes", Ge(0.014, 0.085, 0.84, 4e-3), { p: [-1.702, 0.77, 0] }, 0.95), t.label(f, { color: "black", font: "stencil", distress: 0.35 }, 0.4, 0.2, { p: [-1.703, 0.96, 0], r: [0, -tt, 0] });
-  for (let K of [1, -1]) t.add(i.mats.emissive(16722450, 0.16), Ge(0.012, 0.05, 0.11, 4e-3), { p: [-1.69, 1.1, K * 0.37] }, 1, { raw: true }), t.add(u, Ge(0.016, 0.066, 0.126, 4e-3), { p: [-1.684, 1.1, K * 0.37] }, 0.4), t.label("几猫", { color: "black", font: "sans", distress: 0.3 }, 0.42, 0.085, { p: [-1.39, 0.99, K * 0.5625], r: [0, K > 0 ? 0 : At, 0] }), t.add(u, Ge(0.06, 0.05, 0.02, 4e-3), { p: [-1.67, 0.44, K * 0.05] }, 0.5);
+  for (let K of [1, -1]) t.add(i.mats.emissive(16722450, 0.16), Ge(0.012, 0.05, 0.11, 4e-3), { p: [-1.69, 1.1, K * 0.37] }, 1, { raw: true }), t.add(u, Ge(0.016, 0.066, 0.126, 4e-3), { p: [-1.684, 1.1, K * 0.37] }, 0.4), t.label("SALTLINE", { color: "black", font: "sans", distress: 0.3 }, 0.42, 0.085, { p: [-1.39, 0.99, K * 0.5625], r: [0, K > 0 ? 0 : At, 0] }), t.add(u, Ge(0.06, 0.05, 0.02, 4e-3), { p: [-1.67, 0.44, K * 0.05] }, 0.5);
   t.add("steel_worn", ot(0.02, 0.02, 0.13, 8), { p: [-1.68, 0.44, 0] }, 0.7), t.add(a, Ge(0.98, 0.46, 0.94, 0.04), { p: [-0.59, 0.79, 0] }, c());
   for (let K of [1, -1]) {
     t.label(f, { color: "black", font: "stencil", distress: 0.35 }, 0.3, 0.19, { p: [-0.84, 0.8, K * 0.4715], r: [0, K > 0 ? 0 : At, 0] }), t.add(u, $e(0.34, 0.2, 4e-3), { p: [-0.36, 0.8, K * 0.47] }, 0.2);
@@ -3361,7 +3361,7 @@ function z1(i, e, t = {}) {
   g(d, Ee(X - 0.04, $ + 0.14, ne + 0.06, X - 0.02, ue, re - 0.06)), g(d, Ee(X - 0.9, $ + 0.02, ne + 0.3, X - 0.1, $ + 0.04, re - 0.3)), g(f, Ee(F + 0.9, $ + 0.14, 3.1, F + 1.45, $ + 0.6, 3.65, 0.04)), g(f, Ee(F + 0.82, $ + 0.6, 3.1, F + 0.96, $ + 1.35, 3.65, 0.04));
   for (let R of [2.75, 4]) g(f, Ee(F + 1.2, $ + 0.14, R - 0.16, F + 1.75, $ + 0.85, R + 0.16, 0.03)), r.add(Ee(F + 1.3, $ + 0.855, R - 0.1, F + 1.6, $ + 0.865, R + 0.1), [0.75, 0.5, 0.26], 0);
   r.add(Ee(F + 0.5, ue - 0.045, 3, F + 1.5, ue - 0.03, 3.2), [0.75, 0.5, 0.26], 0), ie(X + 0.15, $ + 0.1, 3.37, 2, "z"), g(h, Ee(F - 0.9, $ + 0.1, ne, F, $ + 0.14, re)), ns(o, l, [[F, $ + 0.14, ne + 0.03], [F - 0.87, $ + 0.14, ne + 0.03], [F - 0.87, $ + 0.14, re - 0.03], [F, $ + 0.14, re - 0.03]], { post: 1, tint: En });
-  let me = i.mats.label("几猫04号", { color: "white", font: "stencil", distress: 0.35 }), ee = Math.max(1, me.aspect || 6);
+  let me = i.mats.label("SALTLINE 04", { color: "white", font: "stencil", distress: 0.35 }), ee = Math.max(1, me.aspect || 6);
   {
     let R = Math.min(1.15, 8.6 / ee);
     for (let I of [-1, 1]) g(me.material, ll(R * ee, R, 36.9, 22, I * (On + 0.453), I > 0 ? 0 : Math.PI));
@@ -3505,7 +3505,7 @@ function vb(i, e) {
     f(r, jt(V(me, ee - 0.1, 0.34), V(me, ee - 2.3, 0.3), 0.22, 0.22, 0.03)), f(r, jt(V(me - 0.95, ee - 2.45, 0.34), V(me + 0.95, ee - 2.45, 0.34), 0.42, 0.42, 0.05));
     for (let Y of [-0.8, 0.8]) f(r, jt(V(me + Y, ee - 2.4, 0.3), V(me + Y * 1.1, ee - 1.1, 0.34), 0.5, 0.12, 0.02));
   }
-  let A = i.mats.label("几猫撤离艇", { color: "white", font: "sans", distress: 0.3 });
+  let A = i.mats.label("KITTIWAKE", { color: "white", font: "sans", distress: 0.3 });
   {
     let ue = Math.min(12, 1.7 * Math.max(2, A.aspect || 6));
     f(A.material, ul(7.6, 7.6 + ue, 10.25, 10.25 + 1.7, -1, 0.014, 10, 1)), f(A.material, ul(7.6, 7.6 + ue, 10.25, 10.25 + 1.7, 1, 0.014, 10, 1));
@@ -3616,7 +3616,7 @@ function vb(i, e) {
   let ne = X.build({ cast: false });
   ne.position.set(N.x, N.y + 3.62, N.z + 0.8), ne.userData.noMerge = true, F.add(ne);
   let re = [{ min: [33, -5, Eo - qn], max: [49, 15, -17.5] }, { min: [34.9, -5, -17.5], max: [47.1, 15.5, -13] }, { min: [37.7, -5, -13], max: [44.3, 16, -9.3] }, { min: [rt - 7.2, 13, T], max: [rt + 7.2, 24.4, U] }];
-  return { root: F, radar: ne, colliders: re, tris: t.tris, name: "几猫撤离艇" };
+  return { root: F, radar: ne, colliders: re, tris: t.tris, name: "KITTIWAKE" };
 }
 function xb(i, e) {
   let t = new io(), n = so(i, "plastic_grey"), s = so(i, "paint_orange"), o = i.mats.get("polymer_black"), r = i.mats.get("steel_galv"), a = i.mats.get("glass"), l = (U, T, D) => t.add(U, T, D), c = [2, 2.02, 2.08], u = [0.5, 0.5, 0.52], h = [1.9, 1.7, 1.2], f = [[-3.35, 0.5, 1.03], [-1.6, 0.5, 1.06], [0.5, 0.52, 1.05], [1.8, 0.58, 0.93], [2.75, 0.68, 0.6], [3.3, 0.78, 0.22]], p = [...f.map((U) => _t(U[0], U[1], U[2])), _t(3.43, 0.8, 0), ...f.slice().reverse().map((U) => _t(U[0], U[1], -U[2]))], d = new Jr(p, false, "centripetal"), v = new Kr(d, 60, 0.27, 12, false);
@@ -3933,7 +3933,7 @@ function Eb(i, { only: e = null, showcase: t = false } = {}) {
     }
     c && (c.radar.rotation.y = x * 1.9), a && (a.root.position.y = r.y + (t ? 0 : 0.05 * Math.sin(x * 1.15) + 0.025 * Math.sin(x * 2.3 + 1.3)), a.hullGrp.rotation.x = 0.05 * Math.sin(x * 0.9 + 0.4) + 0.016 * Math.sin(x * 2.1), a.hullGrp.rotation.z = 0.02 * Math.sin(x * 1.3 + 2));
   }
-  return y(0), { update: y, root: s, boat: a ? a.root : new on(), crane: l ? l.root : null, ship: c ? c.root : null, skyline: u ? u.root : null, gulls: h, lamps: f, colliders: p, spreader: l ? l.spreader : null, boatBase: r, extractionPoint: new W(30, 0, 20), shipName: "几猫撤离艇", craneId: "几猫04号", stats: { tris: Math.round(v), drawCalls: g } };
+  return y(0), { update: y, root: s, boat: a ? a.root : new on(), crane: l ? l.root : null, ship: c ? c.root : null, skyline: u ? u.root : null, gulls: h, lamps: f, colliders: p, spreader: l ? l.spreader : null, boatBase: r, extractionPoint: new W(30, 0, 20), shipName: "KITTIWAKE", craneId: "SALTLINE 04", stats: { tris: Math.round(v), drawCalls: g } };
 }
 function pv(i) { // 原版 async，改同步
   return Eb(i, {});

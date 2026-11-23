@@ -25,15 +25,15 @@ export function apply(ctx: Context) {
   let hurtShown = ''
   let lowHealth = 0
 
-  on(ctx, 'jimao/radio', (text) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
-  on(ctx, 'jimao/warn', (text) => { warn = { text, t: 0 } })
-  on(ctx, 'jimao/message', (text) => { message = { text, t: 0 } })
-  on(ctx, 'jimao/hitmarker', (kill, weak) => { marker = { t: 0, kill, weak } })
-  on(ctx, 'jimao/feed', (text, weak) => {
+  on(ctx, 'saltline/radio', (text) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
+  on(ctx, 'saltline/warn', (text) => { warn = { text, t: 0 } })
+  on(ctx, 'saltline/message', (text) => { message = { text, t: 0 } })
+  on(ctx, 'saltline/hitmarker', (kill, weak) => { marker = { t: 0, kill, weak } })
+  on(ctx, 'saltline/feed', (text, weak) => {
     feed.unshift({ text: weak ? `${text} · 弱点命中` : text, weak, t: 0 })
     feed = feed.slice(0, 5)
   })
-  on(ctx, 'jimao/reset', () => {
+  on(ctx, 'saltline/reset', () => {
     warn.t = 99
     message.t = 99
     feed = []
@@ -59,7 +59,7 @@ export function apply(ctx: Context) {
       const key = [damage, lowHealth, ads].map((v) => Math.round(v * 200)).join(',')
       if (key !== hurtShown) {
         hurtShown = key
-        emit(ctx, 'jimao/post', { uDamage: damage, uLowHealth: lowHealth, uAds: ads })
+        emit(ctx, 'saltline/post', { uDamage: damage, uLowHealth: lowHealth, uAds: ads })
       }
     }
 

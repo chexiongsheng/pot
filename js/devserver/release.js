@@ -10,7 +10,7 @@
  *   name / id / version          产品名 / 包名缺省来源 / 版本
  *   icon                         图标（相对游戏目录，png/jpg；缺省找 icon.png）
  *   release.company              公司名（缺省 pot）
- *   release.packageId            包名（Android applicationId 等；缺省由 id 推出，如 pot.jimao）
+ *   release.packageId            包名（Android applicationId 等；缺省由 id 推出，如 pot.saltline）
  *   release.versionCode          Android 版本号（缺省由 version 推出：1.2.3 → 10203）
  *   release.orientation          landscape（缺省）| portrait | auto
  *   release.window               { width, height, fullscreen, resizable }（桌面）

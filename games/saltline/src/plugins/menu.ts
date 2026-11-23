@@ -29,7 +29,7 @@ const LEGEND: [string, string][][] = [
 ]
 
 const ABOUT = [
-  '《几猫 · 港区突击》是一部单关卡第一人称射击短篇。',
+  '《Saltline》是一部单关卡第一人称射击短篇，原作由 Felix Rieseberg 使用 Claude Fable 5.2 制作。',
   '你将潜入暴雨中的港区，切断堆场、仓库与码头的三处中继，在机械飞鸥与机械猎犬的围攻中撤离。',
   '本版本使用 pot 框架重制：关卡、数值与流程全部来自数据文件，几何、音效均由代码生成，支持热重载。',
 ]
@@ -214,7 +214,7 @@ export function apply(ctx: Context) {
   function title(g: GameState, W: number, H: number) {
     const { x, bottom } = frame(W, H, g.phaseTime, 1)
     // 备注
-    ui.text('使用 Fable5.2 自主研发 · 国产第一人称射击游戏 · 开发体验版', x, bottom, { size: 11, color: C.steel, valign: 'bottom' })
+    ui.text('原作 Saltline · Felix Rieseberg × Claude Fable 5.2 · pot 移植版', x, bottom, { size: 11, color: C.steel, valign: 'bottom' })
     // 右下操作速览
     if (W >= 1180) {
       LEGEND.forEach((line, i) => {
@@ -236,7 +236,7 @@ export function apply(ctx: Context) {
     const items: [string, string, boolean?][] = [['start', '开始行动', true], ['settings', '设置'], ['about', '项目介绍']]
     if (W < 1180) items.push(['controls', '操作说明'])
     const hit = row(items, x, by)
-    if (hit === 'start') emit(ctx, 'jimao/command', 'start')
+    if (hit === 'start') emit(ctx, 'saltline/command', 'start')
     else if (hit) g.panel = hit
     // 简介：1px line 上边框 + 72×3 signal 短条
     const ps = Math.round(clamp(W * 0.0155, 17, 22))
@@ -245,14 +245,14 @@ export function apply(ctx: Context) {
     ui.rect(x, py, pw, 1, C.bone, { alpha: 0.2 })
     ui.rect(x, py, 72, 3, C.signal)
     ui.text('港区防御系统失控。切断三处中继，突破封锁，登船撤离。', x, py + 16, { size: ps, color: C.bone, alpha: 0.9 })
-    // 大标题 + 副标题
-    const hs = Math.round(clamp(W * 0.155, 52, 208))
+    // 大标题 + 副标题（原版用窄体显示字体，这里按可用宽度收窄字号，避免 SALTLINE 溢出屏幕）
+    let hs = Math.round(clamp(W * 0.155, 52, 208))
+    const titleW = spacedWidth('SALTLINE', { size: hs, weight: 900, spacing: 0.15, color: C.bone })
+    if (titleW > W - x * 2) hs = Math.max(40, Math.floor(hs * (W - x * 2) / titleW))
     const hb = py - 34
-    const tw = spacedWidth('几猫', { size: hs, weight: 900, spacing: 0.15, color: C.bone })
-    const top = heading('几猫突击小队', '几猫', x, hb, hs, 1, 'B4')
-    spaced('3A大作', x + tw + 4, hb - hs * 0.06, { size: Math.round(hs * 0.24), weight: 900, spacing: 0.08, color: C.signal, shadow: true, valign: 'bottom' })
-    const ew = spacedWidth('B4', { size: 15, weight: 900, spacing: 0.1, color: C.ink }) + 28 + spacedWidth('几猫突击小队', { size: 13, weight: 600, spacing: 0.24, color: C.bone })
-    spaced('几猫港区 · 05:42', x + ew + 14, top - 22, { size: 13, weight: 600, spacing: 0.24, color: BONE_DIM, valign: 'middle' })
+    const top = heading('港务局突击小队', 'SALTLINE', x, hb, hs, 1, 'B4')
+    const ew = spacedWidth('B4', { size: 15, weight: 900, spacing: 0.1, color: C.ink }) + 28 + spacedWidth('港务局突击小队', { size: 13, weight: 600, spacing: 0.24, color: C.bone })
+    spaced('Saltline 港区 · 05:42', x + ew + 14, top - 22, { size: 13, weight: 600, spacing: 0.24, color: BONE_DIM, valign: 'middle' })
   }
 
   ctx.on('update', () => {
@@ -269,8 +269,8 @@ export function apply(ctx: Context) {
       ui.text(`任务用时 ${formatTime(g.time)}`, x, bottom, { size: 11, color: C.steel, valign: 'bottom' })
       const by = bottom - 22 - 26
       const hit = row([['resume', '继续游戏', true], ['settings', '设置'], ['controls', '操作说明'], ['restart', '重新开始任务']], x, by)
-      if (hit === 'resume') emit(ctx, 'jimao/command', 'resume')
-      else if (hit === 'restart') emit(ctx, 'jimao/command', 'restart')
+      if (hit === 'resume') emit(ctx, 'saltline/command', 'resume')
+      else if (hit === 'restart') emit(ctx, 'saltline/command', 'restart')
       else if (hit) g.panel = hit
       heading('行动暂时中止', '已暂停', x, by - 26 - 30, Math.round(clamp(W * 0.08, 44, 120)), 1)
       return
@@ -281,7 +281,7 @@ export function apply(ctx: Context) {
       const a = clamp(g.phaseTime - 1, 0, 1)
       const { x, bottom } = frame(W, H, g.phaseTime - 1, a)
       const by = bottom - 26
-      if (a >= 1 && (row([['retry', '重试', true]], x, by) || input.pressed('return'))) emit(ctx, 'jimao/command', 'retry')
+      if (a >= 1 && (row([['retry', '重试', true]], x, by) || input.pressed('return'))) emit(ctx, 'saltline/command', 'retry')
       const cut = g.relays.filter((r) => r === 'cut').length
       const sy = by - 26 - 30 - 52
       stats([['生存时间', formatTime(g.time)], ['已切断中继', `${cut} / ${g.relays.length}`]], x, sy, a)
@@ -297,8 +297,8 @@ export function apply(ctx: Context) {
       const by = bottom - 26
       if (a >= 1) {
         const hit = row([['again', '再次出击', true], ['title', '返回标题']], x, by)
-        if (hit === 'again') emit(ctx, 'jimao/command', 'start')
-        else if (hit === 'title') emit(ctx, 'jimao/command', 'title')
+        if (hit === 'again') emit(ctx, 'saltline/command', 'start')
+        else if (hit === 'title') emit(ctx, 'saltline/command', 'title')
       }
       const sy = by - 26 - 30 - 52
       stats([
@@ -312,7 +312,7 @@ export function apply(ctx: Context) {
       spaced('行动评级', x, ry, { size: 11, weight: 500, spacing: 0.2, color: C.steel, alpha: a })
       const rw = spaced(r.label, x, ry + 18, { size: 30, weight: 900, color: C.signal, alpha: a })
       for (let i = 0; i < 5; i++) ui.rect(x + rw + 20 + i * 22, ry + 34, 16, 6, i < r.score ? C.signal : C.steel, { alpha: a * (i < r.score ? 1 : 0.35) })
-      heading('四号泊位 · 行动简报', '几猫港区已解除封锁', x, ry - 30, Math.round(clamp(W * 0.05, 36, 72)), a)
+      heading('四号泊位 · 行动简报', 'Saltline 港区已解除封锁', x, ry - 30, Math.round(clamp(W * 0.05, 36, 72)), a)
     }
   })
 }
