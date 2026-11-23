@@ -3999,8 +3999,17 @@ var pot = (() => {
       if (options.vertexColors !== void 0) engine.matFloat(this.id, "_VColor", options.vertexColors ? 1 : 0);
       return this;
     }
-    collider(enabled) {
-      this._engine.collider(this.id, enabled);
+    /**
+     * 开关碰撞体，或换成指定形状（'mesh' / 'convex' / 'box'，同时打开）。
+     * options.dynamic 挂运动学刚体，适合会动的碰撞体（见 SpawnOptions.dynamic）
+     */
+    collider(value, options = {}) {
+      if (typeof value === "string" || options.dynamic) {
+        if (typeof value === "string" && value !== "mesh" && value !== "convex" && value !== "box") throw new Error(`collider(${value})：形状只能是 mesh、convex 或 box`);
+        const error = this._engine.colliderShape(this.id, typeof value === "string" ? value : "", !!options.dynamic);
+        if (error) throw new Error(`collider(${value})：${error}`);
+      }
+      this._engine.collider(this.id, value !== false);
       return this;
     }
     /**
@@ -4143,6 +4152,14 @@ var pot = (() => {
       if (options.color) entity.color(options.color);
       if (options.material) entity.material(options.material);
       if (options.collider === false) entity.collider(false);
+      else if (typeof options.collider === "string" || options.dynamic) {
+        try {
+          entity.collider(options.collider ?? true, { dynamic: options.dynamic });
+        } catch (e) {
+          entity.destroy();
+          throw new Error(`scene.spawn(${name})：${e.message}`);
+        }
+      }
       if (options.layer !== void 0) entity.layer(options.layer);
       if (options.active === false) entity.active(false);
       if (options.visible === false) entity.visible(false);
@@ -4378,6 +4395,15 @@ var pot = (() => {
         life: options.life,
         lifeJitter: options.lifeJitter
       }));
+    }
+    /**
+     * 球体扫掠（粗射线）：半径 radius 的球沿 direction 移动，返回第一个碰到的碰撞体。
+     * 适合子弹、视线这类细射线容易从缝里漏过去的场合。起点已与碰撞体重叠时不算命中。direction 不必归一化
+     */
+    sphereCast(origin, direction, radius, options = {}) {
+      if (!(radius > 0)) throw new Error(`sphereCast：radius 须大于 0，给了 ${radius}`);
+      const hit = this.host.engine.sphereCast(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], radius, options.maxDistance ?? 0, options.mask ?? 0);
+      return hit ? { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : void 0 } : null;
     }
     /** 射线检测（命中图元自带的碰撞体，以及 options.planes 中的无限平面）。direction 不必归一化 */
     raycast(origin, direction, options = {}) {
@@ -6921,9 +6947,15 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
         emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
         collider: (id, enabled) => S.SetCollider(id, enabled),
+        colliderShape: (id, kind, dynamic) => S.SetColliderShape(id, kind, dynamic) ?? "",
         layer: (id, layer) => S.SetLayer(id, layer),
         raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
           const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask);
+          if (!id) return null;
+          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
+        },
+        sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => {
+          const id = S.SphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask);
           if (!id) return null;
           return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
         },

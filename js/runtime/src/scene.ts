@@ -84,8 +84,17 @@ export interface SpawnOptions {
   scale?: Vec3 | number
   color?: Color
   material?: MaterialOptions
-  /** 图元自带碰撞体，false 关闭（纯装饰物关掉能让射线更快） */
-  collider?: boolean
+  /**
+   * 碰撞体。图元和 mesh: 形状默认自带（mesh: 为按网格的 MeshCollider），false 关闭（纯装饰物关掉能让射线更快）。
+   * 'mesh'：按网格精确求交；'convex'：凸包（更快，凹处会被填平）；'box'：按网格包围盒的盒子。
+   * mesh: 形状的碰撞体跟随 scene.mesh 更新重建，网格从退化变为有效时自动补上
+   */
+  collider?: boolean | ColliderShape
+  /**
+   * 会动的碰撞体（中继、闸杆、门）：挂运动学刚体，移动时不触发静态碰撞体重建，射线照常命中最新位置。
+   * 只想射线挡住、不需要物理推挤时用它；不动的物体不要开
+   */
+  dynamic?: boolean
   /** 层 0 到 31，配合 raycast 的 mask 使用 */
   layer?: number
   active?: boolean
@@ -141,6 +150,8 @@ export interface LightOptions {
   spotAngle?: number
   shadows?: 'none' | 'hard' | 'soft'
 }
+
+export type ColliderShape = 'mesh' | 'convex' | 'box'
 
 export interface RaycastOptions {
   maxDistance?: number
@@ -675,8 +686,17 @@ export class Entity {
     return this
   }
 
-  collider(enabled: boolean) {
-    this._engine.collider(this.id, enabled)
+  /**
+   * 开关碰撞体，或换成指定形状（'mesh' / 'convex' / 'box'，同时打开）。
+   * options.dynamic 挂运动学刚体，适合会动的碰撞体（见 SpawnOptions.dynamic）
+   */
+  collider(value: boolean | ColliderShape, options: { dynamic?: boolean } = {}) {
+    if (typeof value === 'string' || options.dynamic) {
+      if (typeof value === 'string' && value !== 'mesh' && value !== 'convex' && value !== 'box') throw new Error(`collider(${value})：形状只能是 mesh、convex 或 box`)
+      const error = this._engine.colliderShape(this.id, typeof value === 'string' ? value : '', !!options.dynamic)
+      if (error) throw new Error(`collider(${value})：${error}`)
+    }
+    this._engine.collider(this.id, value !== false)
     return this
   }
 
@@ -829,6 +849,14 @@ export class SceneService extends Service {
     if (options.color) entity.color(options.color)
     if (options.material) entity.material(options.material)
     if (options.collider === false) entity.collider(false)
+    else if (typeof options.collider === 'string' || options.dynamic) {
+      try {
+        entity.collider(options.collider ?? true, { dynamic: options.dynamic })
+      } catch (e) {
+        entity.destroy()
+        throw new Error(`scene.spawn(${name})：${(e as Error).message}`)
+      }
+    }
     if (options.layer !== undefined) entity.layer(options.layer)
     if (options.active === false) entity.active(false)
     if (options.visible === false) entity.visible(false)
@@ -1081,6 +1109,16 @@ export class SceneService extends Service {
       life: options.life,
       lifeJitter: options.lifeJitter,
     }))
+  }
+
+  /**
+   * 球体扫掠（粗射线）：半径 radius 的球沿 direction 移动，返回第一个碰到的碰撞体。
+   * 适合子弹、视线这类细射线容易从缝里漏过去的场合。起点已与碰撞体重叠时不算命中。direction 不必归一化
+   */
+  sphereCast(origin: Vec3, direction: Vec3, radius: number, options: Omit<RaycastOptions, 'planes'> = {}): RaycastHit | null {
+    if (!(radius > 0)) throw new Error(`sphereCast：radius 须大于 0，给了 ${radius}`)
+    const hit = this.host.engine.sphereCast(origin[0], origin[1], origin[2], direction[0], direction[1], direction[2], radius, options.maxDistance ?? 0, options.mask ?? 0)
+    return hit ? { ...hit, entity: hit.id > 0 ? new Entity(this, hit.id) : undefined } : null
   }
 
   /** 射线检测（命中图元自带的碰撞体，以及 options.planes 中的无限平面）。direction 不必归一化 */

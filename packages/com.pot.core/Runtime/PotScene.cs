@@ -92,6 +92,7 @@ namespace Pot
         public static int Spawn(string shape, string name, int parent)
         {
             GameObject go;
+            string spawnMesh = null;
             switch (shape)
             {
                 case "cube": go = GameObject.CreatePrimitive(PrimitiveType.Cube); break;
@@ -110,12 +111,7 @@ namespace Pot
                         {
                             go.AddComponent<MeshFilter>().sharedMesh = mesh;
                             go.AddComponent<MeshRenderer>();
-                            // 退化网格（如初始全零的动态池）不建碰撞体：PhysX 会报错，且之后每次更新都会重新烘焙
-                            if (mesh.vertexCount >= 3 && mesh.bounds.size.sqrMagnitude > 1e-12f)
-                            {
-                                var mc = go.AddComponent<MeshCollider>();
-                                mc.sharedMesh = mesh;
-                            }
+                            spawnMesh = meshName;
                         }
                         else Debug.LogWarning("[pot] 未注册的网格：" + meshName);
                     }
@@ -143,6 +139,15 @@ namespace Pot
             go.transform.SetParent(parentGo != null ? parentGo.transform : Root, false);
             objects[id] = go;
             ids[go] = id;
+            if (spawnMesh != null)
+            {
+                HashSet<int> users;
+                if (!meshUsers.TryGetValue(spawnMesh, out users)) meshUsers[spawnMesh] = users = new HashSet<int>();
+                users.Add(id);
+                meshOfObject[id] = spawnMesh;
+                colliderKinds[id] = "mesh";
+                RebuildCollider(id, go, false);
+            }
             return id;
         }
 
@@ -150,6 +155,7 @@ namespace Pot
         public static void Destroy(int id)
         {
             GameObject go;
+            ForgetCollider(id);
             if (!objects.TryGetValue(id, out go)) return;
             objects.Remove(id);
             if (go != null)
@@ -697,6 +703,7 @@ namespace Pot
             mesh.RecalculateBounds();
             meshes[name] = mesh;
             if (!string.IsNullOrEmpty(key)) meshKeys[name] = key;
+            RefreshMeshUsers(name);
             return vcount;
         }
 
@@ -927,7 +934,117 @@ namespace Pot
         {
             var go = Get(id);
             if (go == null) return;
+            if (enabled) collidersOff.Remove(id); else collidersOff.Add(id);
+            if (colliderKinds.ContainsKey(id)) { RebuildCollider(id, go, false); return; }
             foreach (var c in go.GetComponents<Collider>()) c.enabled = enabled;
+        }
+
+        // mesh: 形状实体：网格名 → 使用它的实体（网格更新时重建碰撞体）；实体 → 网格名
+        static readonly Dictionary<string, HashSet<int>> meshUsers = new Dictionary<string, HashSet<int>>();
+        static readonly Dictionary<int, string> meshOfObject = new Dictionary<int, string>();
+        // 由 pot 管理碰撞体的实体：mesh / convex / box（图元没换过形状时不在这里，沿用自带碰撞体）
+        static readonly Dictionary<int, string> colliderKinds = new Dictionary<int, string>();
+        // 关掉碰撞体的实体：网格碰撞体直接移除，网格更新时也不烘焙
+        static readonly HashSet<int> collidersOff = new HashSet<int>();
+
+        // 退化网格（如初始全零的动态池）不建网格碰撞体：PhysX 会报错，且之后每次更新都会重新烘焙
+        static bool Degenerate(Mesh m) => m == null || m.vertexCount < 3 || m.bounds.size.sqrMagnitude <= 1e-12f;
+
+        static void ForgetCollider(int id)
+        {
+            string meshName;
+            HashSet<int> users;
+            if (meshOfObject.TryGetValue(id, out meshName) && meshUsers.TryGetValue(meshName, out users))
+            {
+                users.Remove(id);
+                if (users.Count == 0) meshUsers.Remove(meshName);
+            }
+            meshOfObject.Remove(id);
+            colliderKinds.Remove(id);
+            collidersOff.Remove(id);
+        }
+
+        /// <summary>按登记的形状重建碰撞体；remesh 为 true 表示网格内容变了，网格碰撞体要重新烘焙</summary>
+        static void RebuildCollider(int id, GameObject go, bool remesh)
+        {
+            string kind;
+            if (!colliderKinds.TryGetValue(id, out kind)) return;
+            var mf = go.GetComponent<MeshFilter>();
+            var mesh = mf != null ? mf.sharedMesh : null;
+            var off = collidersOff.Contains(id);
+            if (kind == "box")
+            {
+                foreach (var c in go.GetComponents<Collider>()) if (!(c is BoxCollider)) Object.DestroyImmediate(c);
+                var bc = go.GetComponent<BoxCollider>();
+                if (bc == null) bc = go.AddComponent<BoxCollider>();
+                if (mesh != null) { var b = mesh.bounds; bc.center = b.center; bc.size = b.size; }
+                bc.enabled = !off;
+                return;
+            }
+            foreach (var c in go.GetComponents<Collider>()) if (!(c is MeshCollider)) Object.DestroyImmediate(c);
+            var mc = go.GetComponent<MeshCollider>();
+            if (off || Degenerate(mesh))
+            {
+                if (mc != null) Object.DestroyImmediate(mc);
+                return;
+            }
+            var convex = kind == "convex";
+            if (mc == null) { mc = go.AddComponent<MeshCollider>(); mc.convex = convex; mc.sharedMesh = mesh; }
+            else if (remesh || mc.sharedMesh != mesh || mc.convex != convex)
+            {
+                // MeshCollider 不会跟着网格内容变化，要重新赋值才会重新烘焙
+                mc.sharedMesh = null;
+                mc.convex = convex;
+                mc.sharedMesh = mesh;
+            }
+            mc.enabled = true;
+        }
+
+        static void RefreshMeshUsers(string meshName)
+        {
+            HashSet<int> users;
+            if (!meshUsers.TryGetValue(meshName, out users)) return;
+            Mesh mesh;
+            meshes.TryGetValue(meshName, out mesh);
+            List<int> dead = null;
+            foreach (var id in users)
+            {
+                var go = Get(id);
+                if (go == null) { (dead ??= new List<int>()).Add(id); continue; }
+                var mf = go.GetComponent<MeshFilter>();
+                if (mf != null && mesh != null && mf.sharedMesh != mesh) mf.sharedMesh = mesh;
+                RebuildCollider(id, go, true);
+            }
+            if (dead != null) foreach (var id in dead) ForgetCollider(id);
+        }
+
+        /// <summary>
+        /// 换碰撞体形状：kind 为 mesh / convex / box（空串不换），之后跟随网格更新。
+        /// dynamic 为 true 时挂运动学刚体（会动的碰撞体，移动不触发静态碰撞体重建）。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string SetColliderShape(int id, string kind, bool dynamic)
+        {
+            var go = Get(id);
+            if (go == null || id == CameraIdValue) return "实体不存在";
+            if (go.GetComponent<SkinnedMeshRenderer>() != null) return "蒙皮实体没有碰撞体，命中体另挂在骨骼下";
+            if (!string.IsNullOrEmpty(kind))
+            {
+                if (kind != "mesh" && kind != "convex" && kind != "box") return "形状只能是 mesh、convex 或 box";
+                var mf = go.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) return "没有网格，不能用 " + kind + " 碰撞体";
+                colliderKinds[id] = kind;
+                RebuildCollider(id, go, false);
+            }
+            if (dynamic)
+            {
+                var rb = go.GetComponent<Rigidbody>();
+                if (rb == null) rb = go.AddComponent<Rigidbody>();
+                rb.isKinematic = true;
+                rb.useGravity = false;
+                rb.interpolation = RigidbodyInterpolation.None;
+            }
+            return "";
         }
 
         /// <summary>设置层（0 到 31），用于射线掩码</summary>
@@ -951,6 +1068,24 @@ namespace Pot
             RaycastHit hit;
             var layers = mask == 0 ? Physics.DefaultRaycastLayers : mask;
             if (!Physics.Raycast(new Ray(new Vector3(ox, oy, oz), dir.normalized), out hit, maxDistance > 0 ? maxDistance : Mathf.Infinity, layers, QueryTriggerInteraction.Ignore)) return 0;
+            return HitResult(hit);
+        }
+
+        /// <summary>球体扫掠（半径 radius），返回与写入同 Raycast；起点已与碰撞体重叠时不算命中</summary>
+        [Preserve]
+        public static int SphereCast(float ox, float oy, float oz, float dx, float dy, float dz, float radius, float maxDistance, int mask)
+        {
+            Physics.SyncTransforms();
+            var dir = new Vector3(dx, dy, dz);
+            if (dir.sqrMagnitude < 1e-12f || !(radius > 0f)) return 0;
+            RaycastHit hit;
+            var layers = mask == 0 ? Physics.DefaultRaycastLayers : mask;
+            if (!Physics.SphereCast(new Vector3(ox, oy, oz), radius, dir.normalized, out hit, maxDistance > 0 ? maxDistance : Mathf.Infinity, layers, QueryTriggerInteraction.Ignore)) return 0;
+            return HitResult(hit);
+        }
+
+        static int HitResult(RaycastHit hit)
+        {
             vx = hit.point.x; vy = hit.point.y; vz = hit.point.z;
             nx = hit.normal.x; ny = hit.normal.y; nz = hit.normal.z;
             dist = hit.distance;
@@ -1104,6 +1239,10 @@ namespace Pot
             foreach (var go in objects.Values) if (go != null) Object.Destroy(go);
             objects.Clear();
             ids.Clear();
+            meshUsers.Clear();
+            meshOfObject.Clear();
+            colliderKinds.Clear();
+            collidersOff.Clear();
             foreach (var t in textures.Values) if (t != null) Object.Destroy(t);
             textures.Clear();
             foreach (var m in meshes.Values) if (m != null) Object.Destroy(m);

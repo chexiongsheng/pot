@@ -54,7 +54,15 @@ class MockEngine {
   emission(id, r, g, b) { this._get(id).emission = [r, g, b] }
   collider(id, enabled) { this._get(id).collider = enabled }
   layer(id, layer) { this._get(id).layer = layer }
+  colliderShape(id, kind, dynamic) {
+    const o = this._get(id)
+    if (kind && (kind === 'mesh' || kind === 'convex') && !String(o.shape).startsWith('mesh:') && !['cube', 'sphere', 'capsule', 'cylinder', 'plane', 'quad'].includes(o.shape)) return '没有网格，不能用 mesh / convex 碰撞体'
+    if (kind) o.colliderShape = kind
+    if (dynamic) o.dynamic = true
+    return ''
+  }
   raycast() { return this.nextHit ?? null }
+  sphereCast(ox, oy, oz, dx, dy, dz, radius) { this.lastSphereCast = { origin: [ox, oy, oz], direction: [dx, dy, dz], radius }; return this.nextHit ?? null }
   view(fov, near, far) { if (fov > 0) this.camera.fov = fov; if (near > 0) this.camera.near = near; if (far > 0) this.camera.far = far }
   fog(r, g, b, density) { this.fogState = { color: [r, g, b], density } }
   ambient(r, g, b, reflection) { this.ambientState = { color: [r, g, b], reflection } }

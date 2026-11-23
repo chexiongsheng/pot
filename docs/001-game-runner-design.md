@@ -158,9 +158,9 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 
 | 状态 | 数量 |
 |---|---|
-| ✅ 已完成 | 47 |
+| ✅ 已完成 | 48 |
 | ⚠️ 有出入 | 7 |
-| ❌ 未完成 | 8 |
+| ❌ 未完成 | 7 |
 
 #### 渲染与着色器（gfx）
 
@@ -223,7 +223,7 @@ Three.js 能在运行时现写着色器，是因为 WebGL 规定着色器以 GLS
 | 状态 | 能力 | 发现场景 | 说明 / 建议 |
 |---|---|---|---|
 | ✅ | `physics.addBox` 接受 `{x,y,z}` | 穿墙 | 原来 557 个碰撞盒有 452 个是 NaN |
-| ❌ | 动态碰撞与 MeshCollider | 远景 | 中继、闸杆等会动的网格挡不住射线，大块静态网格只能用盒子近似 |
+| ✅ | 动态碰撞与 MeshCollider | 远景 | 中继、闸杆等会动的网格挡不住射线，大块静态网格只能用盒子近似。现在 `spawn({ collider: 'mesh' \| 'convex' \| 'box', dynamic: true })`：dynamic 挂运动学刚体，移动不触发静态碰撞体重建；mesh: 形状的碰撞体跟随 `scene.mesh` 更新重新烘焙，网格从退化变为有效时自动补上，`collider: false` 的网格不再烘焙；另加 `scene.sphereCast` 粗射线 |
 | ✅ | 固定步长 `fixedUpdate` | 穿墙 | `ctx.on('fixed-update', (step, fixedTime) => …)`：按 `clock.fixedStep`（默认 1/60 秒）切分游戏时间，在 `update` 前触发；低帧率一帧补多步（`maxFixedSteps` 默认 8，超出计入 `fixedDropped`），`fixedAlpha` 供渲染插值，暂停、冻结、`scale` 与 `update` 一致。jimao 的玩家移动仍用子步（移到固定步需要相机插值，留待实机验证后再改） |
 | ✅ | `state.define` 的 `validate` | 穿墙 | `define(key, { init, validate })`：对沿用下来的数据（读档、冷重启、热重载、migrate 结果）调用，返回 `false`/原因字符串或抛错时用 `init` 重新初始化并告警，尽量原地写回保持引用；可在函数里就地修正字段。jimao 的玩家位置校验已改用它（越界或非有限数回出生点） |
 | ✅ | 跨热重载缓存网格 `scene.mesh(name, fn, { key })` | 远景 | key 相同时直接复用 Runner 里的网格，生成函数也不调用；`key: true` 由运行时按内容算哈希。同时着色器程序在源码没变时不再重新编译。world 单元热重载实测从约 6.3 秒降到 0.17 到 0.26 秒。更正原诊断：那 6 秒里网格重建只占约 1 秒，约 4.5 秒花在材质与着色器上 |

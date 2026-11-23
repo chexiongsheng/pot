@@ -57,9 +57,15 @@ export function createUnityHost(): Host {
       surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
       emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
       collider: (id, enabled) => S.SetCollider(id, enabled),
+      colliderShape: (id, kind, dynamic) => S.SetColliderShape(id, kind, dynamic) ?? '',
       layer: (id, layer) => S.SetLayer(id, layer),
       raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
         const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask)
+        if (!id) return null
+        return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist }
+      },
+      sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => {
+        const id = S.SphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask)
         if (!id) return null
         return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist }
       },

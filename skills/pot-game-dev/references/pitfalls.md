@@ -133,7 +133,8 @@
 ### 移植 canvas 贴图与贴花
 
 - `canvas.data` 是预乘 alpha 的 Float32；要非预乘 RGBA8 用 `pixels()`，直接喂 `scene.texture` 时用 `pixels(true)`（行序从下到上），否则贴图上下颠倒。
-- 动态网格池（弹孔、贴花）初始全零时，`spawn` 不会建碰撞体；但池子本身也不该参与射线检测，spawn 时传 `collider: false`。
+- 动态网格池（弹孔、贴花）初始全零时，`spawn` 不会建碰撞体，但网格一旦有效就会补建，并在每次 `scene.mesh` 更新时重新烘焙。池子本身不该参与射线检测，spawn 时传 `collider: false`（关掉后不再烘焙）。
+- 会动的网格（门、闸杆、中继）要挡射线：`spawn({ shape: 'mesh:名字', collider: 'mesh', dynamic: true })`。不加 dynamic 时每次移动都会让 PhysX 重建静态碰撞体；只需粗略命中时用 `collider: 'box'` 或 `'convex'` 更省。
 - gfx 没有 polygon offset，贴花沿法线外推几毫米防 z-fighting；网格没有切线，法线贴图用 `dFdx/dFdy` 重建切线框架。
 - 调试命中类效果不要靠模拟鼠标（失焦会触发暂停），给游戏加一个调试事件，在 `eval` 里 `ctx.emit` 后看日志和截图。
 

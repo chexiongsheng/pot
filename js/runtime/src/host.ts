@@ -49,9 +49,13 @@ export interface Engine {
 
   // ---- 碰撞与射线 ----
   collider(id: number, enabled: boolean): void
+  /** 换碰撞体形状：kind 为 mesh / convex / box（空串表示不换），dynamic 为 true 时挂运动学刚体。成功返回空串 */
+  colliderShape(id: number, kind: string, dynamic: boolean): string
   layer(id: number, layer: number): void
   /** 未命中返回 null；命中非 pot 对象时 id 为 -1 */
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDistance: number, mask: number): RaycastResult | null
+  /** 球体扫掠，返回同 raycast */
+  sphereCast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, radius: number, maxDistance: number, mask: number): RaycastResult | null
 
   // ---- 相机、环境、灯光 ----
   /** 0 或负数表示不变 */
