@@ -218,8 +218,13 @@ export interface MeshData {
   indices: ArrayLike<number>
   normals?: ArrayLike<number>
   uvs?: ArrayLike<number>
-  /** RGBA（sRGB 0 到 1） */
+  /**
+   * RGBA，按 colorSpace 解释（默认 sRGB）。以 Float32 存储，大于 1 的 HDR 值原样保留（不截断），
+   * 内置材质的 vertexColors 不做 saturate，配合 post({ bloom }) 可以直接发光
+   */
   colors?: ArrayLike<number>
+  /** colors 的色彩空间：srgb（默认，线性色彩空间项目里转线性）或 linear（已是线性值，原样写入，例如 three 的顶点色） */
+  colorSpace?: 'srgb' | 'linear'
   /**
    * 切线 xyzw（引擎坐标；w 为 ±1，副切线 = cross(normal, tangent.xyz) * w）。
    * 省略时有 uvs 就由引擎按 UV 自动计算；自定义着色器从 pot_Tangent / vTangent 读到
@@ -981,12 +986,18 @@ export class SceneService extends Service {
     const vcount = positions.byteLength / 12
     const attributes = meshAttributes(name, d.attributes, vcount)
     if (attributes.length && boneIndices) throw new Error(`scene.mesh(${name})：自定义顶点属性不能与蒙皮同时使用`)
+    if (d.colorSpace !== undefined && d.colorSpace !== 'srgb' && d.colorSpace !== 'linear') throw new Error(`scene.mesh(${name})：colorSpace 只能是 srgb 或 linear`)
+    const linearColors = !!colors && d.colorSpace === 'linear'
     if (options.key === true) {
-      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes)])
+      key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes), ...(linearColors ? [new Uint32Array([0x4c494e]).buffer] : [])])
       const cached = engine.meshCached(name, key)
       if (cached >= 0) return cached
     }
-    const count = engine.mesh(name, positions, normals, uvs, colors, indices, key)
+    const count = engine.mesh(name, positions, normals, uvs, linearColors ? null : colors, indices, key)
+    if (linearColors) {
+      const error = engine.meshColors(name, colors!, true)
+      if (error) throw new Error(`scene.mesh(${name})：${error}`)
+    }
     if (tangents) {
       const error = engine.meshTangents(name, tangents)
       if (error) throw new Error(`scene.mesh(${name})：${error}`)

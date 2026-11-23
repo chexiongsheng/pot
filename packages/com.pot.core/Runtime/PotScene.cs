@@ -726,6 +726,37 @@ namespace Pot
             return "";
         }
 
+        static float LinearToSrgb(float v) => v <= 0.0031308f ? v * 12.92f : 1.055f * Mathf.Pow(v, 1f / 2.4f) - 0.055f;
+
+        /// <summary>
+        /// 替换网格顶点色（紧跟在 Mesh 之后调用）。colors 为 Float32 rgba，每顶点 4 个，以 Float32 存储不截断（HDR 值保留）。
+        /// linear 为 true 表示输入已是线性值：线性色彩空间项目原样写入，Gamma 项目转回 sRGB；为 false 时与 Mesh 相同按 sRGB 处理。成功返回空串。
+        /// </summary>
+        [Preserve]
+        public static string MeshColors(string name, Puerts.ArrayBuffer colors, bool linear)
+        {
+            Mesh mesh;
+            if (!meshes.TryGetValue(name, out mesh) || mesh == null) return "未注册的网格：" + name;
+            var c = Floats(colors);
+            var vcount = mesh.vertexCount;
+            if (c == null || c.Length != vcount * 4)
+            {
+                meshKeys.Remove(name);
+                return "colors 须为每顶点 4 个数（rgba），共 " + (vcount * 4) + " 个";
+            }
+            var projectLinear = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            var cs = new Color[vcount];
+            for (var i = 0; i < vcount; i++)
+            {
+                float r = c[i * 4], g = c[i * 4 + 1], b = c[i * 4 + 2], a = c[i * 4 + 3];
+                if (linear && !projectLinear) { r = LinearToSrgb(r); g = LinearToSrgb(g); b = LinearToSrgb(b); }
+                else if (!linear && projectLinear) { r = SrgbToLinear(r); g = SrgbToLinear(g); b = SrgbToLinear(b); }
+                cs[i] = new Color(r, g, b, a);
+            }
+            mesh.colors = cs;
+            return "";
+        }
+
         // 网格 → 自定义顶点属性名 → UV 通道（1-7）
         static readonly Dictionary<Mesh, Dictionary<string, int>> meshAttrs = new Dictionary<Mesh, Dictionary<string, int>>();
 

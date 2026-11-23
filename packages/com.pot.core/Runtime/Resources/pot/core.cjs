@@ -4290,12 +4290,18 @@ var pot = (() => {
       const vcount = positions.byteLength / 12;
       const attributes = meshAttributes(name, d.attributes, vcount);
       if (attributes.length && boneIndices) throw new Error(`scene.mesh(${name})：自定义顶点属性不能与蒙皮同时使用`);
+      if (d.colorSpace !== void 0 && d.colorSpace !== "srgb" && d.colorSpace !== "linear") throw new Error(`scene.mesh(${name})：colorSpace 只能是 srgb 或 linear`);
+      const linearColors = !!colors && d.colorSpace === "linear";
       if (options.key === true) {
-        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes)]);
+        key = contentKey([positions, normals, uvs, colors, indices, boneIndices, boneWeights, bindPoses, tangents, ...attributeKeyParts(attributes), ...linearColors ? [new Uint32Array([4999502]).buffer] : []]);
         const cached = engine.meshCached(name, key);
         if (cached >= 0) return cached;
       }
-      const count = engine.mesh(name, positions, normals, uvs, colors, indices, key);
+      const count = engine.mesh(name, positions, normals, uvs, linearColors ? null : colors, indices, key);
+      if (linearColors) {
+        const error = engine.meshColors(name, colors, true);
+        if (error) throw new Error(`scene.mesh(${name})：${error}`);
+      }
       if (tangents) {
         const error = engine.meshTangents(name, tangents);
         if (error) throw new Error(`scene.mesh(${name})：${error}`);
@@ -6959,6 +6965,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         meshCached: (name, key) => S.MeshCached(name, key),
         meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
         meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? "",
+        meshColors: (name, colors, linear) => S.MeshColors(name, colors, linear) ?? "",
         meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
         matFloat: (id, prop, value) => S.MatFloat(id, prop, value),

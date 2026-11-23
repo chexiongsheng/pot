@@ -91,7 +91,7 @@ class MockEngine {
   }
   mesh(name, positions, normals, uvs, colors, indices, key) {
     const old = (this.meshes ??= new Map()).get(name)
-    this.meshes.set(name, { vertices: positions.byteLength / 12, indices: indices.byteLength / 4, key: key || '', uploads: (old?.uploads ?? 0) + 1 })
+    this.meshes.set(name, { vertices: positions.byteLength / 12, colors: colors ? { linear: false, data: [...new Float32Array(colors)] } : null, indices: indices.byteLength / 4, key: key || '', uploads: (old?.uploads ?? 0) + 1 })
     return positions.byteLength / 12
   }
   meshCached(name, key) { const m = this.meshes?.get(name); return m && key && m.key === key ? m.vertices : -1 }
@@ -101,6 +101,14 @@ class MockEngine {
     const t = new Float32Array(tangents)
     if (t.length !== m.vertices * 4) { m.key = ''; return `tangents 须为每顶点 4 个数（xyzw），共 ${m.vertices * 4} 个` }
     m.tangents = [...t]
+    return ''
+  }
+  meshColors(name, colors, linear) {
+    const m = this.meshes?.get(name)
+    if (!m) return '未注册的网格：' + name
+    const d = new Float32Array(colors)
+    if (d.length !== m.vertices * 4) { m.key = ''; return `colors 须为每顶点 4 个数（rgba），共 ${m.vertices * 4} 个` }
+    m.colors = { linear, data: [...d] }
     return ''
   }
   meshAttribute(name, channel, attr, size, data) {
