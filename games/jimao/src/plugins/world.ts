@@ -246,9 +246,12 @@ export async function apply(ctx: Context) {
     scene.mesh(name, () => toMesh(d.mesh.geometry), meshKey)
     const r = resolveToken(d.material)
     const tr = toUnityTransform(d.mesh.matrixWorld)
+    // 中继、闸杆等会动的实心网格也要挡子弹：网格碰撞体 + 运动学刚体，移动时不重建静态碰撞体
+    const solid = !d.material.transparent && d.material.kind === 'std'
     const ent = scene.spawn({
       shape: `mesh:${name}`, name: `level-dyn:${d.material.name}`, position: tr.position, rotation: tr.rotation, scale: tr.scale,
-      color: r.color, material: { ...r.material, shadows: d.mesh.castShadow }, collider: false,
+      color: r.color, material: { ...r.material, shadows: d.mesh.castShadow },
+      collider: solid ? 'mesh' : false, dynamic: solid, layer: solid ? LEVEL_LAYER : undefined,
     })
     if (r.mat) mats!.apply(ent, r.mat, { shadows: d.mesh.castShadow })
     dynamic.push({ mesh: d.mesh, ent, last: d.mesh.matrixWorld.elements.slice(), token: d.material, version: d.material.version })
