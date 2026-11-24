@@ -944,6 +944,14 @@ interface Cmd {
 
 欧拉角与 `scene.spawn` 的 `rotation` 用同一约定，换算函数优先用 `scene.ts` 现有的，没有就新增并加测试。表现对象不经调用单元的 `ctx.effect`，由 `WorldService` 自己管，单元重载时不会被误回收。
 
+实施时补充的约定（M1）：
+
+- 表现由 `WorldService` 自己的 `update` 处理器驱动（先清扫，再表现）。`WorldService` 装在 `PluginsService` 之前，它的处理器先于游戏单元的 `update`，所以自然在 `ui` 之前。
+- `view.enter`、`update`、`exit` 收到的 `ctx` 是 `WorldService` 构造时的 ctx，用它 `scene.spawn` 的对象归 `(host)`；实体消失或积木定义被替换时，`exit` 之后由内核逐个 `destroy`。积木定义没变（例如只改了 `game.tsx`，积木在别的模块里）时对象保留，不重建。
+- 跟随实体的对象位置与实体位置相同，不保留创建时的位置偏移；需要偏移的效果在 `view.update` 里自己摆放、不要从 `enter` 返回。
+- `sun` 写成对象时缺省 `rot: [50, -30, 0]`、`intensity: 1`、`color: '#ffffff'`；`stage` 去掉 `sun`（或整个 `stage`）时平行光销毁，背景与相机保持最后一次的值。`camera` 的 `at`、`look` 任一变化时两者一起重新应用（`lookAt` 依赖位置）。
+- 欧拉角换算新增在 `scene.ts`：`eulerToQuaternion`（`q = qY * qX * qZ`，即 Unity 的 `Quaternion.Euler`）与 `slerpQuaternion`（取短弧）。
+
 ### 15.11 积木、预制件、界面、defineGame
 
 ```ts
@@ -971,7 +979,7 @@ M1 的官方积木：`shape`（`kind` 为 cube、sphere、plane、cylinder 等 `
 
 M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`moveTopdown`、`trigger` 半径 0，标签 `player`；半径 0 即按玩家中心点判定，与 hello 的“玩家中心进入金币 0.8 米内即拾取”一致）、`coin`（`shape` 黄色球、`trigger`、`spin`，标签 `coin`）、`ground`（`shape` 平面）、`wall`（`shape` 方块）、`bullet`（`shape` 小球、`projectile`、`lifetime`、`trigger`）。
 
-界面求值器：`ui(w, ctx.ui)` 每帧在表现之后调用，返回的树里只认片段、数组、函数组件和 `<text>`。`<text>` 的子节点里的字符串和数字拼成一行；`at` 是九宫格位置名（`top-left`、`top`、`top-right`、`left`、`center`、`right`、`bottom-left`、`bottom`、`bottom-right`）或像素坐标 `[x, y]`，九宫格离屏幕边缘 16 像素；`size`、`color`、`bold` 原样传给 `ctx.ui.text`，对齐方式由 `at` 推出。其他标签报错，同一个标签只报一次。
+界面求值器：`ui(w, ctx.ui)` 每帧在表现之后调用，返回的树里只认片段、数组、函数组件和 `<text>`。`<text>` 的子节点里的字符串和数字拼成一行；`at` 是九宫格位置名（`top-left`、`top`、`top-right`、`left`、`center`、`right`、`bottom-left`、`bottom`、`bottom-right`）或像素坐标 `[x, y]`，九宫格离屏幕边缘 16 像素；`size`、`color`、`bold` 原样传给 `ctx.ui.text`，对齐方式由 `at` 推出。其他标签报错，同一个标签只报一次。实现为 `createUIRenderer(onError)`（`world/ui-eval.ts`），返回 `(tree, ui) => void`，求值器自带去重表；`defineGame` 每个单元建一个。`<text>` 缺省 `at` 为 `top-left`；九宫格的锚点是去掉 16 像素边距后的矩形的角、边中点和中心，水平对齐依次为 left、center、right，垂直为 top、middle、bottom；`[x, y]` 为左上对齐。数组里的 `null`、`false` 忽略；直接写在树里（不在 `<text>` 里）的字符串报错。
 
 `defineGame(def)` 返回 `{ apply(ctx) }`，不设 `name`，由加载器按文件名命名。`apply` 依次：登记 `blocks`、`prefabs`；合并 `vars`；以 `s = { state: 'play', params: {}, data: ctx.data }` 求值 `scene` 并 `ctx.world.mount`；有 `ui` 时 `ctx.on('update', ...)` 每帧求值界面。登记和 `on` 都随单元回收。
 

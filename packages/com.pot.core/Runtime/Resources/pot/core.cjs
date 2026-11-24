@@ -23,6 +23,7 @@ var pot = (() => {
   // runtime/src/index.ts
   var index_exports = {};
   __export(index_exports, {
+    ANCHORS: () => ANCHORS,
     API_VERSION: () => API_VERSION,
     AudioService: () => AudioService,
     BUILTIN_UNIFORMS: () => BUILTIN_UNIFORMS,
@@ -68,9 +69,11 @@ var pot = (() => {
     Texture: () => Texture,
     TimerService: () => TimerService,
     UIService: () => UIService,
+    UI_MARGIN: () => UI_MARGIN,
     VERSION: () => VERSION,
     ValidationError: () => ValidationError,
     WorldService: () => WorldService,
+    WorldView: () => WorldView,
     ancestors: () => ancestors,
     applyUniforms: () => applyUniforms,
     assertSerializable: () => assertSerializable,
@@ -83,6 +86,7 @@ var pot = (() => {
     createCallable: () => createCallable,
     createElement: () => createElement,
     createRuntime: () => createRuntime,
+    createUIRenderer: () => createUIRenderer,
     createUnit: () => createUnit,
     createUnityHost: () => createUnityHost,
     currentRuntime: () => currentRuntime,
@@ -95,6 +99,7 @@ var pot = (() => {
     encode: () => encode,
     encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
+    eulerToQuaternion: () => eulerToQuaternion,
     evaluate: () => evaluate,
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
@@ -125,6 +130,7 @@ var pot = (() => {
     rayPlane: () => rayPlane,
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
+    slerpQuaternion: () => slerpQuaternion,
     sourcePrefix: () => sourcePrefix,
     symbols: () => symbols,
     threeChunks: () => threeChunks,
@@ -2339,9 +2345,9 @@ var pot = (() => {
     exportJSON() {
       return JSON.stringify(encode(this.snapshot()));
     }
-    importJSON(json) {
-      if (!json) return;
-      const data = decode(JSON.parse(json));
+    importJSON(json2) {
+      if (!json2) return;
+      const data = decode(JSON.parse(json2));
       for (const key of Object.keys(data)) {
         const saved = data[key];
         this._entries.set(key, { value: saved.value, owner: saved.owner, version: saved.version, defined: false });
@@ -3102,7 +3108,7 @@ var pot = (() => {
     }
     /** @internal */
     _coverage(polys) {
-      const W = this.canvas.width, H = this.canvas.height;
+      const W = this.canvas.width, H2 = this.canvas.height;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const p of polys) for (let i = 0; i < p.length; i += 2) {
         const x = p[i], y = p[i + 1];
@@ -3113,7 +3119,7 @@ var pot = (() => {
         if (y > maxY) maxY = y;
       }
       const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(W, Math.ceil(maxX));
-      const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H, Math.ceil(maxY));
+      const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H2, Math.ceil(maxY));
       if (x1 <= x0 || y1 <= y0) return null;
       const bw = x1 - x0, bh = y1 - y0, stride = bw + 2;
       const acc = new Float32Array(stride * bh);
@@ -3907,6 +3913,43 @@ var pot = (() => {
     }
     return t;
   }
+  function eulerToQuaternion(x, y, z, out = [0, 0, 0, 1]) {
+    const h = Math.PI / 360;
+    const sx = Math.sin(x * h), cx = Math.cos(x * h);
+    const sy = Math.sin(y * h), cy = Math.cos(y * h);
+    const sz = Math.sin(z * h), cz = Math.cos(z * h);
+    const ax = sx * cz, ay = -sx * sz, az = cx * sz, aw = cx * cz;
+    out[0] = cy * ax + sy * az;
+    out[1] = cy * ay + sy * aw;
+    out[2] = cy * az - sy * ax;
+    out[3] = cy * aw - sy * ay;
+    return out;
+  }
+  function slerpQuaternion(a, b, t, out = [0, 0, 0, 1]) {
+    let bx = b[0], by = b[1], bz = b[2], bw = b[3];
+    let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw;
+    if (cos < 0) {
+      cos = -cos;
+      bx = -bx;
+      by = -by;
+      bz = -bz;
+      bw = -bw;
+    }
+    let k0 = 1 - t, k1 = t;
+    if (cos < 0.9995) {
+      const angle = Math.acos(cos);
+      const sin = Math.sin(angle);
+      k0 = Math.sin((1 - t) * angle) / sin;
+      k1 = Math.sin(t * angle) / sin;
+    }
+    const x = k0 * a[0] + k1 * bx, y = k0 * a[1] + k1 * by, z = k0 * a[2] + k1 * bz, w = k0 * a[3] + k1 * bw;
+    const len = Math.hypot(x, y, z, w) || 1;
+    out[0] = x / len;
+    out[1] = y / len;
+    out[2] = z / len;
+    out[3] = w / len;
+    return out;
+  }
   function parseColor(color) {
     if (typeof color === "string") {
       let c = colorCache.get(color);
@@ -4283,7 +4326,7 @@ var pot = (() => {
       const engine = this.host.engine;
       const width = options.width ?? 256;
       const height = options.height ?? 64;
-      const json = JSON.stringify({
+      const json2 = JSON.stringify({
         text: options.text,
         width,
         height,
@@ -4296,7 +4339,7 @@ var pot = (() => {
       });
       let id = 0;
       const dispose = this.ctx.effect(() => {
-        id = engine.textTexture(json);
+        id = engine.textTexture(json2);
         return () => engine.destroyTexture(id);
       }, `scene.text(${options.text})`);
       return new Texture(id, width, height, dispose);
@@ -6525,7 +6568,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           }
           return id;
         });
-        const json = JSON.stringify({
+        const json2 = JSON.stringify({
           shared: chain._shared,
           stage: options.after === "urp" ? 1 : 0,
           targets: Object.entries(targets).map(([name, t]) => ({
@@ -6545,7 +6588,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             blend: { none: 0, alpha: 1, add: 2, premultiplied: 3 }[p.blend ?? "none"]
           }))
         });
-        const error = engine.gfxPost(json);
+        const error = engine.gfxPost(json2);
         if (error) throw new Error(`gfx.post：${error}`);
         if (this._post) this._post._active = false;
         this._post = chain;
@@ -7277,6 +7320,189 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return out;
   }
 
+  // runtime/src/world/view.ts
+  var json = (v) => v === void 0 ? void 0 : JSON.stringify(v);
+  function normalizeSun(sun) {
+    if (sun === void 0 || sun === null || sun === false) return null;
+    if (Array.isArray(sun)) return { rot: sun, intensity: 1, color: "#ffffff" };
+    return { rot: sun.rot ?? [50, -30, 0], intensity: sun.intensity ?? 1, color: sun.color ?? "#ffffff" };
+  }
+  var WorldView = class {
+    constructor(_world, _root, _guard) {
+      __publicField(this, "_world", _world);
+      __publicField(this, "_root", _root);
+      __publicField(this, "_guard", _guard);
+      __publicField(this, "_entities", /* @__PURE__ */ new Map());
+      __publicField(this, "_ids", new Int32Array(64));
+      __publicField(this, "_buf", new Float32Array(640));
+      __publicField(this, "_qa", [0, 0, 0, 1]);
+      __publicField(this, "_qb", [0, 0, 0, 1]);
+      __publicField(this, "_q", [0, 0, 0, 1]);
+      __publicField(this, "_background");
+      __publicField(this, "_sunKey");
+      __publicField(this, "_sun", null);
+      __publicField(this, "_camera");
+    }
+    /** 当前登记的场景对象数（测试与开发工具用） */
+    get objectCount() {
+      let n2 = 0;
+      for (const v of this._entities.values()) for (const b of v.blocks.values()) n2 += b.objs.length;
+      return n2;
+    }
+    /** 每个游戏帧调用一次 */
+    frame() {
+      const w = this._world;
+      this._applyStage(w.stage);
+      const data = w.data;
+      const registry = w.registry;
+      const ordered = registry.ordered();
+      const ctx = this._root;
+      const seen = /* @__PURE__ */ new Set();
+      for (const key in data.entities) {
+        const e = data.entities[key];
+        seen.add(e.id);
+        let v = this._entities.get(e.id);
+        if (!v) this._entities.set(e.id, v = { e, blocks: /* @__PURE__ */ new Map() });
+        v.e = e;
+        for (const [name, rec] of v.blocks) {
+          if (e.b[name] && registry.block(name) === rec.def) continue;
+          this._exit(rec, e);
+          v.blocks.delete(name);
+        }
+        for (const def of ordered) {
+          const me = e.b[def.name];
+          if (!def.view || !me) continue;
+          const rec = v.blocks.get(def.name);
+          if (rec) {
+            rec.me = me;
+            continue;
+          }
+          const created = { def, me, objs: [], scales: [] };
+          v.blocks.set(def.name, created);
+          if (def.view.enter) {
+            this._guard(`积木 ${def.name}.view.enter`, () => {
+              const out = def.view.enter(me, e, ctx, w);
+              const list = out === void 0 || out === null ? [] : Array.isArray(out) ? out : [out];
+              for (const obj of list) {
+                if (!(obj instanceof Entity)) continue;
+                created.objs.push(obj);
+                created.scales.push(obj.scale);
+              }
+            });
+          }
+        }
+      }
+      for (const [id, v] of this._entities) {
+        if (seen.has(id)) continue;
+        for (const rec of v.blocks.values()) this._exit(rec, v.e);
+        this._entities.delete(id);
+      }
+      for (const def of ordered) {
+        const update = def.view?.update;
+        if (!update) continue;
+        for (const v of this._entities.values()) {
+          const rec = v.blocks.get(def.name);
+          if (rec) this._guard(`积木 ${def.name}.view.update`, () => update(rec.me, v.e, rec.objs, ctx, w));
+        }
+      }
+      this._sync();
+    }
+    _exit(rec, e) {
+      const exit = rec.def.view?.exit;
+      if (exit) this._guard(`积木 ${rec.def.name}.view.exit`, () => exit(rec.me, e, rec.objs, this._root, this._world));
+      for (const obj of rec.objs) {
+        try {
+          obj.destroy();
+        } catch {
+        }
+      }
+      rec.objs = [];
+      rec.scales = [];
+    }
+    _sync() {
+      let count = 0;
+      for (const v of this._entities.values()) for (const b of v.blocks.values()) count += b.objs.length;
+      if (!count) return;
+      if (this._ids.length < count) {
+        let size = this._ids.length;
+        while (size < count) size *= 2;
+        this._ids = new Int32Array(size);
+        this._buf = new Float32Array(size * 10);
+      }
+      const alpha = this._root.clock.fixedAlpha;
+      const ids = this._ids;
+      const buf = this._buf;
+      let k = 0;
+      for (const v of this._entities.values()) {
+        const e = v.e;
+        const prev = this._world.prev.get(e.id);
+        const p0 = prev?.pos ?? e.pos;
+        const x = p0[0] + (e.pos[0] - p0[0]) * alpha;
+        const y = p0[1] + (e.pos[1] - p0[1]) * alpha;
+        const z = p0[2] + (e.pos[2] - p0[2]) * alpha;
+        const r1 = e.rot;
+        const r0 = prev?.rot ?? r1;
+        eulerToQuaternion(r1[0], r1[1], r1[2], this._qb);
+        const q = r0 === r1 || r0[0] === r1[0] && r0[1] === r1[1] && r0[2] === r1[2] ? this._qb : slerpQuaternion(eulerToQuaternion(r0[0], r0[1], r0[2], this._qa), this._qb, alpha, this._q);
+        for (const b of v.blocks.values()) {
+          for (let i = 0; i < b.objs.length; i++) {
+            const s = b.scales[i];
+            const at = k * 10;
+            ids[k] = b.objs[i].id;
+            buf[at] = x;
+            buf[at + 1] = y;
+            buf[at + 2] = z;
+            buf[at + 3] = q[0];
+            buf[at + 4] = q[1];
+            buf[at + 5] = q[2];
+            buf[at + 6] = q[3];
+            buf[at + 7] = e.scale[0] * s[0];
+            buf[at + 8] = e.scale[1] * s[1];
+            buf[at + 9] = e.scale[2] * s[2];
+            k++;
+          }
+        }
+      }
+      this._root.scene.setTransforms(ids, buf, { count: k });
+    }
+    _applyStage(stage) {
+      const scene = this._root.scene;
+      const background = json(stage?.background);
+      if (background !== void 0 && background !== this._background) {
+        this._background = background;
+        this._guard("<stage background>", () => scene.background(stage.background));
+      }
+      const sun = normalizeSun(stage?.sun);
+      const sunKey = json(sun);
+      if (sunKey !== this._sunKey) {
+        this._sunKey = sunKey;
+        if (this._sun) {
+          const old = this._sun;
+          this._sun = null;
+          try {
+            old.destroy();
+          } catch {
+          }
+        }
+        if (sun) {
+          this._guard("<stage sun>", () => {
+            this._sun = scene.light({ type: "directional", name: "sun", rotation: sun.rot, intensity: sun.intensity, color: sun.color });
+          });
+        }
+      }
+      const camera = stage?.camera;
+      const cameraKey = json(camera ? { at: camera.at, look: camera.look } : void 0);
+      if (cameraKey !== void 0 && cameraKey !== this._camera) {
+        this._camera = cameraKey;
+        this._guard("<stage camera>", () => {
+          const cam = scene.camera;
+          if (camera.at) cam.position = camera.at;
+          if (camera.look) cam.lookAt(camera.look);
+        });
+      }
+    }
+  };
+
   // runtime/src/world/world.ts
   var DEFAULT_CONTROLS = {
     axes: { move: "move", look: "look" },
@@ -7295,6 +7521,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     constructor(ctx) {
       super(ctx, "world");
       __publicField(this, "registry", new Registry());
+      /** 表现（15.10） */
+      __publicField(this, "view");
       /** 构造时的 ctx：服务自己的东西挂在这里 */
       __publicField(this, "_root");
       __publicField(this, "_controls", DEFAULT_CONTROLS);
@@ -7325,7 +7553,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       this._root = ctx;
       ctx.state.define("world", { init: initData });
       ctx.on("fixed-update", () => this._step());
-      ctx.on("update", () => this._sweep());
+      this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, void 0, fn));
+      ctx.on("update", () => {
+        this._sweep();
+        this.view.frame();
+      });
     }
     /** 当前的 World 数据（每次重新取，不缓存） */
     get data() {
@@ -7978,7 +8210,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   // runtime/src/unity.ts
   function createUnityHost() {
     const Pot = CS.Pot;
-    const H = Pot.PotHost;
+    const H2 = Pot.PotHost;
     const FS2 = Pot.GameFS;
     const S = Pot.PotScene;
     const I = Pot.PotInput;
@@ -7988,7 +8220,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const G = Pot.PotGfx;
     return {
       platform: "unity",
-      log: (level, text) => H.Log(level, text),
+      log: (level, text) => H2.Log(level, text),
       readText: (path) => {
         const text = FS2.ReadText(path);
         return text === null || text === void 0 ? null : text;
@@ -7998,10 +8230,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return text === null || text === void 0 ? null : text;
       },
       cacheWrite: (bucket, key, text) => FS2.CacheWrite(bucket, key, text),
-      gc: () => H.RequestGC(),
-      send: (message) => H.Send(message),
+      gc: () => H2.RequestGC(),
+      send: (message) => H2.Send(message),
       frames: true,
-      loading: (progress, text) => H.OnLoading(progress, text),
+      loading: (progress, text) => H2.OnLoading(progress, text),
       engine: {
         spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
         destroy: (id) => S.Destroy(id),
@@ -8074,7 +8306,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         audioPause: (paused) => A.Pause(paused),
         texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
         destroyTexture: (id) => S.DestroyTexture(id),
-        textTexture: (json) => R.TextTexture(json),
+        textTexture: (json2) => R.TextTexture(json2),
         canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
         mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
         meshCached: (name, key) => S.MeshCached(name, key),
@@ -8086,8 +8318,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
         matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
         ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
-        render: (kind, json) => R.Configure(kind, json) ?? "",
-        burst: (json) => R.Burst(json),
+        render: (kind, json2) => R.Configure(kind, json2) ?? "",
+        burst: (json2) => R.Burst(json2),
         gfxBackend: () => G.Backend() ?? "",
         gfxUnsupported: () => G.Unsupported() ?? "",
         gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
@@ -8099,7 +8331,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxInstances: (id, count, layout, data) => G.Instances(id, count, layout, data) ?? "",
         gfxBakeBegin: () => G.BakeBegin(),
         gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
-        gfxPost: (json) => G.Post(json) ?? "",
+        gfxPost: (json2) => G.Post(json2) ?? "",
         gfxPostEnable: (pass, on) => G.PostEnable(pass, on) ?? ""
       }
     };
@@ -8160,6 +8392,104 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     bindEntry("unity.info", () => unity.info());
   }
   bindUnity();
+
+  // runtime/src/world/ui-eval.ts
+  var UI_MARGIN = 16;
+  var ANCHORS = {
+    "top-left": [0, 0],
+    top: [0.5, 0],
+    "top-right": [1, 0],
+    left: [0, 0.5],
+    center: [0.5, 0.5],
+    right: [1, 0.5],
+    "bottom-left": [0, 1],
+    bottom: [0.5, 1],
+    "bottom-right": [1, 1]
+  };
+  var H = ["left", "center", "right"];
+  var V = ["top", "middle", "bottom"];
+  var MAX_DEPTH = 64;
+  function textOf(children, out) {
+    if (children === null || children === void 0 || typeof children === "boolean") return;
+    if (typeof children === "string" || typeof children === "number") {
+      out.push(String(children));
+      return;
+    }
+    if (Array.isArray(children)) {
+      for (const c of children) textOf(c, out);
+      return;
+    }
+    throw new Error("<text> 的子节点只能是字符串和数字");
+  }
+  function createUIRenderer(onError) {
+    const reported = /* @__PURE__ */ new Set();
+    const report = (message) => {
+      if (reported.has(message)) return;
+      if (reported.size > 256) reported.clear();
+      reported.add(message);
+      onError(message);
+    };
+    const text = (node, ui) => {
+      const p = node.props;
+      const parts = [];
+      textOf(p.children, parts);
+      const content = parts.join("").replace(/[\r\n]+/g, " ");
+      const at = p.at ?? "top-left";
+      let x, y, h = 0, v = 0;
+      if (typeof at === "string") {
+        const anchor = ANCHORS[at];
+        if (!anchor) throw new Error(`<text> 的 at 不认识 "${at}"，可用 ${Object.keys(ANCHORS).join("、")} 或 [x, y]`);
+        x = UI_MARGIN + (ui.width - UI_MARGIN * 2) * anchor[0];
+        y = UI_MARGIN + (ui.height - UI_MARGIN * 2) * anchor[1];
+        h = anchor[0] * 2;
+        v = anchor[1] * 2;
+      } else if (Array.isArray(at) && at.length === 2 && at.every((n2) => typeof n2 === "number" && Number.isFinite(n2))) {
+        x = at[0];
+        y = at[1];
+      } else {
+        throw new Error("<text> 的 at 必须是九宫格位置名或 [x, y]");
+      }
+      ui.text(content, x, y, { size: p.size, color: p.color, bold: p.bold, align: H[h], valign: V[v] });
+    };
+    const visit = (child, ui, depth, source) => {
+      if (child === null || child === void 0 || typeof child === "boolean") return;
+      if (depth > MAX_DEPTH) {
+        report(`${sourcePrefix(source)}界面树嵌套超过 ${MAX_DEPTH} 层`);
+        return;
+      }
+      if (Array.isArray(child)) {
+        for (const c of child) visit(c, ui, depth + 1, source);
+        return;
+      }
+      if (!isNode(child)) {
+        report(`${sourcePrefix(source)}界面树里的文字要放在 <text> 里`);
+        return;
+      }
+      const node = child;
+      const type = node.type;
+      if (type === Fragment) return visit(node.props.children, ui, depth + 1, node.source ?? source);
+      if (typeof type === "function" && !isPrefab(type)) {
+        let out;
+        try {
+          out = type(node.props);
+        } catch (error) {
+          report(`${sourcePrefix(node.source)}界面组件 ${nodeName(node)} 出错：${error?.message ?? error}`);
+          return;
+        }
+        return visit(out, ui, depth + 1, node.source ?? source);
+      }
+      if (type === "text") {
+        try {
+          text(node, ui);
+        } catch (error) {
+          report(`${sourcePrefix(node.source)}${error?.message ?? error}`);
+        }
+        return;
+      }
+      report(`${sourcePrefix(node.source)}界面树里不认识 <${nodeName(node)}>，只能用 <text>、片段和函数组件`);
+    };
+    return (tree, ui) => visit(tree, ui, 0);
+  }
 
   // runtime/src/index.ts
   function definePlugin(plugin) {

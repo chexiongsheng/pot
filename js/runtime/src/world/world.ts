@@ -1,6 +1,6 @@
 /**
  * WorldService（ctx.world）：实体数据、挂载与对比、固定步调度、事件与规则、指令、触发检测。
- * 见 004 第 15.5 至 15.9 节。表现（15.10）在 view.ts。
+ * 见 004 第 15.5 至 15.9 节。表现（15.10）在 view.ts，由这里的 update 驱动。
  *
  * - 持久数据只放 state 的 'world' 条目，每次进入 fixed-update / update 都重新 get，不跨帧缓存引用。
  * - 内存表（规则、事件队列、上一步变换、指令）丢了可以重建。
@@ -17,6 +17,7 @@ import { evaluate } from './tree'
 import type { EntitySpec, RuleSpec, StageSpec } from './tree'
 import { overlappingPairs } from './collide'
 import type { Collider } from './collide'
+import { WorldView } from './view'
 
 declare module 'cordis' {
   interface Context {
@@ -121,6 +122,8 @@ const same = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b)
 export class WorldService extends Service {
   static inject = ['clock', 'state', 'input', 'scene', 'ui']
   readonly registry = new Registry()
+  /** 表现（15.10） */
+  readonly view: WorldView
   /** 构造时的 ctx：服务自己的东西挂在这里 */
   private _root: Context
   private _controls: Required<Controls> = DEFAULT_CONTROLS
@@ -155,7 +158,11 @@ export class WorldService extends Service {
     // 构造时 define 一次占住归属（host）；冷重启的 importJSON 会整个替换，之后一律 get
     ctx.state.define<WorldData>('world', { init: initData })
     ctx.on('fixed-update', () => this._step())
-    ctx.on('update', () => this._sweep())
+    this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, undefined, fn))
+    ctx.on('update', () => {
+      this._sweep()
+      this.view.frame()
+    })
   }
 
   /** 当前的 World 数据（每次重新取，不缓存） */

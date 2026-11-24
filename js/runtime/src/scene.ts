@@ -561,6 +561,48 @@ export function rayPlane(o: Vec3, d: Vec3, plane: RayPlane): number | undefined 
   return t
 }
 
+export type Quat = [number, number, number, number]
+
+/**
+ * 欧拉角（度）转四元数 [x, y, z, w]，与 spawn 的 rotation、Unity 的 Quaternion.Euler 同一约定：
+ * 先绕 z、再绕 x、最后绕 y（q = qY * qX * qZ）
+ */
+export function eulerToQuaternion(x: number, y: number, z: number, out: Quat = [0, 0, 0, 1]): Quat {
+  const h = Math.PI / 360
+  const sx = Math.sin(x * h), cx = Math.cos(x * h)
+  const sy = Math.sin(y * h), cy = Math.cos(y * h)
+  const sz = Math.sin(z * h), cz = Math.cos(z * h)
+  // qX * qZ
+  const ax = sx * cz, ay = -sx * sz, az = cx * sz, aw = cx * cz
+  // qY * (qX * qZ)
+  out[0] = cy * ax + sy * az
+  out[1] = cy * ay + sy * aw
+  out[2] = cy * az - sy * ax
+  out[3] = cy * aw - sy * ay
+  return out
+}
+
+/** 四元数球面插值（取短弧），结果写进 out */
+export function slerpQuaternion(a: ArrayLike<number>, b: ArrayLike<number>, t: number, out: Quat = [0, 0, 0, 1]): Quat {
+  let bx = b[0], by = b[1], bz = b[2], bw = b[3]
+  let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw
+  if (cos < 0) {
+    cos = -cos
+    bx = -bx; by = -by; bz = -bz; bw = -bw
+  }
+  let k0 = 1 - t, k1 = t
+  if (cos < 0.9995) {
+    const angle = Math.acos(cos)
+    const sin = Math.sin(angle)
+    k0 = Math.sin((1 - t) * angle) / sin
+    k1 = Math.sin(t * angle) / sin
+  }
+  const x = k0 * a[0] + k1 * bx, y = k0 * a[1] + k1 * by, z = k0 * a[2] + k1 * bz, w = k0 * a[3] + k1 * bw
+  const len = Math.hypot(x, y, z, w) || 1
+  out[0] = x / len; out[1] = y / len; out[2] = z / len; out[3] = w / len
+  return out
+}
+
 /** Color → sRGB 0..1 的 [r, g, b, a]；字符串规则见 color.ts，无法解析时抛出 TypeError */
 export function parseColor(color: Color): [number, number, number, number] {
   if (typeof color === 'string') {
