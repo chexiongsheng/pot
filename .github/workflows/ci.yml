@@ -124,10 +124,16 @@ jobs:
           password: ${{ secrets.UNITY_PASSWORD }}
 
       # Unity Editor 的 OpenRL.dll 依赖 VC++ 2010 运行时，windows-2022 镜像里没有
+      # 走微软官方直链，不用 Chocolatey：社区源 community.chocolatey.org 经常返回 503，
+      # 会把整条流水线卡在 "Unable to find package 'vcredist2010'"
       - name: Install VC++ 2010 Redistributable
         shell: pwsh
         run: |
-          choco install vcredist2010 -y --no-progress
+          $url = 'https://download.microsoft.com/download/1/6/5/165255E7-1014-4D0A-B094-B6A430A6BFFC/vcredist_x64.exe'
+          $exe = Join-Path $env:RUNNER_TEMP 'vcredist_x64_2010.exe'
+          curl.exe -fsSL --retry 3 -o $exe $url
+          if ($LASTEXITCODE -ne 0) { throw 'download vcredist2010 failed' }
+          Start-Process $exe -ArgumentList '/q', '/norestart' -Wait
           if (-not (Test-Path "$env:WINDIR\System32\MSVCP100.dll")) { throw 'MSVCP100.dll still missing after installing vcredist2010' }
 
       # pot_gfx.dll 不入库：每次都用 CMake 重新编译（--force），不使用缓存
