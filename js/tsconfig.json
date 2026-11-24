@@ -10,9 +10,13 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": [],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@pot/core",
     "baseUrl": ".",
     "paths": {
-      "@pot/core": ["./runtime/src/index.ts"]
+      "@pot/core": ["./runtime/src/index.ts"],
+      "@pot/core/jsx-runtime": ["./runtime/src/jsx-runtime.ts"],
+      "@pot/core/jsx-dev-runtime": ["./runtime/src/jsx-dev-runtime.ts"]
     }
   },
   "include": ["runtime/src", "devtools/src", "../games/*/src"]

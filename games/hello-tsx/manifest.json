@@ -1,0 +1,7 @@
+{
+  "id": "pot.hello-tsx",
+  "name": "Hello Pot (TSX)",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "plugins": ["game"]
+}

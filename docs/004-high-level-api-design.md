@@ -280,7 +280,7 @@ export default defineGame({
 | `js/devserver/builder.js` 第 11 行 | `external` 过滤只精确匹配 `@pot/core` 和 `cordis` | 两个 jsx 子路径也标为外部，并保留各自的名字 |
 | `js/devserver/builder.js` 第 37 到 38 行 | `listUnits` 只认 `ts`、`js` | 加 `tsx` |
 | `js/devserver/builder.js` 第 62 行起的 esbuild 选项 | 无 jsx 设置 | 加 `jsx: 'automatic'`、`jsxImportSource: '@pot/core'` |
-| 各游戏和模板的 `tsconfig.json`、`js/tsconfig.json` | 无 jsx 设置 | 加 `"jsx": "react-jsx"`、`"jsxImportSource": "@pot/core"`，`paths` 加 `@pot/core/jsx-runtime` |
+| 各游戏和模板的 `tsconfig.json`、`js/tsconfig.json` | 无 jsx 设置 | 加 `"jsx": "react-jsx"`、`"jsxImportSource": "@pot/core"`，`paths` 加 `@pot/core/jsx-runtime` 与 `@pot/core/jsx-dev-runtime`（游戏的 `paths` 会覆盖继承来的，两项都要写） |
 
 不引入 React 或 Preact 作为依赖。场景树的求值就是调用纯函数、展开片段、算 key 路径，几百行以内。界面运行时的选择见 6.8。
 
@@ -1008,7 +1008,9 @@ M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`m
 | `world-hmr.test.js` | 改 `game.tsx` 后：吃掉的金币不回来、玩家位置保留、`vars` 保留、新规则生效；改金币坐标后金币移动；从 manifest 去掉单元后实体全部销毁；`exportJSON` 后冷重启 World 一致；另：改预制件属性后表现重建。manifest 变化在 Runner 里由 C# 冷重启，测试以“导出状态、换 manifest 冷启动”模拟 |
 | `world-builtin.test.js` | 官方积木与预制件已登记；`shape`、`spin`、`projectile`、`lifetime`、`cameraFollow`、`light` 的行为；游戏同名覆盖与撤销后露出官方的；`controls` 生效与撤销 |
 
-另在 `devserver.test.js` 里加一例：`buildRelease` 一个含 `.tsx` 的游戏，产物能在 Node 宿主上跑起来。
+另在 `devserver.test.js` 里加一例：`buildRelease` 一个含 `.tsx` 的游戏，产物能在 Node 宿主上跑起来。实施时直接构建 `games/hello-tsx`：检查 bundle 里 `@pot/core/jsx-runtime` 保持为外部引用，不带加载器启动后朝第一个金币走，界面从“得分 0”变为“得分 1”。
+
+tsconfig 的补充（实施时发现）：各游戏和模板的 `tsconfig.json` 用 `extends` 继承 `js/tsconfig.json`，`jsx`、`jsxImportSource` 随之继承；但 `paths` 会被游戏自己的 `paths` 整体覆盖，所以游戏的 `paths` 必须把 `@pot/core/jsx-runtime` 和 `@pot/core/jsx-dev-runtime` 两项都写上，路径相对游戏目录。现有的 hello、saltline、shaders 和模板一并补齐，没有 `.tsx` 的游戏不受影响。
 
 M1 验收：`npm test` 全部通过（含原有用例）；`pot check games/hello-tsx` 通过；`games/hello-tsx` 在 Runner 里可玩，行为与 hello 相同；报告 hello-tsx 与 hello 的源码字节数对比。
 

@@ -11,7 +11,7 @@ const path = require('path')
 const WebSocket = require('ws')
 const { DevServer } = require('../devserver/server')
 const { client } = require('../devserver/client')
-const { loadPot, createHost, readGameFiles, helloDir } = require('./helpers')
+const { loadPot, createHost, startGame, readGameFiles, helloDir } = require('./helpers')
 
 class FakeRunner {
   constructor(port) {
@@ -250,6 +250,35 @@ test('发布构建：bundle.cjs 在没有源码加载器（发布包）时运行
     await runtime.start()
     assert.deepEqual(runtime.failures, [])
     assert.equal(runtime.scene.objects.size, 8, '地面 + 灯光 + 玩家 + 5 个金币')
+    await runtime.stop()
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true })
+  }
+})
+
+test('发布构建：hello-tsx（TSX + defineGame）打包后在 Node 宿主上可玩', async () => {
+  const { buildRelease } = require('../devserver/builder')
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-release-tsx-'))
+  try {
+    const result = await buildRelease(path.resolve(helloDir, '../hello-tsx'), out)
+    assert.equal(result.units, 1)
+    const bundle = fs.readFileSync(path.join(out, 'bundle.cjs'), 'utf8')
+    assert.match(bundle, /require\("@pot\/core\/jsx-runtime"\)/)
+    const files = new Map()
+    for (const f of ['manifest.json', 'bundle.cjs', 'data/coins.json']) files.set(f, fs.readFileSync(path.join(out, f), 'utf8'))
+    const { runtime, engine } = await startGame(files, { loader: false })
+    assert.deepEqual(runtime.failures, [])
+    runtime.tick(1 / 60)
+    assert.equal(runtime.scene.objects.size, 8, '地面 + 灯光 + 玩家 + 5 个金币')
+    const texts = () => engine.ui.split('\u001e').map((s) => s.split('\u001f')).filter((t) => t[0] === 't').map((t) => t[9])
+    assert.deepEqual(texts(), ['得分 0'])
+    // 朝第一个金币 (3, 0.5, 2) 走
+    engine.axes.move = [3 / Math.hypot(3, 2), 2 / Math.hypot(3, 2)]
+    for (let i = 0; i < 120 && texts()[0] === '得分 0'; i++) runtime.tick(1 / 60)
+    engine.axes.move = [0, 0]
+    runtime.tick(1 / 60)
+    assert.deepEqual(texts(), ['得分 1'])
+    assert.equal(runtime.scene.objects.size, 7)
     await runtime.stop()
   } finally {
     fs.rmSync(out, { recursive: true, force: true })
