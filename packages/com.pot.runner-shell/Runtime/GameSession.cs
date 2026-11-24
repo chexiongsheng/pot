@@ -4,8 +4,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -18,6 +20,7 @@ namespace Pot.Runner
     /// - 本地 .potg：解压到 persistentDataPath/pot/installed/，文件变化时重装并冷重启
     /// - http(s)://…/*.potg：下载后解压
     /// - http(s)://…/（目录，如 Dev Server 的 /files/games/hello/）：镜像到 persistentDataPath/pot/mirror/，每秒轮询变化
+    ///   也支持普通静态服务器（http-server、python -m http.server）：?list 不是 JSON 时改为爬目录列表 + HEAD 比对版本
     /// 与 Dev Server 无关：不启动 Dev Server 也能打开、试玩、热重载。
     /// </summary>
     public class GameSession : MonoBehaviour
@@ -544,10 +547,12 @@ namespace Pot.Runner
         /// <summary>对比远端清单，下载新增 / 变化的文件、删除已不存在的文件；changed 收集变化路径</summary>
         IEnumerator Sync(string url, string dir, List<string> changed, int gen, Action<string> fail)
         {
-            RemoteList list;
+            RemoteList list = null;
+            string listText;
             using (var req = UnityWebRequest.Get(url + "?list"))
             {
                 req.timeout = 15;
+                req.SetRequestHeader("Cache-Control", "no-cache");
                 yield return req.SendWebRequest();
                 if (gen != generation) yield break;
                 if (req.result != UnityWebRequest.Result.Success)
@@ -555,15 +560,34 @@ namespace Pot.Runner
                     fail("无法访问 " + url + "（" + req.error + "）");
                     yield break;
                 }
+                listText = req.downloadHandler.text ?? "";
+            }
+            if (listText.TrimStart('\uFEFF', ' ', '\t', '\r', '\n').StartsWith("{"))
+            {
+                // Dev Server：?list 直接返回 JSON 清单
                 try
                 {
-                    list = JsonUtility.FromJson<RemoteList>(req.downloadHandler.text);
+                    list = JsonUtility.FromJson<RemoteList>(listText);
                 }
                 catch (Exception e)
                 {
                     fail("文件清单格式不对：" + e.Message);
                     yield break;
                 }
+            }
+            else
+            {
+                // 普通静态服务器（http-server、python -m http.server 等）：爬 HTML 目录列表 + HEAD 取版本
+                var crawled = new List<RemoteFile>();
+                string crawlError = null;
+                yield return CrawlStatic(url, listText, crawled, gen, e => crawlError = e);
+                if (gen != generation) yield break;
+                if (crawlError != null)
+                {
+                    fail(crawlError);
+                    yield break;
+                }
+                list = new RemoteList { files = crawled.ToArray() };
             }
             if (list == null || list.files == null)
             {
@@ -584,6 +608,7 @@ namespace Pot.Runner
                 using (var req = UnityWebRequest.Get(url + EscapePath(f.path)))
                 {
                     req.timeout = 60;
+                    req.SetRequestHeader("Cache-Control", "no-cache");
                     yield return req.SendWebRequest();
                     if (gen != generation) yield break;
                     if (req.result != UnityWebRequest.Result.Success)
@@ -616,6 +641,132 @@ namespace Pot.Runner
                     var rel = file.Substring(root.Length).Replace('\\', '/');
                     if (!seen.Contains(rel)) try { File.Delete(file); } catch (Exception) { }
                 }
+            }
+        }
+
+        // ---- 普通静态服务器兜底 ----
+
+        static readonly Regex HrefPattern = new Regex("href\\s*=\\s*[\"']([^\"']+)[\"']", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        const int MaxCrawlFiles = 2000;
+
+        /// <summary>
+        /// 没有 ?list 接口时：从目录列表 HTML 递归收集文件，用 HEAD 的 Content-Length + Last-Modified/ETag 作为版本；
+        /// 服务器不给这些头时退化为 GET 并以内容哈希作为版本。
+        /// </summary>
+        IEnumerator CrawlStatic(string rootUrl, string rootHtml, List<RemoteFile> files, int gen, Action<string> fail)
+        {
+            var root = new Uri(rootUrl);
+            var rootPath = root.AbsolutePath;
+            var pending = new Queue<KeyValuePair<Uri, string>>();
+            var visited = new HashSet<string> { rootPath };
+            var filePaths = new List<string>();
+            pending.Enqueue(new KeyValuePair<Uri, string>(root, rootHtml));
+            while (pending.Count > 0)
+            {
+                var item = pending.Dequeue();
+                var html = item.Value;
+                if (html == null)
+                {
+                    using (var req = UnityWebRequest.Get(item.Key.AbsoluteUri))
+                    {
+                        req.timeout = 15;
+                        req.SetRequestHeader("Cache-Control", "no-cache");
+                        yield return req.SendWebRequest();
+                        if (gen != generation) yield break;
+                        if (req.result != UnityWebRequest.Result.Success)
+                        {
+                            fail("无法读取目录 " + item.Key.AbsoluteUri + "（" + req.error + "）");
+                            yield break;
+                        }
+                        html = req.downloadHandler.text ?? "";
+                    }
+                }
+                foreach (Match m in HrefPattern.Matches(html))
+                {
+                    Uri link;
+                    if (!Uri.TryCreate(item.Key, WebUtility.HtmlDecode(m.Groups[1].Value), out link)) continue;
+                    if (link.Scheme != root.Scheme || link.Authority != root.Authority) continue;
+                    var abs = link.AbsolutePath;
+                    if (!abs.StartsWith(rootPath, StringComparison.Ordinal) || abs.Length <= rootPath.Length) continue;
+                    var rel = Uri.UnescapeDataString(abs.Substring(rootPath.Length));
+                    if (IsIgnoredPath(rel)) continue;
+                    if (abs.EndsWith("/"))
+                    {
+                        if (visited.Add(abs)) pending.Enqueue(new KeyValuePair<Uri, string>(new Uri(root, abs), null));
+                    }
+                    else if (!filePaths.Contains(rel))
+                    {
+                        filePaths.Add(rel);
+                        if (filePaths.Count > MaxCrawlFiles)
+                        {
+                            fail("目录下文件超过 " + MaxCrawlFiles + " 个，请缩小范围或改用 Dev Server");
+                            yield break;
+                        }
+                    }
+                }
+            }
+            if (!filePaths.Contains("manifest.json"))
+            {
+                fail("在 " + rootUrl + " 没找到 manifest.json。请确认地址指向游戏目录，且服务器开启了目录列表"
+                    + "（http-server 若目录里有 index.html 会直接返回首页，可加 -i false 或改用 Dev Server）");
+                yield break;
+            }
+            foreach (var rel in filePaths)
+            {
+                var fileUrl = rootUrl + EscapePath(rel);
+                long size = -1;
+                string stamp = null;
+                using (var req = UnityWebRequest.Head(fileUrl))
+                {
+                    req.timeout = 15;
+                    req.SetRequestHeader("Cache-Control", "no-cache");
+                    yield return req.SendWebRequest();
+                    if (gen != generation) yield break;
+                    if (req.result == UnityWebRequest.Result.Success)
+                    {
+                        long.TryParse(req.GetResponseHeader("Content-Length") ?? "", out size);
+                        var lm = req.GetResponseHeader("Last-Modified");
+                        var etag = req.GetResponseHeader("ETag");
+                        if (!string.IsNullOrEmpty(lm) || !string.IsNullOrEmpty(etag)) stamp = lm + "|" + etag;
+                    }
+                }
+                if (stamp == null)
+                {
+                    using (var req = UnityWebRequest.Get(fileUrl))
+                    {
+                        req.timeout = 60;
+                        req.SetRequestHeader("Cache-Control", "no-cache");
+                        yield return req.SendWebRequest();
+                        if (gen != generation) yield break;
+                        if (req.result != UnityWebRequest.Result.Success)
+                        {
+                            fail("下载 " + rel + " 失败（" + req.error + "）");
+                            yield break;
+                        }
+                        var data = req.downloadHandler.data ?? new byte[0];
+                        size = data.Length;
+                        files.Add(new RemoteFile { path = rel, size = size, mtime = StableHash(data) });
+                    }
+                    continue;
+                }
+                files.Add(new RemoteFile { path = rel, size = size, mtime = StableHash(Encoding.UTF8.GetBytes(stamp)) });
+            }
+        }
+
+        static bool IsIgnoredPath(string rel)
+        {
+            foreach (var part in rel.Split('/'))
+            {
+                if (Ignored.Contains(part)) return true;
+            }
+            return false;
+        }
+
+        static long StableHash(byte[] bytes)
+        {
+            using (var md5 = MD5.Create())
+            {
+                return BitConverter.ToInt64(md5.ComputeHash(bytes), 0);
             }
         }
 
