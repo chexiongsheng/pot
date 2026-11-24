@@ -178,3 +178,29 @@ export const unity = {
     return JSON.stringify(unity.runtime?.info() ?? { status: 'idle' })
   },
 }
+
+/**
+ * 向 C# 注册无参入口（PotRuntime.Bind），C# 用 PotRuntime.Call(name, arg) 调用。
+ * 小游戏环境禁止 eval，C# 不能再用 ScriptEnv.Eval 拼代码调 JS；参数经 PotRuntime.TakeArg() 取，返回值经 PotRuntime.Return() 带回。
+ * 不在 Unity 里（Node 测试）时什么都不做。
+ */
+export function bindEntry(name: string, fn: (arg: string) => string | void) {
+  const R = typeof CS === 'undefined' ? undefined : CS?.Pot?.PotRuntime
+  if (!R || typeof R.Bind !== 'function') return false
+  R.Bind(name, () => {
+    const result = fn(R.TakeArg() ?? '')
+    if (typeof result === 'string') R.Return(result)
+  })
+  return true
+}
+
+function bindUnity() {
+  bindEntry('unity.boot', (state) => unity.boot(state))
+  bindEntry('unity.tick', () => unity.tick(CS.Pot.PotRuntime.frameDt))
+  bindEntry('unity.pump', () => unity.pump())
+  bindEntry('unity.exportState', () => unity.exportState())
+  bindEntry('unity.stop', () => unity.stop())
+  bindEntry('unity.info', () => unity.info())
+}
+
+bindUnity()

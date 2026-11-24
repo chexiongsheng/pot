@@ -123,13 +123,23 @@ export class PluginsService extends Service {
     ctx.mixin('plugins', ['use'])
   }
 
-  /** 发布期：bundle.cjs 是一个整体打包的模块，导出 { units: { 单元名: 模块导出 } }，共享代码只有一份 */
+  /**
+   * 发布期：bundle.cjs 是一个整体打包的模块，导出 { units: { 单元名: 模块导出 } }，共享代码只有一份。
+   * WebGL/小游戏禁止 eval：构建时把 bundle.cjs 包成 globalThis.__potBundle = function (exports, require, module, __filename) {...}，
+   * 由宿主以普通脚本预先加载（PotRuntime 用 ScriptEnv.ExecuteModule），这里直接拿工厂函数；没有时才读源码编译。
+   */
   private _getBundle() {
     if (this._bundle !== undefined) return this._bundle
-    const code = this._host.readText('bundle.cjs')
     this._bundle = null
-    if (code) {
-      const exports = runModule(compileModule(code, 'bundle.cjs'), 'bundle.cjs', this._modules)
+    const preloaded: ModuleFactory | undefined = (globalThis as any).__potBundle
+    let factory: ModuleFactory | undefined
+    if (typeof preloaded === 'function') factory = preloaded
+    else {
+      const code = this._host.readText('bundle.cjs')
+      if (code) factory = compileModule(code, 'bundle.cjs')
+    }
+    if (factory) {
+      const exports = runModule(factory, 'bundle.cjs', this._modules)
       if (!exports?.units) throw new Error('bundle.cjs 格式不对（缺少 units），请用当前版本的 pot build 重新构建')
       this._bundle = exports.units
     }

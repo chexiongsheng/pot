@@ -118,13 +118,14 @@ namespace Pot.Dev
 
         static void LoadDevtools(ScriptEnv env)
         {
-            var asset = Resources.Load<TextAsset>("pot/devtools");
-            if (asset == null)
+            try
             {
-                Debug.LogError("[pot] 找不到 Resources/pot/devtools.cjs");
-                return;
+                PotRuntime.LoadScript(env, "pot/devtools");
             }
-            env.Eval(asset.text, "pot/devtools.cjs");
+            catch (Exception e)
+            {
+                Debug.LogError("[pot] 加载 Resources/pot/devtools.cjs 失败：" + e.Message);
+            }
         }
 
         [Preserve]
@@ -432,7 +433,14 @@ namespace Pot.Dev
             }
             pendingJs = raw;
             // 回复由 JS 通过 host.send → PotHost.Send → SendHook 发出
-            runtime.Env.Eval("pot.devtools.handle(CS.Pot.Dev.PotDevClient.TakePending())", "pot/devtools-handle");
+            try
+            {
+                runtime.Call("devtools.handle", TakePending());
+            }
+            catch (Exception e)
+            {
+                Reply(cmd.id, false, null, "转发到 JS 失败：" + e.Message);
+            }
         }
 
         IEnumerator Screenshot(int id, int width)

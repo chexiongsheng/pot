@@ -327,7 +327,7 @@ namespace Pot.Runner
                     sb.Append(']');
                     try
                     {
-                        runtime.Eval("pot.devtools.changed(" + Json.Quote(sb.ToString()) + ")", "pot/changed");
+                        runtime.Call("devtools.changed", sb.ToString());
                     }
                     catch (Exception e)
                     {

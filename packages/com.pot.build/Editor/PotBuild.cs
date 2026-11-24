@@ -121,7 +121,7 @@ namespace Pot.Build
             var config = LoadConfig(stageDir);
             if (string.IsNullOrEmpty(outputPath))
                 outputPath = Path.Combine("Builds", TargetName(target), config.fileName + OutputExtension(target));
-            ImportStage(stageDir);
+            ImportStage(stageDir, target);
             CreateBootScene();
             EnsurePuertsGenerated();
             PotPipeline.Ensure();
@@ -166,10 +166,44 @@ namespace Pot.Build
         }
 
         /// <summary>
+        /// WebGL/小游戏禁止 eval：运行时既不能 Eval core.cjs，也不能把 bundle.cjs 文本编译成函数。
+        /// 这里把要用 ScriptEnv.ExecuteModule 加载的脚本放到 Assets/PotGame/Js~/Resources/ 下：
+        /// - pot/core.cjs：com.pot.core 包里 Resources/pot/core.cjs 的副本；
+        /// - pot-game/bundle-factory.cjs：bundle.cjs 包成 globalThis.__potBundle = function (exports, require, module, __filename) {...}，plugins.ts 直接取工厂函数。
+        /// Puerts 的 WebGL 构建后处理会按 Assets/**/Resources/**/*.cjs 把它们打进 puerts_browser_js_resources.js / puerts_minigame_js_resources；
+        /// 目录名带 ~，Unity 不导入，不会和包里的同名 Resources 资源冲突，也不会重复进包体。其他平台删除该目录。
+        /// </summary>
+        public const string WebGLScriptsDir = GameRoot + "/Js~/Resources";
+
+        static void WriteWebGLScripts(string gameDir, BuildTarget target)
+        {
+            var root = Path.GetDirectoryName(WebGLScriptsDir);
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+            if (target != BuildTarget.WebGL) return;
+            var core = Path.GetFullPath("Packages/com.pot.core/Runtime/Resources/pot/core.cjs");
+            if (!File.Exists(core)) throw new Exception("找不到 " + core + "（请先运行 js 的 npm run build）");
+            var coreTarget = Path.Combine(WebGLScriptsDir, "pot/core.cjs");
+            Directory.CreateDirectory(Path.GetDirectoryName(coreTarget));
+            File.Copy(core, coreTarget, true);
+
+            var bundle = Path.Combine(gameDir, "bundle.cjs");
+            if (!File.Exists(bundle)) return;
+            var code = File.ReadAllText(bundle, Encoding.UTF8);
+            var factory = Path.Combine(WebGLScriptsDir, PotRuntime.BundleFactory + ".cjs");
+            Directory.CreateDirectory(Path.GetDirectoryName(factory));
+            File.WriteAllText(factory, "globalThis.__potBundle = function (exports, require, module, __filename) {" + code + "\n};\n", new UTF8Encoding(false));
+        }
+
+        /// <summary>
         /// 暂存目录 game/** → Resources/pot-game/**.bytes。统一加 .bytes：Unity 只把少数扩展名识别为文本资源（.frag/.vert/.glsl 不行），
         /// 且 Resources 路径不含扩展名，sea.frag 与 sea.vert 会撞名；加后缀后资源名 = 原文件名（GameFS 按完整路径读取）。
         /// </summary>
         public static void ImportStage(string stageDir)
+        {
+            ImportStage(stageDir, EditorUserBuildSettings.activeBuildTarget);
+        }
+
+        public static void ImportStage(string stageDir, BuildTarget target)
         {
             var gameDir = Path.Combine(stageDir, "game");
             if (!File.Exists(Path.Combine(gameDir, "manifest.json"))) throw new Exception("暂存目录缺少 game/manifest.json：" + stageDir);
@@ -180,11 +214,12 @@ namespace Pot.Build
             foreach (var file in Directory.GetFiles(gameDir, "*", SearchOption.AllDirectories))
             {
                 var rel = file.Substring(gameDir.Length).TrimStart('\\', '/');
-                var target = Path.Combine(ResourcesDir, rel + ".bytes");
-                Directory.CreateDirectory(Path.GetDirectoryName(target));
-                File.Copy(file, target, true);
+                var dest = Path.Combine(ResourcesDir, rel + ".bytes");
+                Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                File.Copy(file, dest, true);
                 files++;
             }
+            WriteWebGLScripts(gameDir, target);
 
             var config = LoadConfig(stageDir);
             if (File.Exists(IconPath)) AssetDatabase.DeleteAsset(IconPath);

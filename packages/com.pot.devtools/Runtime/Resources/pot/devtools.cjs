@@ -1511,6 +1511,19 @@ ${code}
     }
     return reply;
   }
+  function logError(what, error) {
+    try {
+      ;
+      (attached ?? (0, import_core2.currentRuntime)())?.root.logger("devtools").error("%s：%s", what, error?.stack ?? error);
+    } catch {
+    }
+  }
+  (0, import_core2.bindEntry)("devtools.changed", (paths) => {
+    changed(paths).catch((error) => logError("热重载出错", error));
+  });
+  (0, import_core2.bindEntry)("devtools.handle", (json) => {
+    handle(json).catch((error) => logError("处理开发命令出错", error));
+  });
 
   // node_modules/sucrase/dist/esm/parser/tokenizer/keywords.js
   var ContextualKeyword;

@@ -6,7 +6,7 @@
  * 回复格式：{ type: 'result', id, ok, data | error }
  */
 import type { Runtime } from '@pot/core'
-import { currentRuntime } from '@pot/core'
+import { bindEntry, currentRuntime } from '@pot/core'
 import { reload, ReloadResult } from './hmr'
 
 export interface Message {
@@ -53,6 +53,7 @@ export function toPlain(value: any, depth = 4, seen = new Set<any>()): any {
   }
 }
 
+/** pot eval：本质就是动态执行代码，只在 Runner（桌面 V8）里可用；小游戏发布包不带 devtools */
 function evaluate(code: string, rt: Runtime) {
   const args = ['runtime', 'ctx', 'pot']
   const values = [rt, rt.root, (globalThis as any).pot]
@@ -123,7 +124,7 @@ function report(rt: Runtime, result: ReloadResult, paths: string[]) {
 }
 
 /**
- * Runner 监听到游戏文件变化时调用（C# 侧 Eval：pot.devtools.changed('["src/plugins/player.ts"]')）。
+ * Runner 监听到游戏文件变化时调用（C# 侧 PotRuntime.Call("devtools.changed", '["src/plugins/player.ts"]')）。
  * manifest.json 变化由 C# 侧直接冷重启，不走这里。
  */
 export async function changed(pathsJson: string | string[]) {
@@ -229,3 +230,17 @@ export async function handle(json: string | Message) {
   } catch {}
   return reply
 }
+
+function logError(what: string, error: any) {
+  try {
+    ;(attached ?? currentRuntime())?.root.logger('devtools').error('%s：%s', what, error?.stack ?? error)
+  } catch {}
+}
+
+// C# 入口（PotRuntime.Call），不用 eval 拼代码
+bindEntry('devtools.changed', (paths) => {
+  changed(paths).catch((error) => logError('热重载出错', error))
+})
+bindEntry('devtools.handle', (json) => {
+  handle(json).catch((error) => logError('处理开发命令出错', error))
+})
