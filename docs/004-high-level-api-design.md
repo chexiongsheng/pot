@@ -761,7 +761,7 @@ export function jsxDEV(type, props, key, isStatic, source, self): PotNode
 
 ### 15.4 树求值
 
-`evaluate(root, registry) → { entities: EntitySpec[], rules: RuleSpec[], stage: StageSpec | null }`，纯函数，Node 上可单测。
+`evaluate(root, registry) → { entities: EntitySpec[], rules: RuleSpec[], stage: StageSpec | null, prefabs: Prefab[] }`，纯函数，Node 上可单测。`prefabs` 是树里以句柄直接引用的预制件（如 `<Coin />`），挂载时由 `WorldService` 补登记，这样游戏不登记也能用自己的预制件。出错时把全部错误收齐后一起抛出，`error.errors` 是逐条的列表。
 
 逐个子节点按下列规则处理：
 
@@ -796,6 +796,8 @@ interface EntitySpec {
 
 属性按“预制件链从根到叶，最后是标签上的属性”的顺序深合并：普通对象逐字段合并，数组和其他值整个替换。每个积木最终的属性是“积木 `props` 默认值，加上述合并结果”。
 
+积木属性的值可以是对象，也可以是 `true` 或 `false`：`true` 等同 `{}`，即加上这个积木、全部用默认值（如 `definePrefab('coin', { trigger: true })`）；`false` 或 `null` 表示去掉链上前面带来的这个积木（如 `<coin spin={false} />`）；`undefined` 不影响。其他值报错。`tags` 在预制件定义与标签上都可以写，合并去重。
+
 校验，出错时报错信息都带 `文件:行号`：
 
 | 情况 | 报错 |
@@ -806,6 +808,8 @@ interface EntitySpec {
 | 实体标签有子节点 | M1 不支持子节点 |
 | 路径重复 | 重复的 key，提示用 `key` 或带 `key` 的片段区分 |
 | 规则的 `on` 不是 `touch`、`death`、`every`，也不是合法的标识符 | 未知的事件 |
+
+另外还校验：`at`、`rot`、`scale` 必须是三个有限数（`scale` 可写一个数）；`name` 必须是字符串；积木值必须是对象、`true`、`false` 或 `null`；`<rule>` 必须有 `do` 函数，`every` 必须有正数 `seconds`；`is` 链上的名字必须已登记且不能成环；函数组件抛出的异常记为一条错误。
 
 ### 15.5 World 数据
 
@@ -952,10 +956,10 @@ interface BlockDef<P extends object, S extends object> {
   }
 }
 function defineBlock<P, S>(def: BlockDef<P, S>): BlockDef<P, S>
-function definePrefab(name: string, def: { is?: Prefab; tags?: string[]; [block: string]: any }): Prefab
+function definePrefab(name: string, def: { is?: Prefab | string; tags?: string[]; [block: string]: any }): Prefab
 ```
 
-`definePrefab` 的返回值是 `{ name, def }`，带一个标记以便 `tree.ts` 识别。登记时游戏的同名积木、预制件覆盖官方的。
+`definePrefab` 的返回值是一个可调用的函数 `(props) => PotNode`，函数上带 `prefab`（名字）、`def`（定义）和一个标记，`tree.ts` 靠标记识别。做成函数而不是普通对象 `{ name, def }`，是因为 TSX 的大写标签 `<Coin />` 要求标签类型可调用，否则过不了类型检查；`tree.ts` 不会调用它，只读 `prefab` 与 `def`。名字必须是小写开头的驼峰标识符（与小写标签同名，`<coin>` 与 `<Coin>` 指同一个预制件）。`is` 可以写预制件句柄，也可以写已登记的预制件名。登记时游戏的同名积木、预制件覆盖官方的，撤销登记（热重载卸载游戏单元）后露出官方的；同 `order` 的积木按名字第一次登记的先后执行，重新登记不改变先后。
 
 M1 的官方积木：`shape`（`kind` 为 cube、sphere、plane、cylinder 等 `scene.spawn` 支持的形状，`color`，`scale`）、`spin`（`speed`，度每秒，绕 y 轴）、`moveTopdown`（`speed`，读 `move` 轴，写 `pos` 的 x、z）、`trigger`（15.9）、`lifetime`（`seconds`，到时销毁）、`projectile`（`speed`、`dir`）、`cameraFollow`（`offset`，在 `view.update` 里移动相机）、`light`（点光源）。
 

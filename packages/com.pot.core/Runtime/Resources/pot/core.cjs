@@ -54,6 +54,7 @@ var pot = (() => {
     PREFAB: () => PREFAB,
     PluginsService: () => PluginsService,
     PostChain: () => PostChain,
+    Registry: () => Registry,
     RegistryService: () => RegistryService,
     Runtime: () => Runtime,
     SceneService: () => SceneService,
@@ -85,10 +86,13 @@ var pot = (() => {
     decode: () => decode,
     deepClone: () => deepClone,
     defaultFormatters: () => defaultFormatters,
+    defineBlock: () => defineBlock,
     definePlugin: () => definePlugin,
+    definePrefab: () => definePrefab,
     encode: () => encode,
     encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
+    evaluate: () => evaluate,
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
     formatSource: () => formatSource,
@@ -7210,6 +7214,388 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     bindEntry("unity.info", () => unity.info());
   }
   bindUnity();
+
+  // runtime/src/world/registry.ts
+  var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "children"]);
+  var PREFAB_RESERVED = /* @__PURE__ */ new Set(["is", "tags"]);
+  var IDENT = /^[a-z][A-Za-z0-9]*$/;
+  function defineBlock(def) {
+    if (!def || typeof def.name !== "string" || !IDENT.test(def.name)) {
+      throw new Error(`defineBlock：积木名必须是小写开头的驼峰标识符，收到 ${JSON.stringify(def?.name)}`);
+    }
+    if (RESERVED.has(def.name) || PREFAB_RESERVED.has(def.name)) throw new Error(`defineBlock：积木名 "${def.name}" 是保留属性`);
+    if (def.props !== void 0 && !isPlainObject2(def.props)) throw new Error(`defineBlock(${def.name})：props 必须是普通对象`);
+    if (def.state !== void 0 && !isPlainObject2(def.state)) throw new Error(`defineBlock(${def.name})：state 必须是普通对象`);
+    for (const key of Object.keys(def.state ?? {})) {
+      if (def.props && key in def.props) throw new Error(`defineBlock(${def.name})：字段 "${key}" 同时出现在 props 与 state 里`);
+    }
+    return def;
+  }
+  function definePrefab(name, def = {}) {
+    if (typeof name !== "string" || !IDENT.test(name)) throw new Error(`definePrefab：预制件名必须是小写开头的驼峰标识符，收到 ${JSON.stringify(name)}`);
+    if (!isPlainObject2(def)) throw new Error(`definePrefab(${name})：定义必须是普通对象`);
+    const prefab = ((props) => makeNode(prefab, props, props?.key));
+    Object.defineProperty(prefab, "name", { value: name });
+    Object.defineProperty(prefab, PREFAB, { value: true });
+    Object.defineProperty(prefab, "prefab", { value: name, enumerable: true });
+    Object.defineProperty(prefab, "def", { value: def, enumerable: true });
+    return prefab;
+  }
+  var Registry = class {
+    constructor() {
+      __publicField(this, "_blocks", /* @__PURE__ */ new Map());
+      __publicField(this, "_prefabs", /* @__PURE__ */ new Map());
+      /** 名字第一次登记的序号，决定同 order 积木的先后 */
+      __publicField(this, "_seen", /* @__PURE__ */ new Map());
+      /** 内容变化时加一，供缓存失效 */
+      __publicField(this, "version", 0);
+    }
+    /** 登记积木，返回撤销函数 */
+    addBlock(def) {
+      defineBlock(def);
+      if (!this._seen.has(def.name)) this._seen.set(def.name, this._seen.size);
+      return this._push(this._blocks, def.name, def);
+    }
+    /** 登记预制件，返回撤销函数 */
+    addPrefab(prefab) {
+      if (!isPrefab(prefab)) throw new Error("登记预制件：需要 definePrefab 的返回值");
+      return this._push(this._prefabs, prefab.prefab, prefab);
+    }
+    _push(map, name, value) {
+      let stack = map.get(name);
+      if (!stack) map.set(name, stack = []);
+      const entry = { value, token: {} };
+      stack.push(entry);
+      this.version++;
+      return () => {
+        const list = map.get(name);
+        const i = list ? list.indexOf(entry) : -1;
+        if (i < 0) return;
+        list.splice(i, 1);
+        if (!list.length) map.delete(name);
+        this.version++;
+      };
+    }
+    block(name) {
+      const stack = this._blocks.get(name);
+      return stack?.[stack.length - 1].value;
+    }
+    prefab(name) {
+      const stack = this._prefabs.get(name);
+      return stack?.[stack.length - 1].value;
+    }
+    /** 预制件链上的名字（从根到叶）；未知的预制件只返回它自己 */
+    chain(name) {
+      const out = [];
+      let current2 = name;
+      for (let guard = 0; current2 !== void 0 && guard < 32; guard++) {
+        const p = typeof current2 === "string" ? this.prefab(current2) : current2;
+        const n2 = typeof current2 === "string" ? current2 : current2.prefab;
+        out.unshift(n2);
+        current2 = p?.def.is;
+      }
+      return out;
+    }
+    blockNames() {
+      return [...this._blocks.keys()];
+    }
+    prefabNames() {
+      return [...this._prefabs.keys()];
+    }
+    /** 按执行顺序排好的积木 */
+    ordered() {
+      return [...this._blocks.keys()].map((name) => this.block(name)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || this._seen.get(a.name) - this._seen.get(b.name));
+    }
+  };
+  function isPlainObject2(value) {
+    if (!value || typeof value !== "object") return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  }
+  function clone(value) {
+    if (Array.isArray(value)) return value.map(clone);
+    if (isPlainObject2(value)) {
+      const out = {};
+      for (const key of Object.keys(value)) out[key] = clone(value[key]);
+      return out;
+    }
+    return value;
+  }
+  function merge(base, over) {
+    if (over === void 0) return clone(base);
+    if (isPlainObject2(base) && isPlainObject2(over)) {
+      const out = clone(base);
+      for (const key of Object.keys(over)) out[key] = merge(base[key], over[key]);
+      return out;
+    }
+    return clone(over);
+  }
+
+  // runtime/src/world/tree.ts
+  var BUILTIN_TAGS = ["rule", "stage"];
+  var EVENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  var BUILTIN_EVENTS = ["touch", "death", "every"];
+  function distance(a, b) {
+    const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = dp[0];
+      dp[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const tmp = dp[j];
+        dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return dp[b.length];
+  }
+  function similar(name, candidates) {
+    const limit = name.length <= 4 ? 1 : 2;
+    const list = candidates.map((c) => ({ c, d: distance(name, c) })).filter(({ c, d }) => d <= limit || c.toLowerCase().startsWith(name.toLowerCase()) || name.toLowerCase().startsWith(c.toLowerCase())).sort((x, y) => x.d - y.d).slice(0, 3).map(({ c }) => c);
+    return list.length ? `，是不是 ${list.join("、")}？` : "";
+  }
+  function isVec3(v) {
+    return Array.isArray(v) && v.length === 3 && v.every((n2) => typeof n2 === "number" && Number.isFinite(n2));
+  }
+  function flatChildren(children) {
+    const out = [];
+    const walk = (c) => {
+      if (Array.isArray(c)) c.forEach(walk);
+      else if (c !== null && c !== void 0 && c !== false && c !== true && c !== "") out.push(c);
+    };
+    walk(children);
+    return out;
+  }
+  function evaluate(root, registry) {
+    const result = { entities: [], rules: [], stage: null, prefabs: [] };
+    const errors = [];
+    const paths = /* @__PURE__ */ new Map();
+    const usedPrefabs = /* @__PURE__ */ new Set();
+    const segment = (layer, name, key) => {
+      if (key !== null) return `${name}:${key}`;
+      const n2 = layer.counts.get(name) ?? 0;
+      layer.counts.set(name, n2 + 1);
+      return `${name}#${n2}`;
+    };
+    const join = (layer, seg) => layer.prefix ? `${layer.prefix}/${seg}` : seg;
+    const claim = (path, node) => {
+      if (paths.has(path)) {
+        const first = paths.get(path);
+        errors.push(`${sourcePrefix(node.source)}重复的 key 路径 "${path}"${first ? `（第一次出现在 ${first.file}:${first.line}）` : ""}：同一层的同名标签请用不同的 key 区分，或包一层带 key 的片段`);
+        return false;
+      }
+      paths.set(path, node.source);
+      return true;
+    };
+    const visit = (child, layer, depth) => {
+      if (child === null || child === void 0 || child === true || child === false || child === "") return;
+      if (depth > 64) {
+        errors.push("场景树嵌套超过 64 层，可能是函数组件递归");
+        return;
+      }
+      if (Array.isArray(child)) {
+        for (const c of child) visit(c, layer, depth + 1);
+        return;
+      }
+      if (typeof child === "string" || typeof child === "number") {
+        errors.push(`${sourcePrefix(layer.source)}场景树里不能有文本：${JSON.stringify(child)}`);
+        return;
+      }
+      if (!isNode(child)) {
+        errors.push(`${sourcePrefix(layer.source)}场景树里不能有 ${Object.prototype.toString.call(child)}，只能是标签、数组或 null`);
+        return;
+      }
+      const node = child;
+      const type = node.type;
+      if (type === Fragment) {
+        if (node.key === null) visit(node.props.children, { ...layer, source: node.source }, depth + 1);
+        else {
+          const prefix = join(layer, `#${node.key}`);
+          visit(node.props.children, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth + 1);
+        }
+        return;
+      }
+      if (typeof type === "function" && !isPrefab(type)) {
+        const name = nodeName(node);
+        const prefix = join(layer, segment(layer, name, node.key));
+        let out;
+        try {
+          out = type(node.props);
+        } catch (error) {
+          errors.push(`${sourcePrefix(node.source)}函数组件 ${name} 出错：${error?.message ?? error}`);
+          return;
+        }
+        visit(out, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth + 1);
+        return;
+      }
+      if (type === "rule") return rule(node, layer);
+      if (type === "stage") return stage(node);
+      let prefab;
+      if (isPrefab(type)) {
+        prefab = type;
+        if (!usedPrefabs.has(type)) {
+          usedPrefabs.add(type);
+          result.prefabs.push(type);
+        }
+      } else if (typeof type === "string") {
+        prefab = registry.prefab(type);
+        if (!prefab) {
+          errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`);
+          return;
+        }
+      } else {
+        errors.push(`${sourcePrefix(node.source)}无法识别的标签类型`);
+        return;
+      }
+      const path = join(layer, segment(layer, prefab.prefab, node.key));
+      if (!claim(path, node)) return;
+      const spec = entity(node, prefab, path);
+      if (spec) result.entities.push(spec);
+    };
+    const chainOf = (prefab, node) => {
+      const chain = [];
+      let current2 = prefab;
+      while (current2 !== void 0) {
+        const p = typeof current2 === "string" ? registry.prefab(current2) : current2;
+        if (!p) {
+          errors.push(`${sourcePrefix(node.source)}预制件 ${chain[0]?.prefab ?? prefab.prefab} 继承的 "${current2}" 没有登记${similar(String(current2), registry.prefabNames())}`);
+          return null;
+        }
+        if (chain.includes(p) || chain.length > 32) {
+          errors.push(`${sourcePrefix(node.source)}预制件 ${prefab.prefab} 的 is 链有循环`);
+          return null;
+        }
+        chain.unshift(p);
+        current2 = p.def.is;
+      }
+      return chain;
+    };
+    const apply = (acc, tags, values, reserved, where) => {
+      let ok = true;
+      for (const key of Object.keys(values)) {
+        if (key === "tags") {
+          const list = values.tags;
+          if (list === void 0) continue;
+          if (!Array.isArray(list) || list.some((t) => typeof t !== "string")) {
+            errors.push(`${where}tags 必须是字符串数组`);
+            ok = false;
+          } else list.forEach((t) => tags.add(t));
+          continue;
+        }
+        if (reserved.has(key)) continue;
+        const block = registry.block(key);
+        if (!block) {
+          errors.push(`${where}未知的积木 ${key}${similar(key, registry.blockNames())}`);
+          ok = false;
+          continue;
+        }
+        const value = values[key];
+        if (value === false || value === null) {
+          delete acc[key];
+          continue;
+        }
+        if (value === void 0) continue;
+        const over = value === true ? {} : value;
+        if (!isPlainObject2(over)) {
+          errors.push(`${where}积木 ${key} 的值必须是对象（或 true 表示用默认值、false 表示去掉）`);
+          ok = false;
+          continue;
+        }
+        const fields = block.props ?? {};
+        for (const field of Object.keys(over)) {
+          if (!(field in fields)) {
+            errors.push(`${where}积木 ${key} 没有字段 ${field}${similar(field, Object.keys(fields))}`);
+            ok = false;
+          }
+        }
+        acc[key] = merge(acc[key] ?? {}, over);
+      }
+      return ok;
+    };
+    const entity = (node, prefab, path) => {
+      const where = sourcePrefix(node.source);
+      const props = node.props;
+      if (flatChildren(props.children).length) {
+        errors.push(`${where}<${prefab.prefab}> 有子节点：M1 的实体是平的，不支持子节点`);
+        return null;
+      }
+      const chain = chainOf(prefab, node);
+      if (!chain) return null;
+      const acc = {};
+      const tags = /* @__PURE__ */ new Set();
+      let ok = true;
+      for (const p of chain) ok = apply(acc, tags, p.def, PREFAB_RESERVED, `${where}预制件 ${p.prefab}：`) && ok;
+      ok = apply(acc, tags, props, RESERVED, where) && ok;
+      const vec = (name, value, fallback) => {
+        if (value === void 0) return [...fallback];
+        if (!isVec3(value)) {
+          errors.push(`${where}${name} 必须是三个有限数 [x, y, z]，收到 ${JSON.stringify(value)}`);
+          ok = false;
+          return [...fallback];
+        }
+        return [value[0], value[1], value[2]];
+      };
+      const at = vec("at", props.at, [0, 0, 0]);
+      const rot = vec("rot", props.rot, [0, 0, 0]);
+      const scale = typeof props.scale === "number" && Number.isFinite(props.scale) ? [props.scale, props.scale, props.scale] : vec("scale", props.scale, [1, 1, 1]);
+      if (props.name !== void 0 && typeof props.name !== "string") {
+        errors.push(`${where}name 必须是字符串`);
+        ok = false;
+      }
+      if (!ok) return null;
+      const blocks = {};
+      for (const name of Object.keys(acc)) {
+        const block = registry.block(name);
+        blocks[name] = merge(clone(block.props ?? {}), acc[name]);
+      }
+      const spec = { path, prefab: prefab.prefab, at, rot, scale, tags: [...tags], blocks };
+      if (props.name !== void 0) spec.name = props.name;
+      if (node.source) spec.source = node.source;
+      return spec;
+    };
+    const rule = (node, layer) => {
+      const where = sourcePrefix(node.source);
+      const p = node.props;
+      const path = join(layer, segment(layer, "rule", node.key));
+      if (!claim(path, node)) return;
+      if (typeof p.on !== "string" || !(BUILTIN_EVENTS.includes(p.on) || EVENT.test(p.on))) {
+        errors.push(`${where}<rule> 未知的事件 ${JSON.stringify(p.on)}：可用 touch、death、every 或自定义事件名（标识符）`);
+        return;
+      }
+      if (typeof p.do !== "function") {
+        errors.push(`${where}<rule on="${p.on}"> 缺少 do 函数`);
+        return;
+      }
+      if (p.on === "every" && !(typeof p.seconds === "number" && p.seconds > 0)) {
+        errors.push(`${where}<rule on="every"> 需要正数 seconds`);
+        return;
+      }
+      const filter = (v) => v === void 0 ? void 0 : isPrefab(v) ? v.prefab : String(v);
+      const spec = { path, on: p.on, do: p.do };
+      const a = filter(p.a), b = filter(p.b);
+      if (a !== void 0) spec.a = a;
+      if (b !== void 0) spec.b = b;
+      if (p.seconds !== void 0) spec.seconds = p.seconds;
+      if (node.source) spec.source = node.source;
+      result.rules.push(spec);
+    };
+    const stage = (node) => {
+      if (result.stage) {
+        errors.push(`${sourcePrefix(node.source)}一棵场景树只能有一个 <stage>${result.stage.source ? `（第一个在 ${result.stage.source.file}:${result.stage.source.line}）` : ""}`);
+        return;
+      }
+      const { children, ...rest } = node.props;
+      const spec = clone(rest);
+      if (node.source) spec.source = node.source;
+      result.stage = spec;
+    };
+    visit(root, { prefix: "", counts: /* @__PURE__ */ new Map() }, 0);
+    if (errors.length) {
+      const error = new Error(errors.join("\n"));
+      error.errors = errors;
+      throw error;
+    }
+    return result;
+  }
 
   // runtime/src/index.ts
   function definePlugin(plugin) {
