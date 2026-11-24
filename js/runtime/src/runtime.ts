@@ -17,6 +17,7 @@ import { UIService } from './ui'
 import { AudioService } from './audio'
 import { GfxService } from './gfx'
 import { LoadingService } from './loading'
+import { WorldService } from './world/world'
 import * as jsxRuntime from './jsx-runtime'
 import * as jsxDevRuntime from './jsx-dev-runtime'
 
@@ -120,6 +121,7 @@ export class Runtime {
     await install(bind(AudioService, host))
     await install(bind(GfxService, host))
     await install(bind(LoadingService, host))
+    await install(WorldService)
     await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this

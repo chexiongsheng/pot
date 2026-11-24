@@ -738,7 +738,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | `js/test/jsx.test.js`、`world-tree.test.js`、`world-diff.test.js`、`world-sim.test.js`、`world-view.test.js`、`world-hmr.test.js` | 见 15.12 |
 | `games/hello-tsx/`：`manifest.json`、`tsconfig.json`、`src/plugins/game.tsx`、`data/coins.json` | 5.1 的写法；`coins.json` 复制自 hello |
 
-修改：`runtime.ts`（安装 `WorldService`，模块表加两个 jsx 子路径）、`index.ts`（导出 `defineGame`、`defineBlock`、`definePrefab`、`Fragment` 和 World 相关类型，另以 `jsxRuntime`、`jsxDevRuntime` 两个名字导出 jsx 模块供模块表引用）、`plugins.ts`（`CORE_SERVICES` 加 `'world'`）、`js/devtools/src/loader.ts`、`js/devserver/builder.js`、各 `tsconfig.json`（均见 5.8）。`WorldService` 装在 `UIService` 之后、`PluginsService` 之前。
+修改：`runtime.ts`（安装 `WorldService`，模块表加两个 jsx 子路径）、`index.ts`（导出 `defineGame`、`defineBlock`、`definePrefab`、`Fragment` 和 World 相关类型，另以 `jsxRuntime`、`jsxDevRuntime` 两个名字导出 jsx 模块供模块表引用）、`plugins.ts`（`CORE_SERVICES` 加 `'world'`）、`js/devtools/src/loader.ts`、`js/devserver/builder.js`、各 `tsconfig.json`（均见 5.8）。`WorldService` 装在 `LoadingService` 之后、`PluginsService` 之前，并声明 `static inject = ['clock', 'state', 'input', 'scene', 'ui']`：cordis 4 里服务访问别的服务必须声明依赖，否则构造时就报错。
 
 ### 15.3 JSX 节点
 
@@ -815,6 +815,8 @@ interface EntitySpec {
 
 `WorldService` 在构造时调用 `ctx.state.define('world', { init })`，归属为 `(host)`，热重载和冷重启都靠现有的 `state` 机制保留。`state.restore` 可能换掉对象，所以内核每次进入 `fixed-update`、`update` 时都重新 `ctx.state.get('world')`，不跨帧缓存引用。
 
+因此 `state.info()` 里会多出一条归属 `(host)` 的 `world` 条目。热重载回滚只恢复本次涉及单元拥有的 key，`world` 不在其中；回滚时旧单元重新 `apply` 并挂载，对比会把实体改回旧树的样子。
+
 ```ts
 interface WorldData {
   nextId: number
@@ -863,7 +865,7 @@ interface MountData {
 
 对比造成的销毁（`prefab` 变了、新树里没有）不是玩法事件，不发 `death`。
 
-单元回收与重载：`mount` 通过调用单元的 `ctx.effect` 登记。单元被回收时，挂载只标记为“脱离”，实体不动；如果在下一次清扫之前同一 id 被重新挂载，就是热重载，按上表对比；否则就是单元被移除，销毁它的全部实体并删除记录。
+单元回收与重载：`mount` 通过调用单元的 `ctx.effect` 登记。单元被回收时，挂载只标记为“脱离”，实体不动；如果在下一次清扫之前同一 id 被重新挂载，就是热重载，按上表对比；否则就是单元被移除，销毁它的全部实体并删除记录。用 `w.spawn` 生成的实体不属于任何挂载，生成它的单元脱离时不清理。
 
 已确认（读 `devtools/src/hmr.ts` 的 `reload`）：热重载事务从开始到提交或回滚全程持有 `clock.freeze()`，冻结时 `clock.tick` 在触发 `fixed-update`、`update` 之前就返回；回滚也在冻结期内。所以回收与重新 `apply` 之间不会插进任何一步，上面的做法成立，不需要额外的重载完成事件。
 
@@ -908,6 +910,8 @@ interface Cmd {
 
 `SpawnProps` 与实体标签的属性相同（保留属性加积木覆盖）。`filter` 匹配实体的标签，或匹配它预制件链上的任一名字，所以 `bigCoin` 也匹配 `coin`。`w.on` 从普通单元调用时随该单元回收。`w.rand` 用 mulberry32，状态在 `seed` 里。
 
+“待销毁”指已调用 `destroy`、还没在第 7 步应用的实体：它仍在 `entities` 里，但 `get`、`query`、`count` 都不返回它，也不再参加 `step` 和触发检测。
+
 ### 15.8 每一步
 
 `fixed-update` 里按顺序：
@@ -916,12 +920,14 @@ interface Cmd {
 2. 记录每个实体的上一步变换（插值用）。
 3. 按积木的 `order`（缺省 0，小的先，同序按登记顺序）逐个积木，对拥有它的存活实体调用 `step(me, e, w)`。
 4. 触发检测（15.9），产生 `touch` 事件。
-5. `every` 规则：`tick` 是 `round(seconds / dt)` 的整数倍时触发。
+5. `every` 规则：记 `n = max(1, round(seconds / dt))`，在第 n、2n… 步触发，即本步的 `(tick + 1) % n === 0`（`tick` 在第 8 步才加一）。这样 `seconds={0.5}` 在开局 60 步里恰好触发 2 次，第 0 步不会立刻触发。
 6. 处理事件队列，依次是 `touch`、自定义事件；对每个事件按规则在树里的顺序调用匹配的 `do`。
-7. 应用延迟销毁，每销毁一个发 `death`，处理 `death` 规则；规则里又销毁或发事件的，回到第 6 步，最多 8 轮，超过即报错。
+7. 应用延迟销毁，每销毁一个发 `death`，处理 `death` 规则；规则里又销毁或发事件的，回到第 6 步，最多 8 轮。超过时报错一次，丢弃队列中剩余的事件，剩余待销毁的实体直接移除（挂载记录照样标 `dead`，但不再发 `death`），保证这一步能结束。
 8. `tick` 加一。
 
-`touch` 的匹配：对实体对 `(x, y)`，规则的 `a` 匹配 `x` 且 `b` 匹配 `y` 时调用 `do(w, x, y)`；否则反过来匹配时调用 `do(w, y, x)`。实体对按 id 从小到大处理，结果确定。规则或积木抛出的异常打印一次（带规则的源位置），不中断这一步的其余部分。
+`touch` 的匹配：对实体对 `(x, y)`，规则的 `a` 匹配 `x` 且 `b` 匹配 `y` 时调用 `do(w, x, y)`；否则反过来匹配时调用 `do(w, y, x)`。实体对按 id 从小到大处理，结果确定。处理某个 `touch` 事件时，若任一方已被移除或已在待销毁中（例如同一步里前面的规则 `destroy` 了它），整个事件跳过。规则或积木抛出的异常按“来源 + 信息”去重，只打印一次（带规则的源位置），不中断这一步的其余部分。
+
+进入 `fixed-update` 时先执行一次清扫（15.6），再从第 1 步开始。
 
 ### 15.9 触发检测
 

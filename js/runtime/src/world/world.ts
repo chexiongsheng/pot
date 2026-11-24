@@ -1,0 +1,642 @@
+/**
+ * WorldService（ctx.world）：实体数据、挂载与对比、固定步调度、事件与规则、指令、触发检测。
+ * 见 004 第 15.5 至 15.9 节。表现（15.10）在 view.ts。
+ *
+ * - 持久数据只放 state 的 'world' 条目，每次进入 fixed-update / update 都重新 get，不跨帧缓存引用。
+ * - 内存表（规则、事件队列、上一步变换、指令）丢了可以重建。
+ * - 服务方法里 this.ctx 是调用方的 ctx（cordis 4），挂载与 w.on 据此随调用单元回收；
+ *   服务自己创建的东西一律用构造时的 _root，避免被单元回收。
+ */
+import { Context, Service } from 'cordis'
+import { unitOf } from '../units'
+import { makeNode } from './node'
+import type { PotChild, Prefab, SourcePos } from './node'
+import { Registry, clone, isPlainObject } from './registry'
+import type { BlockDef } from './registry'
+import { evaluate } from './tree'
+import type { EntitySpec, RuleSpec, StageSpec } from './tree'
+import { overlappingPairs } from './collide'
+import type { Collider } from './collide'
+
+declare module 'cordis' {
+  interface Context {
+    world: WorldService
+  }
+}
+
+export interface EntityData {
+  id: number
+  prefab: string
+  /** 所属挂载 id；w.spawn 生成的为 null */
+  mount: string | null
+  path: string | null
+  name?: string
+  tags: string[]
+  pos: number[]
+  rot: number[]
+  scale: number[]
+  /** 每个积木一个对象：属性与状态放在一起（me） */
+  b: Record<string, Record<string, any>>
+  /** w.spawn 的覆盖参数，用于重建 */
+  spawn?: Record<string, any>
+}
+
+export interface MountRecord {
+  id: number
+  dead: boolean
+  /** 上次应用的 EntitySpec 规范化 JSON */
+  last: string
+}
+
+export interface MountData {
+  keys: Record<string, MountRecord>
+}
+
+export interface WorldData {
+  nextId: number
+  /** 已执行的模拟步数 */
+  tick: number
+  /** w.rand 的 uint32 状态 */
+  seed: number
+  vars: Record<string, any>
+  entities: Record<string, EntityData>
+  mounts: Record<string, MountData>
+  /** 正在重叠的实体对，键为 '小id:大id' */
+  contacts: Record<string, true>
+}
+
+export type SpawnProps = Record<string, any> & { at?: number[]; rot?: number[]; scale?: number | number[]; name?: string; tags?: string[] }
+export type Handler = (w: WorldService, ...args: any[]) => any
+
+export interface Cmd {
+  axis(name: string): { x: number; y: number }
+  down(action: string): boolean
+  /** 本步刚按下 */
+  pressed(action: string): boolean
+}
+
+export interface Controls {
+  /** 指令轴名到 ctx.input.axis 的名字 */
+  axes?: Record<string, string>
+  /** 动作名到键（任一按住即为按下） */
+  actions?: Record<string, string | string[]>
+}
+
+export const DEFAULT_CONTROLS: Required<Controls> = {
+  axes: { move: 'move', look: 'look' },
+  actions: { jump: ['space'], fire: ['mouse0'] },
+}
+
+export const DEFAULT_SEED = 0x2f6b9d31
+/** 第 6、7 步（事件、延迟销毁）最多循环的轮数 */
+export const MAX_EVENT_ROUNDS = 8
+
+interface QueuedEvent {
+  name: string
+  args: any[]
+}
+
+interface HandlerEntry {
+  event: string
+  filter?: string
+  fn: Handler
+}
+
+interface MountInfo {
+  unit: string
+  token: object
+}
+
+function initData(): WorldData {
+  return { nextId: 1, tick: 0, seed: DEFAULT_SEED, vars: {}, entities: {}, mounts: {}, contacts: {} }
+}
+
+/** EntitySpec 中参与对比的部分（规范化后 JSON 化存进 last） */
+function normalize(spec: EntitySpec) {
+  return { prefab: spec.prefab, at: spec.at, rot: spec.rot, scale: spec.scale, name: spec.name ?? null, tags: spec.tags, blocks: spec.blocks }
+}
+
+const same = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b)
+
+export class WorldService extends Service {
+  static inject = ['clock', 'state', 'input', 'scene', 'ui']
+  readonly registry = new Registry()
+  /** 构造时的 ctx：服务自己的东西挂在这里 */
+  private _root: Context
+  private _controls: Required<Controls> = DEFAULT_CONTROLS
+  /** 挂载 id → 当前挂着它的单元（脱离后删除） */
+  private _attached = new Map<string, MountInfo>()
+  /** 已脱离、等待清扫的挂载 id */
+  private _detached = new Set<string>()
+  /** 本次运行里挂载过的 id（冷重启清扫用） */
+  private _mountedThisRun = new Set<string>()
+  private _coldChecked = false
+  /** 挂载 id → 规则表（按挂载先后，每次挂载整体替换） */
+  private _rules = new Map<string, RuleSpec[]>()
+  private _handlers: HandlerEntry[] = []
+  private _queue: QueuedEvent[] = []
+  private _pending: number[] = []
+  private _pendingSet = new Set<number>()
+  /** 上一步的变换（插值用）：id → { pos, rot } */
+  readonly prev = new Map<number, { pos: number[]; rot: number[] }>()
+  private _axes: Record<string, { x: number; y: number }> = {}
+  private _down: Record<string, boolean> = {}
+  private _prevDown: Record<string, boolean> = {}
+  private _chains = new Map<string, string[]>()
+  private _chainVersion = -1
+  private _reported = new Set<string>()
+  private _stepping = false
+  /** 当前 stage（由挂载给出，最后一个带 stage 的挂载生效） */
+  private _stages = new Map<string, StageSpec>()
+
+  constructor(ctx: Context) {
+    super(ctx, 'world')
+    this._root = ctx
+    // 构造时 define 一次占住归属（host）；冷重启的 importJSON 会整个替换，之后一律 get
+    ctx.state.define<WorldData>('world', { init: initData })
+    ctx.on('fixed-update', () => this._step())
+    ctx.on('update', () => this._sweep())
+  }
+
+  /** 当前的 World 数据（每次重新取，不缓存） */
+  get data(): WorldData {
+    const state = this._root.state
+    let data = state.get<WorldData>('world')
+    if (!data) {
+      state.set('world', initData())
+      data = state.get<WorldData>('world')!
+    }
+    return data
+  }
+
+  get dt() {
+    return this._root.clock.fixedStep
+  }
+
+  get tick() {
+    return this.data.tick
+  }
+
+  get time() {
+    return this.data.tick * this.dt
+  }
+
+  get vars() {
+    return this.data.vars
+  }
+
+  /** 当前生效的 stage（多个挂载都给了时取最后挂载的） */
+  get stage(): StageSpec | null {
+    let last: StageSpec | null = null
+    for (const s of this._stages.values()) last = s
+    return last
+  }
+
+  /** 设置指令映射（defineGame 的 controls） */
+  setControls(controls: Controls | undefined) {
+    this._controls = {
+      axes: { ...DEFAULT_CONTROLS.axes, ...controls?.axes },
+      actions: { ...DEFAULT_CONTROLS.actions, ...controls?.actions },
+    }
+  }
+
+  /** 合并 vars：没有的键补初值，已有的保留 */
+  mergeVars(vars: Record<string, any> | undefined) {
+    if (!vars) return
+    const target = this.data.vars
+    for (const key of Object.keys(vars)) {
+      if (!(key in target)) target[key] = clone(vars[key])
+    }
+  }
+
+  // ---------------------------------------------------------------- 挂载与对比（15.6）
+
+  mount(tree: PotChild, options: { id?: string } = {}) {
+    const unit = unitOf(this.ctx) ?? '(host)'
+    const id = options.id ?? unit
+    const current = this._attached.get(id)
+    if (current && current.unit !== unit) {
+      throw new Error(`world.mount：挂载 id "${id}" 已被单元 "${current.unit}" 使用，请换一个 id`)
+    }
+    const result = evaluate(tree, this.registry)
+    for (const prefab of result.prefabs) {
+      if (this.registry.prefab(prefab.prefab) !== prefab) this.ctx.effect(() => this.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`)
+    }
+    const data = this.data
+    this._diff(data, id, result.entities)
+    this._rules.set(id, result.rules)
+    if (result.stage) this._stages.set(id, result.stage)
+    else this._stages.delete(id)
+    const token = {}
+    this._attached.set(id, { unit, token })
+    this._detached.delete(id)
+    this._mountedThisRun.add(id)
+    this.ctx.effect(() => () => {
+      if (this._attached.get(id)?.token !== token) return
+      this._attached.delete(id)
+      this._detached.add(id)
+    }, `world.mount(${id})`)
+  }
+
+  private _diff(data: WorldData, id: string, specs: EntitySpec[]) {
+    const mount = (data.mounts[id] ??= { keys: {} })
+    const seen = new Set<string>()
+    for (const spec of specs) {
+      seen.add(spec.path)
+      const last = JSON.stringify(normalize(spec))
+      const rec = mount.keys[spec.path]
+      if (!rec) {
+        const e = this._create(data, spec, id, spec.path)
+        mount.keys[spec.path] = { id: e.id, dead: false, last }
+        continue
+      }
+      if (rec.dead) continue
+      const e = data.entities[rec.id]
+      if (!e) {
+        rec.dead = true
+        continue
+      }
+      const old = JSON.parse(rec.last)
+      if (old.prefab !== spec.prefab) {
+        this._remove(data, e, false)
+        const fresh = this._create(data, spec, id, spec.path)
+        mount.keys[spec.path] = { id: fresh.id, dead: false, last }
+        continue
+      }
+      if (last === rec.last) continue
+      if (!same(old.at, spec.at)) e.pos = [...spec.at]
+      if (!same(old.rot, spec.rot)) e.rot = [...spec.rot]
+      if (!same(old.scale, spec.scale)) e.scale = [...spec.scale]
+      if (old.name !== (spec.name ?? null)) {
+        if (spec.name === undefined) delete e.name
+        else e.name = spec.name
+      }
+      if (!same(old.tags, spec.tags)) e.tags = [...spec.tags]
+      const added: string[] = []
+      for (const name of Object.keys(spec.blocks)) {
+        const props = spec.blocks[name]
+        if (!e.b[name]) {
+          e.b[name] = this._blockData(name, props)
+          added.push(name)
+        } else if (!same(old.blocks?.[name], props)) {
+          Object.assign(e.b[name], clone(props))
+        }
+      }
+      for (const name of Object.keys(e.b)) {
+        if (!(name in spec.blocks)) delete e.b[name]
+      }
+      this._init(e, added)
+      rec.last = last
+    }
+    for (const path of Object.keys(mount.keys)) {
+      if (seen.has(path)) continue
+      const rec = mount.keys[path]
+      const e = !rec.dead && data.entities[rec.id]
+      if (e) this._remove(data, e, false)
+      delete mount.keys[path]
+    }
+  }
+
+  /** 清扫已脱离的挂载：销毁它们的实体、删除记录。fixed-update 与 update 先到的一处执行 */
+  private _sweep() {
+    if (!this._coldChecked) {
+      this._coldChecked = true
+      // 冷重启带回的、本次运行里还没挂载过的记录一律视为脱离
+      for (const id of Object.keys(this.data.mounts)) {
+        if (!this._mountedThisRun.has(id) && !this._attached.has(id)) this._detached.add(id)
+      }
+    }
+    if (!this._detached.size) return
+    const data = this.data
+    for (const id of this._detached) {
+      const mount = data.mounts[id]
+      if (mount) {
+        for (const rec of Object.values(mount.keys)) {
+          const e = !rec.dead && data.entities[rec.id]
+          if (e) this._remove(data, e, false)
+        }
+        delete data.mounts[id]
+      }
+      this._rules.delete(id)
+      this._stages.delete(id)
+    }
+    this._detached.clear()
+  }
+
+  // ---------------------------------------------------------------- 实体
+
+  private _blockData(name: string, props: Record<string, any>) {
+    const block = this.registry.block(name)
+    return { ...clone(block?.state ?? {}), ...clone(props) }
+  }
+
+  private _create(data: WorldData, spec: EntitySpec, mount: string | null, path: string | null): EntityData {
+    const id = data.nextId++
+    const e: EntityData = {
+      id, prefab: spec.prefab, mount, path, tags: [...spec.tags],
+      pos: [...spec.at], rot: [...spec.rot], scale: [...spec.scale], b: {},
+    }
+    if (spec.name !== undefined) e.name = spec.name
+    for (const name of Object.keys(spec.blocks)) e.b[name] = this._blockData(name, spec.blocks[name])
+    data.entities[id] = e
+    this._init(e, Object.keys(e.b))
+    return e
+  }
+
+  /** 按执行顺序对指定积木调用 init */
+  private _init(e: EntityData, names: string[]) {
+    if (!names.length) return
+    for (const block of this.registry.ordered()) {
+      if (!block.init || !names.includes(block.name) || !e.b[block.name]) continue
+      this._guard(`积木 ${block.name}.init`, undefined, () => block.init!(e.b[block.name], e, this))
+    }
+  }
+
+  /** 立即移除实体；gameplay 为真时把挂载记录标为 dead */
+  private _remove(data: WorldData, e: EntityData, gameplay: boolean) {
+    delete data.entities[e.id]
+    this.prev.delete(e.id)
+    if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id)
+    if (gameplay && e.mount !== null && e.path !== null) {
+      const rec = data.mounts[e.mount]?.keys[e.path]
+      if (rec && rec.id === e.id) rec.dead = true
+    }
+  }
+
+  private _alive(e: EntityData | undefined): e is EntityData {
+    return !!e && !this._pendingSet.has(e.id) && this.data.entities[e.id] === e
+  }
+
+  spawn(prefab: string | Prefab, props: SpawnProps = {}): EntityData {
+    if (typeof prefab !== 'string' && this.registry.prefab(prefab.prefab) !== prefab) {
+      // 句柄直接生成：补登记（不随单元撤销，重建要靠名字找到它）
+      if (!this.registry.prefab(prefab.prefab)) this.registry.addPrefab(prefab)
+    }
+    if (!isPlainObject(props)) throw new Error('w.spawn 的属性必须是普通对象')
+    const { key, children, ...rest } = props as any
+    let saved: Record<string, any>
+    try {
+      saved = JSON.parse(JSON.stringify(rest))
+    } catch {
+      throw new Error('w.spawn 的属性必须可序列化（热重载与读档要靠它重建）')
+    }
+    const { entities } = evaluate(makeNode(prefab, rest, null), this.registry)
+    const e = this._create(this.data, entities[0], null, null)
+    e.spawn = saved
+    return e
+  }
+
+  /** 延迟到本步末尾销毁（不在步内调用时，到下一步末尾） */
+  destroy(target: EntityData | number) {
+    const id = typeof target === 'number' ? target : target?.id
+    const e = this.data.entities[id]
+    if (!e || this._pendingSet.has(id)) return
+    this._pendingSet.add(id)
+    this._pending.push(id)
+  }
+
+  get(id: number): EntityData | undefined {
+    const e = this.data.entities[id]
+    return e && !this._pendingSet.has(id) ? e : undefined
+  }
+
+  /** 预制件链上的名字（按登记表版本缓存） */
+  chain(prefab: string) {
+    if (this._chainVersion !== this.registry.version) {
+      this._chains.clear()
+      this._chainVersion = this.registry.version
+    }
+    let chain = this._chains.get(prefab)
+    if (!chain) this._chains.set(prefab, chain = this.registry.chain(prefab))
+    return chain
+  }
+
+  /** filter 匹配实体的标签，或它预制件链上的任一名字；省略时匹配全部 */
+  matches(e: EntityData, filter?: string) {
+    if (filter === undefined) return true
+    return e.tags.includes(filter) || this.chain(e.prefab).includes(filter)
+  }
+
+  query(filter?: string): EntityData[] {
+    const out: EntityData[] = []
+    const entities = this.data.entities
+    for (const key in entities) {
+      const e = entities[key]
+      if (!this._pendingSet.has(e.id) && this.matches(e, filter)) out.push(e)
+    }
+    return out
+  }
+
+  count(filter?: string) {
+    return this.query(filter).length
+  }
+
+  // ---------------------------------------------------------------- 事件
+
+  on(event: string, filter: string | Handler, fn?: Handler): () => void {
+    const entry: HandlerEntry = typeof filter === 'function' ? { event, fn: filter } : { event, filter, fn: fn! }
+    if (typeof entry.fn !== 'function') throw new Error('w.on 需要处理函数')
+    return this.ctx.effect(() => {
+      this._handlers.push(entry)
+      return () => {
+        const i = this._handlers.indexOf(entry)
+        if (i >= 0) this._handlers.splice(i, 1)
+      }
+    }, `world.on(${event})`)
+  }
+
+  emit(name: string, payload?: any) {
+    this._queue.push({ name, args: [payload] })
+  }
+
+  cmd(_e?: EntityData): Cmd {
+    return {
+      axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
+      down: (action) => !!this._down[action],
+      pressed: (action) => !!this._down[action] && !this._prevDown[action],
+    }
+  }
+
+  rand(): number
+  rand(min: number, max: number): number
+  rand(min?: number, max?: number) {
+    const data = this.data
+    // mulberry32
+    let t = (data.seed = (data.seed + 0x6d2b79f5) >>> 0)
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    return min === undefined ? r : min + r * ((max ?? 1) - min)
+  }
+
+  /** 打印一次（同一来源同一信息只打印一次），不中断其余部分 */
+  private _guard(what: string, source: SourcePos | undefined, fn: () => void) {
+    try {
+      fn()
+    } catch (error: any) {
+      const where = source ? `${source.file}:${source.line} ` : ''
+      const message = `${where}${what} 出错：${error?.stack ?? error?.message ?? error}`
+      const key = `${where}${what}:${error?.message ?? error}`
+      if (this._reported.has(key)) return
+      if (this._reported.size > 1000) this._reported.clear()
+      this._reported.add(key)
+      this._root.logger('world').error(message)
+    }
+  }
+
+  private *_allRules(on: string) {
+    for (const rules of this._rules.values()) {
+      for (const rule of rules) if (rule.on === on) yield rule
+    }
+  }
+
+  private _dispatch(event: QueuedEvent) {
+    if (event.name === 'touch') {
+      const [x, y] = event.args as [EntityData, EntityData]
+      if (!this._alive(x) || !this._alive(y)) return
+      for (const rule of this._allRules('touch')) {
+        if (this.matches(x, rule.a) && this.matches(y, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, x, y))
+        else if (this.matches(y, rule.a) && this.matches(x, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, y, x))
+      }
+      for (const h of [...this._handlers]) {
+        if (h.event !== 'touch') continue
+        if (this.matches(x, h.filter)) this._guard('w.on("touch")', undefined, () => h.fn(this, x, y))
+        else if (this.matches(y, h.filter)) this._guard('w.on("touch")', undefined, () => h.fn(this, y, x))
+      }
+      return
+    }
+    if (event.name === 'death') {
+      const [e] = event.args as [EntityData]
+      for (const rule of this._allRules('death')) {
+        if (this.matches(e, rule.a)) this._guard(`<rule on="death">`, rule.source, () => rule.do(this, e))
+      }
+      for (const h of [...this._handlers]) {
+        if (h.event === 'death' && this.matches(e, h.filter)) this._guard('w.on("death")', undefined, () => h.fn(this, e))
+      }
+      return
+    }
+    for (const rule of this._allRules(event.name)) {
+      this._guard(`<rule on="${event.name}">`, rule.source, () => rule.do(this, ...event.args))
+    }
+    for (const h of [...this._handlers]) {
+      if (h.event === event.name) this._guard(`w.on("${event.name}")`, undefined, () => h.fn(this, ...event.args))
+    }
+  }
+
+  // ---------------------------------------------------------------- 每一步（15.8）
+
+  private _step() {
+    if (this._stepping) return
+    this._stepping = true
+    try {
+      this._sweep()
+      const data = this.data
+      // 1. 采样指令
+      this._prevDown = this._down
+      this._down = {}
+      this._axes = {}
+      const input = this._root.input
+      for (const name of Object.keys(this._controls.axes)) this._axes[name] = input.axis(this._controls.axes[name])
+      for (const action of Object.keys(this._controls.actions)) {
+        const keys = this._controls.actions[action]
+        this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
+      }
+      // 2. 上一步变换
+      this.prev.clear()
+      for (const key in data.entities) {
+        const e = data.entities[key]
+        this.prev.set(e.id, { pos: [...e.pos], rot: [...e.rot] })
+      }
+      // 3. 积木 step（本步开始时存活的实体；本步生成的下一步起参加）
+      const alive = Object.values(data.entities)
+      for (const block of this.registry.ordered()) {
+        if (!block.step) continue
+        for (const e of alive) {
+          const me = e.b[block.name]
+          if (!me || !this._alive(e)) continue
+          this._guard(`积木 ${block.name}.step`, undefined, () => block.step!(me, e, this))
+        }
+      }
+      // 4. 触发检测
+      const touches = this._detect(data)
+      // 5. every
+      for (const rule of this._allRules('every')) {
+        const n = Math.max(1, Math.round(rule.seconds! / this.dt))
+        if ((data.tick + 1) % n === 0) this._guard('<rule on="every">', rule.source, () => rule.do(this))
+      }
+      // 6、7. 事件队列与延迟销毁
+      this._queue.unshift(...touches)
+      this._drain(data)
+      // 8.
+      data.tick++
+    } finally {
+      this._stepping = false
+    }
+  }
+
+  private _drain(data: WorldData) {
+    let rounds = 0
+    while (this._queue.length || this._pending.length) {
+      if (++rounds > MAX_EVENT_ROUNDS) {
+        const dropped = this._queue.map((e) => e.name)
+        this._queue = []
+        this._root.logger('world').error('事件与销毁连锁超过 %d 轮，本步剩余的事件已丢弃：%s', MAX_EVENT_ROUNDS, dropped.join('、') || '（death）')
+        for (const id of this._pending.splice(0)) {
+          const e = data.entities[id]
+          this._pendingSet.delete(id)
+          if (e) this._remove(data, e, true)
+        }
+        return
+      }
+      const batch = this._queue.splice(0)
+      for (const event of batch) this._dispatch(event)
+      const pending = this._pending.splice(0)
+      for (const id of pending) {
+        this._pendingSet.delete(id)
+        const e = data.entities[id]
+        if (!e) continue
+        this._remove(data, e, true)
+        this._queue.push({ name: 'death', args: [e] })
+      }
+    }
+  }
+
+  private _detect(data: WorldData): QueuedEvent[] {
+    const colliders: Collider[] = []
+    for (const key in data.entities) {
+      const e = data.entities[key]
+      const t = e.b.trigger
+      if (!t || this._pendingSet.has(e.id)) continue
+      const [sx, sy, sz] = e.scale.map(Math.abs)
+      const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] as [number, number, number] : null
+      colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box })
+    }
+    const now = new Set<string>()
+    const events: QueuedEvent[] = []
+    for (const [a, b] of overlappingPairs(colliders)) {
+      const key = `${a.id}:${b.id}`
+      now.add(key)
+      if (!data.contacts[key]) {
+        data.contacts[key] = true
+        events.push({ name: 'touch', args: [data.entities[a.id], data.entities[b.id]] })
+      }
+    }
+    for (const key of Object.keys(data.contacts)) {
+      if (!now.has(key)) delete data.contacts[key]
+    }
+    return events
+  }
+
+  /** 测试与开发工具用：当前规则表 */
+  rules(): RuleSpec[] {
+    return [...this._rules.values()].flat()
+  }
+
+  /** 测试与开发工具用：挂载状态 */
+  mounts() {
+    return { attached: [...this._attached.keys()], detached: [...this._detached] }
+  }
+}
+
+export type World = WorldService
+export type { BlockDef }

@@ -34,6 +34,7 @@ var pot = (() => {
     ClockService: () => ClockService,
     Context: () => Context,
     CordisError: () => CordisError,
+    DEFAULT_CONTROLS: () => DEFAULT_CONTROLS,
     DataService: () => DataService,
     DisposableList: () => DisposableList,
     Entity: () => Entity,
@@ -50,6 +51,7 @@ var pot = (() => {
     Logger: () => Logger,
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
+    MAX_EVENT_ROUNDS: () => MAX_EVENT_ROUNDS,
     MAX_VERTEX_INPUTS: () => MAX_VERTEX_INPUTS,
     PREFAB: () => PREFAB,
     PluginsService: () => PluginsService,
@@ -68,6 +70,7 @@ var pot = (() => {
     UIService: () => UIService,
     VERSION: () => VERSION,
     ValidationError: () => ValidationError,
+    WorldService: () => WorldService,
     ancestors: () => ancestors,
     applyUniforms: () => applyUniforms,
     assertSerializable: () => assertSerializable,
@@ -113,6 +116,8 @@ var pot = (() => {
     mapErrors: () => mapErrors,
     markFiber: () => markFiber,
     nodeName: () => nodeName,
+    overlap: () => overlap,
+    overlappingPairs: () => overlappingPairs,
     parseColor: () => parseColor,
     parseCssColor: () => parseCssColor,
     parseFont: () => parseFont,
@@ -2989,8 +2994,8 @@ var pot = (() => {
         return;
       }
       const cos = (ax * bx + ay * by) / (la * lb);
-      const half = Math.acos(Math.max(-1, Math.min(1, cos))) / 2;
-      const dist = r / Math.tan(half);
+      const half2 = Math.acos(Math.max(-1, Math.min(1, cos))) / 2;
+      const dist = r / Math.tan(half2);
       const t0x = x1 + ax / la * dist, t0y = y1 + ay / la * dist;
       const t1x = x1 + bx / lb * dist, t1y = y1 + by / lb * dist;
       const nx = cross > 0 ? -ay / la : ay / la, ny = cross > 0 ? ax / la : -ax / la;
@@ -6651,7 +6656,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   };
 
   // runtime/src/plugins.ts
-  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "loading", "plugins"];
+  var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "loading", "world", "plugins"];
   function compileModule(code, filename) {
     const indirectEval = eval;
     return indirectEval(`(function (exports, require, module, __filename) {${code}
@@ -6784,15 +6789,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
-  // runtime/src/jsx-runtime.ts
-  var jsx_runtime_exports = {};
-  __export(jsx_runtime_exports, {
-    Fragment: () => Fragment,
-    createElement: () => createElement,
-    jsx: () => jsx,
-    jsxs: () => jsxs
-  });
-
   // runtime/src/world/node.ts
   var Fragment = /* @__PURE__ */ Symbol.for("pot.fragment");
   var PREFAB = /* @__PURE__ */ Symbol.for("pot.prefab");
@@ -6827,393 +6823,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   function sourcePrefix(source) {
     return source ? `${formatSource(source)} ` : "";
   }
-
-  // runtime/src/jsx-runtime.ts
-  function jsx(type, props, key) {
-    return makeNode(type, props, key);
-  }
-  var jsxs = jsx;
-  function createElement(type, config, ...children) {
-    const props = {};
-    let key;
-    for (const name in config ?? {}) {
-      if (name === "key") key = config[name];
-      else if (name !== "__self" && name !== "__source") props[name] = config[name];
-    }
-    if (children.length === 1) props.children = children[0];
-    else if (children.length > 1) props.children = children;
-    return makeNode(type, props, key);
-  }
-
-  // runtime/src/jsx-dev-runtime.ts
-  var jsx_dev_runtime_exports = {};
-  __export(jsx_dev_runtime_exports, {
-    Fragment: () => Fragment,
-    jsxDEV: () => jsxDEV
-  });
-  function jsxDEV(type, props, key, _isStatic, source, _self) {
-    const pos = source && source.fileName ? { file: source.fileName, line: source.lineNumber ?? 0, col: source.columnNumber ?? 0 } : void 0;
-    return makeNode(type, props, key, pos);
-  }
-
-  // runtime/src/runtime.ts
-  var API_VERSION = "0.1";
-  var VERSION = "0.1.0";
-  var current;
-  function currentRuntime() {
-    return current;
-  }
-  function bind(Base, ...args) {
-    const Bound = class extends Base {
-      constructor(ctx) {
-        super(ctx, ...args);
-      }
-    };
-    Object.defineProperty(Bound, "name", { value: Base.name });
-    return Bound;
-  }
-  var Runtime = class {
-    constructor(host, options = {}) {
-      __publicField(this, "host", host);
-      __publicField(this, "options", options);
-      __publicField(this, "root");
-      __publicField(this, "manifest");
-      __publicField(this, "status", "idle");
-      /** 启动阶段失败的单元 */
-      __publicField(this, "failures", []);
-      this.root = new Context();
-      current = this;
-      const exporter = {
-        colors: false,
-        export(message) {
-          const level = ["error", "warn", "info", "debug"].includes(message.type) ? message.type : "info";
-          try {
-            host.log(level, Logger.format(exporter, message));
-          } catch {
-            host.log(level, String(message.args?.[0]));
-          }
-        }
-      };
-      this.root.logger.exporter(exporter);
-    }
-    get clock() {
-      return this.root.clock;
-    }
-    get state() {
-      return this.root.state;
-    }
-    get plugins() {
-      return this.root.plugins;
-    }
-    get scene() {
-      return this.root.scene;
-    }
-    get data() {
-      return this.root.data;
-    }
-    get cache() {
-      return this.root.cache;
-    }
-    get loading() {
-      return this.root.loading;
-    }
-    /** 安装核心服务 */
-    async init() {
-      const { root, host } = this;
-      const pot = globalThis.pot;
-      const modules = this.options.modules ?? {
-        "@pot/core": pot,
-        "cordis": pot,
-        "@pot/core/jsx-runtime": jsx_runtime_exports,
-        "@pot/core/jsx-dev-runtime": jsx_dev_runtime_exports
-      };
-      const install = (plugin) => root.plugin(plugin, void 0);
-      await install(ClockService);
-      await install(TimerService);
-      await install(bind(StateService));
-      await install(CacheService);
-      await install(bind(DataService, host));
-      await install(bind(SceneService, host));
-      await install(bind(InputService, host));
-      await install(bind(UIService, host));
-      await install(bind(AudioService, host));
-      await install(bind(GfxService, host));
-      await install(bind(LoadingService, host));
-      await install(bind(PluginsService, host, modules, this.options.loader));
-      if (this.options.state) this.root.state.importJSON(this.options.state);
-      return this;
-    }
-    readManifest() {
-      const text = this.host.readText("manifest.json");
-      if (!text) throw new Error("找不到 manifest.json");
-      const manifest = JSON.parse(text);
-      if (!manifest.id) throw new Error("manifest.json 缺少 id");
-      if (!Array.isArray(manifest.plugins)) throw new Error("manifest.json 缺少 plugins 数组");
-      if (manifest.apiVersion && manifest.apiVersion.split(".")[0] !== API_VERSION.split(".")[0]) {
-        throw new Error(`manifest.apiVersion=${manifest.apiVersion} 与运行时 ${API_VERSION} 不兼容`);
-      }
-      return manifest;
-    }
-    /**
-     * 读取 manifest 并挂载入口单元。单个单元失败不影响其他单元。
-     * 注意：不要在这里持有入口 fiber 的引用，否则热重载后旧 fiber 无法回收。
-     */
-    async start() {
-      this.status = "starting";
-      this.root.loading.begin();
-      try {
-        this.manifest = this.readManifest();
-      } catch (error) {
-        this.status = "failed";
-        this.root.loading.end();
-        this.root.logger("pot").error(error);
-        throw error;
-      }
-      for (const item of this.manifest.plugins) {
-        const entry = typeof item === "string" ? { name: item } : item;
-        try {
-          await this.root.plugins.use(entry.name, entry.config);
-        } catch (error) {
-          this.failures.push({ name: entry.name, error: error?.stack ?? String(error) });
-          this.root.logger("pot").error("单元 %s 启动失败：%s", entry.name, error?.stack ?? error);
-        }
-      }
-      this.root.loading.end();
-      this.status = "running";
-      return this;
-    }
-    tick(dt) {
-      const clock = this.root.clock;
-      const frame = clock.frame;
-      this.root.loading.pump();
-      clock.tick(dt);
-      if (clock.frame !== frame) this.root.ui.flush();
-    }
-    /** 卸载所有单元（服务保留，state 保留） */
-    async stop() {
-      for (const unit of this.root.plugins.units.values()) {
-        for (const fiber of [...unit.mounts]) {
-          try {
-            await fiber.dispose();
-          } catch (error) {
-            this.root.logger("pot").warn(error);
-          }
-        }
-      }
-      this.status = "stopped";
-    }
-    exportState() {
-      return this.root.state.exportJSON();
-    }
-    info() {
-      return {
-        status: this.status,
-        game: this.manifest?.id,
-        apiVersion: API_VERSION,
-        time: this.root.clock.time,
-        frame: this.root.clock.frame,
-        paused: this.root.clock.paused,
-        frozen: this.root.clock.frozen,
-        units: this.root.plugins.list().map((u) => ({ name: u.name, hash: u.hash, mounts: u.mounts.length })),
-        objects: this.root.scene.objects.size,
-        timers: this.root.clock.pending,
-        state: this.root.state.keys(),
-        failures: this.failures,
-        loading: { active: this.root.loading.active, progress: this.root.loading.progress, text: this.root.loading.text, yields: this.root.loading.yields }
-      };
-    }
-  };
-  async function createRuntime(host, options) {
-    const runtime = new Runtime(host, options);
-    await runtime.init();
-    return runtime;
-  }
-
-  // runtime/src/unity.ts
-  function createUnityHost() {
-    const Pot = CS.Pot;
-    const H = Pot.PotHost;
-    const FS2 = Pot.GameFS;
-    const S = Pot.PotScene;
-    const I = Pot.PotInput;
-    const U = Pot.PotUI;
-    const A = Pot.PotAudio;
-    const R = Pot.PotRender;
-    const G = Pot.PotGfx;
-    return {
-      platform: "unity",
-      log: (level, text) => H.Log(level, text),
-      readText: (path) => {
-        const text = FS2.ReadText(path);
-        return text === null || text === void 0 ? null : text;
-      },
-      cacheRead: (bucket, key) => {
-        const text = FS2.CacheRead(bucket, key);
-        return text === null || text === void 0 ? null : text;
-      },
-      cacheWrite: (bucket, key, text) => FS2.CacheWrite(bucket, key, text),
-      gc: () => H.RequestGC(),
-      send: (message) => H.Send(message),
-      frames: true,
-      loading: (progress, text) => H.OnLoading(progress, text),
-      engine: {
-        spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
-        destroy: (id) => S.Destroy(id),
-        exists: (id) => S.Exists(id),
-        setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
-        setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
-        visible: (id, visible) => S.SetVisible(id, visible),
-        skin: (id, bones) => S.Skin(id, bones) ?? "",
-        getVec: (id, prop) => {
-          S.GetVec(id, prop);
-          return [S.vx, S.vy, S.vz];
-        },
-        setColor: (id, r, g, b, a) => S.SetColor(id, r, g, b, a),
-        setActive: (id, active) => S.SetActive(id, active),
-        lookAt: (id, x, y, z) => S.LookAt(id, x, y, z),
-        light: (id, type, intensity, r, g, b, range) => S.Light(id, type, intensity, r, g, b, range),
-        cameraId: () => S.CameraId(),
-        setBackground: (r, g, b) => S.SetBackground(r, g, b),
-        axis: (name) => {
-          I.Axis(name);
-          return [I.ax, I.ay];
-        },
-        key: (name, mode) => I.Key(name, mode),
-        count: () => S.Count(),
-        material: (id, mode, castShadows, cull) => S.SetMaterial(id, mode, castShadows, cull),
-        surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
-        emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
-        collider: (id, enabled) => S.SetCollider(id, enabled),
-        colliderShape: (id, kind, dynamic) => S.SetColliderShape(id, kind, dynamic) ?? "",
-        layer: (id, layer) => S.SetLayer(id, layer),
-        raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
-          const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask);
-          if (!id) return null;
-          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
-        },
-        sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => {
-          const id = S.SphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask);
-          if (!id) return null;
-          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
-        },
-        view: (fov, near, far) => S.SetCamera(fov, near, far),
-        fog: (r, g, b, density) => S.SetFog(r, g, b, density),
-        ambient: (r, g, b, reflection) => S.SetAmbient(r, g, b, reflection),
-        lightOptions: (id, spotAngle, shadows) => S.LightOptions(id, spotAngle, shadows),
-        lightIntensity: (id, intensity) => S.SetLightIntensity(id, intensity),
-        cursor: (locked) => I.SetCursor(locked),
-        cursorLocked: () => I.CursorLocked(),
-        mouse: () => {
-          I.Mouse();
-          return [I.mx, I.my];
-        },
-        screen: () => {
-          I.ScreenSize();
-          return [I.sw, I.sh];
-        },
-        wheel: () => I.Wheel(),
-        focused: () => I.Focused(),
-        uiSubmit: (list) => U.Submit(list),
-        uiMeasure: (text, size, flags) => {
-          U.Measure(text, size, flags);
-          return [U.tw, U.th];
-        },
-        audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),
-        audioHas: (name) => A.HasClip(name),
-        audioPlay: (name, volume, pitch, x, y, z, spatial) => A.Play(name, volume, pitch, x, y, z, spatial),
-        audioLoop: (name, volume, pitch) => A.Loop(name, volume, pitch),
-        audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => A.SetLoop(handle, volume, pitch, x, y, z, spatial),
-        audioStop: (handle) => A.StopLoop(handle),
-        audioVolume: (volume) => A.Volume(volume),
-        audioPause: (paused) => A.Pause(paused),
-        texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
-        destroyTexture: (id) => S.DestroyTexture(id),
-        textTexture: (json) => R.TextTexture(json),
-        canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
-        mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
-        meshCached: (name, key) => S.MeshCached(name, key),
-        meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
-        meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? "",
-        meshColors: (name, colors, linear) => S.MeshColors(name, colors, linear) ?? "",
-        meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
-        matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
-        matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
-        matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
-        ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
-        render: (kind, json) => R.Configure(kind, json) ?? "",
-        burst: (json) => R.Burst(json),
-        gfxBackend: () => G.Backend() ?? "",
-        gfxUnsupported: () => G.Unsupported() ?? "",
-        gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
-        gfxDestroyProgram: (name) => G.DestroyProgram(name),
-        gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
-        gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
-        gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
-        gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
-        gfxInstances: (id, count, layout, data) => G.Instances(id, count, layout, data) ?? "",
-        gfxBakeBegin: () => G.BakeBegin(),
-        gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
-        gfxPost: (json) => G.Post(json) ?? "",
-        gfxPostEnable: (pass, on) => G.PostEnable(pass, on) ?? ""
-      }
-    };
-  }
-  var unity = {
-    runtime: void 0,
-    /** 启动：异步完成后回调 PotHost.OnBooted(ok, error) */
-    boot(stateJson) {
-      const host = createUnityHost();
-      const loader = globalThis.pot?.devtools?.createLoader?.(host);
-      createRuntime(host, { state: stateJson || void 0, loader }).then((runtime) => {
-        unity.runtime = runtime;
-        globalThis.pot?.devtools?.attach?.(runtime);
-        return runtime.start();
-      }).then(() => CS.Pot.PotHost.OnBooted(true, ""), (error) => CS.Pot.PotHost.OnBooted(false, String(error?.stack ?? error)));
-    },
-    tick(dt) {
-      unity.runtime?.tick(dt);
-    },
-    /** 启动期间（尚未 Running）每帧调用：放行 loading.frame()/step() 的等待 */
-    pump() {
-      unity.runtime?.root.loading.pump();
-    },
-    /** 冷重启前调用：导出 state JSON（失败返回空串） */
-    exportState() {
-      try {
-        return unity.runtime?.exportState() ?? "";
-      } catch (error) {
-        CS.Pot.PotHost.Log("error", `导出 state 失败：${error?.stack ?? error}`);
-        return "";
-      }
-    },
-    stop() {
-      const runtime = unity.runtime;
-      unity.runtime = void 0;
-      runtime?.stop().catch(() => {
-      });
-    },
-    info() {
-      return JSON.stringify(unity.runtime?.info() ?? { status: "idle" });
-    }
-  };
-  function bindEntry(name, fn) {
-    const R = typeof CS === "undefined" ? void 0 : CS?.Pot?.PotRuntime;
-    if (!R || typeof R.Bind !== "function") return false;
-    R.Bind(name, () => {
-      const result = fn(R.TakeArg() ?? "");
-      if (typeof result === "string") R.Return(result);
-    });
-    return true;
-  }
-  function bindUnity() {
-    bindEntry("unity.boot", (state) => unity.boot(state));
-    bindEntry("unity.tick", () => unity.tick(CS.Pot.PotRuntime.frameDt));
-    bindEntry("unity.pump", () => unity.pump());
-    bindEntry("unity.exportState", () => unity.exportState());
-    bindEntry("unity.stop", () => unity.stop());
-    bindEntry("unity.info", () => unity.info());
-  }
-  bindUnity();
 
   // runtime/src/world/registry.ts
   var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "children"]);
@@ -7596,6 +7205,961 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
     return result;
   }
+
+  // runtime/src/world/collide.ts
+  var GRID_THRESHOLD = 256;
+  var GRID_CELL = 4;
+  function overlap(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    if (!a.box && !b.box) {
+      const r = a.r + b.r;
+      return dx * dx + dy * dy + dz * dz < r * r;
+    }
+    if (a.box && b.box) {
+      return Math.abs(dx) < a.box[0] + b.box[0] && Math.abs(dy) < a.box[1] + b.box[1] && Math.abs(dz) < a.box[2] + b.box[2];
+    }
+    const sphere = a.box ? b : a;
+    const box = a.box ? a : b;
+    const [hx, hy, hz] = box.box;
+    const cx = clamp(sphere.x, box.x - hx, box.x + hx) - sphere.x;
+    const cy = clamp(sphere.y, box.y - hy, box.y + hy) - sphere.y;
+    const cz = clamp(sphere.z, box.z - hz, box.z + hz) - sphere.z;
+    const d2 = cx * cx + cy * cy + cz * cz;
+    if (sphere.r > 0) return d2 < sphere.r * sphere.r;
+    return Math.abs(sphere.x - box.x) < hx && Math.abs(sphere.y - box.y) < hy && Math.abs(sphere.z - box.z) < hz;
+  }
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+  }
+  function half(c) {
+    return c.box ?? [c.r, c.r, c.r];
+  }
+  function overlappingPairs(list) {
+    const sorted = [...list].sort((a, b) => a.id - b.id);
+    const out = [];
+    if (sorted.length <= GRID_THRESHOLD) {
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (overlap(sorted[i], sorted[j])) out.push([sorted[i], sorted[j]]);
+        }
+      }
+      return out;
+    }
+    const cells = /* @__PURE__ */ new Map();
+    sorted.forEach((c, index) => {
+      const [hx, hy, hz] = half(c);
+      const x0 = Math.floor((c.x - hx) / GRID_CELL), x1 = Math.floor((c.x + hx) / GRID_CELL);
+      const y0 = Math.floor((c.y - hy) / GRID_CELL), y1 = Math.floor((c.y + hy) / GRID_CELL);
+      const z0 = Math.floor((c.z - hz) / GRID_CELL), z1 = Math.floor((c.z + hz) / GRID_CELL);
+      for (let i = x0; i <= x1; i++) for (let j = y0; j <= y1; j++) for (let k = z0; k <= z1; k++) {
+        const key = `${i},${j},${k}`;
+        let cell = cells.get(key);
+        if (!cell) cells.set(key, cell = []);
+        cell.push(index);
+      }
+    });
+    const seen = /* @__PURE__ */ new Set();
+    const n2 = sorted.length;
+    const found = [];
+    for (const cell of cells.values()) {
+      for (let i = 0; i < cell.length; i++) {
+        for (let j = i + 1; j < cell.length; j++) {
+          const a = cell[i], b = cell[j];
+          const key = a * n2 + b;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (overlap(sorted[a], sorted[b])) found.push([a, b]);
+        }
+      }
+    }
+    found.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+    for (const [a, b] of found) out.push([sorted[a], sorted[b]]);
+    return out;
+  }
+
+  // runtime/src/world/world.ts
+  var DEFAULT_CONTROLS = {
+    axes: { move: "move", look: "look" },
+    actions: { jump: ["space"], fire: ["mouse0"] }
+  };
+  var DEFAULT_SEED = 795581745;
+  var MAX_EVENT_ROUNDS = 8;
+  function initData() {
+    return { nextId: 1, tick: 0, seed: DEFAULT_SEED, vars: {}, entities: {}, mounts: {}, contacts: {} };
+  }
+  function normalize3(spec) {
+    return { prefab: spec.prefab, at: spec.at, rot: spec.rot, scale: spec.scale, name: spec.name ?? null, tags: spec.tags, blocks: spec.blocks };
+  }
+  var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  var WorldService = class extends Service {
+    constructor(ctx) {
+      super(ctx, "world");
+      __publicField(this, "registry", new Registry());
+      /** 构造时的 ctx：服务自己的东西挂在这里 */
+      __publicField(this, "_root");
+      __publicField(this, "_controls", DEFAULT_CONTROLS);
+      /** 挂载 id → 当前挂着它的单元（脱离后删除） */
+      __publicField(this, "_attached", /* @__PURE__ */ new Map());
+      /** 已脱离、等待清扫的挂载 id */
+      __publicField(this, "_detached", /* @__PURE__ */ new Set());
+      /** 本次运行里挂载过的 id（冷重启清扫用） */
+      __publicField(this, "_mountedThisRun", /* @__PURE__ */ new Set());
+      __publicField(this, "_coldChecked", false);
+      /** 挂载 id → 规则表（按挂载先后，每次挂载整体替换） */
+      __publicField(this, "_rules", /* @__PURE__ */ new Map());
+      __publicField(this, "_handlers", []);
+      __publicField(this, "_queue", []);
+      __publicField(this, "_pending", []);
+      __publicField(this, "_pendingSet", /* @__PURE__ */ new Set());
+      /** 上一步的变换（插值用）：id → { pos, rot } */
+      __publicField(this, "prev", /* @__PURE__ */ new Map());
+      __publicField(this, "_axes", {});
+      __publicField(this, "_down", {});
+      __publicField(this, "_prevDown", {});
+      __publicField(this, "_chains", /* @__PURE__ */ new Map());
+      __publicField(this, "_chainVersion", -1);
+      __publicField(this, "_reported", /* @__PURE__ */ new Set());
+      __publicField(this, "_stepping", false);
+      /** 当前 stage（由挂载给出，最后一个带 stage 的挂载生效） */
+      __publicField(this, "_stages", /* @__PURE__ */ new Map());
+      this._root = ctx;
+      ctx.state.define("world", { init: initData });
+      ctx.on("fixed-update", () => this._step());
+      ctx.on("update", () => this._sweep());
+    }
+    /** 当前的 World 数据（每次重新取，不缓存） */
+    get data() {
+      const state = this._root.state;
+      let data = state.get("world");
+      if (!data) {
+        state.set("world", initData());
+        data = state.get("world");
+      }
+      return data;
+    }
+    get dt() {
+      return this._root.clock.fixedStep;
+    }
+    get tick() {
+      return this.data.tick;
+    }
+    get time() {
+      return this.data.tick * this.dt;
+    }
+    get vars() {
+      return this.data.vars;
+    }
+    /** 当前生效的 stage（多个挂载都给了时取最后挂载的） */
+    get stage() {
+      let last = null;
+      for (const s of this._stages.values()) last = s;
+      return last;
+    }
+    /** 设置指令映射（defineGame 的 controls） */
+    setControls(controls) {
+      this._controls = {
+        axes: { ...DEFAULT_CONTROLS.axes, ...controls?.axes },
+        actions: { ...DEFAULT_CONTROLS.actions, ...controls?.actions }
+      };
+    }
+    /** 合并 vars：没有的键补初值，已有的保留 */
+    mergeVars(vars) {
+      if (!vars) return;
+      const target = this.data.vars;
+      for (const key of Object.keys(vars)) {
+        if (!(key in target)) target[key] = clone(vars[key]);
+      }
+    }
+    // ---------------------------------------------------------------- 挂载与对比（15.6）
+    mount(tree, options = {}) {
+      const unit = unitOf(this.ctx) ?? "(host)";
+      const id = options.id ?? unit;
+      const current2 = this._attached.get(id);
+      if (current2 && current2.unit !== unit) {
+        throw new Error(`world.mount：挂载 id "${id}" 已被单元 "${current2.unit}" 使用，请换一个 id`);
+      }
+      const result = evaluate(tree, this.registry);
+      for (const prefab of result.prefabs) {
+        if (this.registry.prefab(prefab.prefab) !== prefab) this.ctx.effect(() => this.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`);
+      }
+      const data = this.data;
+      this._diff(data, id, result.entities);
+      this._rules.set(id, result.rules);
+      if (result.stage) this._stages.set(id, result.stage);
+      else this._stages.delete(id);
+      const token = {};
+      this._attached.set(id, { unit, token });
+      this._detached.delete(id);
+      this._mountedThisRun.add(id);
+      this.ctx.effect(() => () => {
+        if (this._attached.get(id)?.token !== token) return;
+        this._attached.delete(id);
+        this._detached.add(id);
+      }, `world.mount(${id})`);
+    }
+    _diff(data, id, specs) {
+      var _a12;
+      const mount = (_a12 = data.mounts)[id] ?? (_a12[id] = { keys: {} });
+      const seen = /* @__PURE__ */ new Set();
+      for (const spec of specs) {
+        seen.add(spec.path);
+        const last = JSON.stringify(normalize3(spec));
+        const rec = mount.keys[spec.path];
+        if (!rec) {
+          const e2 = this._create(data, spec, id, spec.path);
+          mount.keys[spec.path] = { id: e2.id, dead: false, last };
+          continue;
+        }
+        if (rec.dead) continue;
+        const e = data.entities[rec.id];
+        if (!e) {
+          rec.dead = true;
+          continue;
+        }
+        const old = JSON.parse(rec.last);
+        if (old.prefab !== spec.prefab) {
+          this._remove(data, e, false);
+          const fresh = this._create(data, spec, id, spec.path);
+          mount.keys[spec.path] = { id: fresh.id, dead: false, last };
+          continue;
+        }
+        if (last === rec.last) continue;
+        if (!same(old.at, spec.at)) e.pos = [...spec.at];
+        if (!same(old.rot, spec.rot)) e.rot = [...spec.rot];
+        if (!same(old.scale, spec.scale)) e.scale = [...spec.scale];
+        if (old.name !== (spec.name ?? null)) {
+          if (spec.name === void 0) delete e.name;
+          else e.name = spec.name;
+        }
+        if (!same(old.tags, spec.tags)) e.tags = [...spec.tags];
+        const added = [];
+        for (const name of Object.keys(spec.blocks)) {
+          const props = spec.blocks[name];
+          if (!e.b[name]) {
+            e.b[name] = this._blockData(name, props);
+            added.push(name);
+          } else if (!same(old.blocks?.[name], props)) {
+            Object.assign(e.b[name], clone(props));
+          }
+        }
+        for (const name of Object.keys(e.b)) {
+          if (!(name in spec.blocks)) delete e.b[name];
+        }
+        this._init(e, added);
+        rec.last = last;
+      }
+      for (const path of Object.keys(mount.keys)) {
+        if (seen.has(path)) continue;
+        const rec = mount.keys[path];
+        const e = !rec.dead && data.entities[rec.id];
+        if (e) this._remove(data, e, false);
+        delete mount.keys[path];
+      }
+    }
+    /** 清扫已脱离的挂载：销毁它们的实体、删除记录。fixed-update 与 update 先到的一处执行 */
+    _sweep() {
+      if (!this._coldChecked) {
+        this._coldChecked = true;
+        for (const id of Object.keys(this.data.mounts)) {
+          if (!this._mountedThisRun.has(id) && !this._attached.has(id)) this._detached.add(id);
+        }
+      }
+      if (!this._detached.size) return;
+      const data = this.data;
+      for (const id of this._detached) {
+        const mount = data.mounts[id];
+        if (mount) {
+          for (const rec of Object.values(mount.keys)) {
+            const e = !rec.dead && data.entities[rec.id];
+            if (e) this._remove(data, e, false);
+          }
+          delete data.mounts[id];
+        }
+        this._rules.delete(id);
+        this._stages.delete(id);
+      }
+      this._detached.clear();
+    }
+    // ---------------------------------------------------------------- 实体
+    _blockData(name, props) {
+      const block = this.registry.block(name);
+      return { ...clone(block?.state ?? {}), ...clone(props) };
+    }
+    _create(data, spec, mount, path) {
+      const id = data.nextId++;
+      const e = {
+        id,
+        prefab: spec.prefab,
+        mount,
+        path,
+        tags: [...spec.tags],
+        pos: [...spec.at],
+        rot: [...spec.rot],
+        scale: [...spec.scale],
+        b: {}
+      };
+      if (spec.name !== void 0) e.name = spec.name;
+      for (const name of Object.keys(spec.blocks)) e.b[name] = this._blockData(name, spec.blocks[name]);
+      data.entities[id] = e;
+      this._init(e, Object.keys(e.b));
+      return e;
+    }
+    /** 按执行顺序对指定积木调用 init */
+    _init(e, names) {
+      if (!names.length) return;
+      for (const block of this.registry.ordered()) {
+        if (!block.init || !names.includes(block.name) || !e.b[block.name]) continue;
+        this._guard(`积木 ${block.name}.init`, void 0, () => block.init(e.b[block.name], e, this));
+      }
+    }
+    /** 立即移除实体；gameplay 为真时把挂载记录标为 dead */
+    _remove(data, e, gameplay) {
+      delete data.entities[e.id];
+      this.prev.delete(e.id);
+      if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id);
+      if (gameplay && e.mount !== null && e.path !== null) {
+        const rec = data.mounts[e.mount]?.keys[e.path];
+        if (rec && rec.id === e.id) rec.dead = true;
+      }
+    }
+    _alive(e) {
+      return !!e && !this._pendingSet.has(e.id) && this.data.entities[e.id] === e;
+    }
+    spawn(prefab, props = {}) {
+      if (typeof prefab !== "string" && this.registry.prefab(prefab.prefab) !== prefab) {
+        if (!this.registry.prefab(prefab.prefab)) this.registry.addPrefab(prefab);
+      }
+      if (!isPlainObject2(props)) throw new Error("w.spawn 的属性必须是普通对象");
+      const { key, children, ...rest } = props;
+      let saved;
+      try {
+        saved = JSON.parse(JSON.stringify(rest));
+      } catch {
+        throw new Error("w.spawn 的属性必须可序列化（热重载与读档要靠它重建）");
+      }
+      const { entities } = evaluate(makeNode(prefab, rest, null), this.registry);
+      const e = this._create(this.data, entities[0], null, null);
+      e.spawn = saved;
+      return e;
+    }
+    /** 延迟到本步末尾销毁（不在步内调用时，到下一步末尾） */
+    destroy(target) {
+      const id = typeof target === "number" ? target : target?.id;
+      const e = this.data.entities[id];
+      if (!e || this._pendingSet.has(id)) return;
+      this._pendingSet.add(id);
+      this._pending.push(id);
+    }
+    get(id) {
+      const e = this.data.entities[id];
+      return e && !this._pendingSet.has(id) ? e : void 0;
+    }
+    /** 预制件链上的名字（按登记表版本缓存） */
+    chain(prefab) {
+      if (this._chainVersion !== this.registry.version) {
+        this._chains.clear();
+        this._chainVersion = this.registry.version;
+      }
+      let chain = this._chains.get(prefab);
+      if (!chain) this._chains.set(prefab, chain = this.registry.chain(prefab));
+      return chain;
+    }
+    /** filter 匹配实体的标签，或它预制件链上的任一名字；省略时匹配全部 */
+    matches(e, filter) {
+      if (filter === void 0) return true;
+      return e.tags.includes(filter) || this.chain(e.prefab).includes(filter);
+    }
+    query(filter) {
+      const out = [];
+      const entities = this.data.entities;
+      for (const key in entities) {
+        const e = entities[key];
+        if (!this._pendingSet.has(e.id) && this.matches(e, filter)) out.push(e);
+      }
+      return out;
+    }
+    count(filter) {
+      return this.query(filter).length;
+    }
+    // ---------------------------------------------------------------- 事件
+    on(event, filter, fn) {
+      const entry = typeof filter === "function" ? { event, fn: filter } : { event, filter, fn };
+      if (typeof entry.fn !== "function") throw new Error("w.on 需要处理函数");
+      return this.ctx.effect(() => {
+        this._handlers.push(entry);
+        return () => {
+          const i = this._handlers.indexOf(entry);
+          if (i >= 0) this._handlers.splice(i, 1);
+        };
+      }, `world.on(${event})`);
+    }
+    emit(name, payload) {
+      this._queue.push({ name, args: [payload] });
+    }
+    cmd(_e) {
+      return {
+        axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
+        down: (action) => !!this._down[action],
+        pressed: (action) => !!this._down[action] && !this._prevDown[action]
+      };
+    }
+    rand(min, max) {
+      const data = this.data;
+      let t = data.seed = data.seed + 1831565813 >>> 0;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      const r = ((t ^ t >>> 14) >>> 0) / 4294967296;
+      return min === void 0 ? r : min + r * ((max ?? 1) - min);
+    }
+    /** 打印一次（同一来源同一信息只打印一次），不中断其余部分 */
+    _guard(what, source, fn) {
+      try {
+        fn();
+      } catch (error) {
+        const where = source ? `${source.file}:${source.line} ` : "";
+        const message = `${where}${what} 出错：${error?.stack ?? error?.message ?? error}`;
+        const key = `${where}${what}:${error?.message ?? error}`;
+        if (this._reported.has(key)) return;
+        if (this._reported.size > 1e3) this._reported.clear();
+        this._reported.add(key);
+        this._root.logger("world").error(message);
+      }
+    }
+    *_allRules(on) {
+      for (const rules of this._rules.values()) {
+        for (const rule of rules) if (rule.on === on) yield rule;
+      }
+    }
+    _dispatch(event) {
+      if (event.name === "touch") {
+        const [x, y] = event.args;
+        if (!this._alive(x) || !this._alive(y)) return;
+        for (const rule of this._allRules("touch")) {
+          if (this.matches(x, rule.a) && this.matches(y, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, x, y));
+          else if (this.matches(y, rule.a) && this.matches(x, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, y, x));
+        }
+        for (const h of [...this._handlers]) {
+          if (h.event !== "touch") continue;
+          if (this.matches(x, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, x, y));
+          else if (this.matches(y, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, y, x));
+        }
+        return;
+      }
+      if (event.name === "death") {
+        const [e] = event.args;
+        for (const rule of this._allRules("death")) {
+          if (this.matches(e, rule.a)) this._guard(`<rule on="death">`, rule.source, () => rule.do(this, e));
+        }
+        for (const h of [...this._handlers]) {
+          if (h.event === "death" && this.matches(e, h.filter)) this._guard('w.on("death")', void 0, () => h.fn(this, e));
+        }
+        return;
+      }
+      for (const rule of this._allRules(event.name)) {
+        this._guard(`<rule on="${event.name}">`, rule.source, () => rule.do(this, ...event.args));
+      }
+      for (const h of [...this._handlers]) {
+        if (h.event === event.name) this._guard(`w.on("${event.name}")`, void 0, () => h.fn(this, ...event.args));
+      }
+    }
+    // ---------------------------------------------------------------- 每一步（15.8）
+    _step() {
+      if (this._stepping) return;
+      this._stepping = true;
+      try {
+        this._sweep();
+        const data = this.data;
+        this._prevDown = this._down;
+        this._down = {};
+        this._axes = {};
+        const input = this._root.input;
+        for (const name of Object.keys(this._controls.axes)) this._axes[name] = input.axis(this._controls.axes[name]);
+        for (const action of Object.keys(this._controls.actions)) {
+          const keys = this._controls.actions[action];
+          this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
+        }
+        this.prev.clear();
+        for (const key in data.entities) {
+          const e = data.entities[key];
+          this.prev.set(e.id, { pos: [...e.pos], rot: [...e.rot] });
+        }
+        const alive = Object.values(data.entities);
+        for (const block of this.registry.ordered()) {
+          if (!block.step) continue;
+          for (const e of alive) {
+            const me = e.b[block.name];
+            if (!me || !this._alive(e)) continue;
+            this._guard(`积木 ${block.name}.step`, void 0, () => block.step(me, e, this));
+          }
+        }
+        const touches = this._detect(data);
+        for (const rule of this._allRules("every")) {
+          const n2 = Math.max(1, Math.round(rule.seconds / this.dt));
+          if ((data.tick + 1) % n2 === 0) this._guard('<rule on="every">', rule.source, () => rule.do(this));
+        }
+        this._queue.unshift(...touches);
+        this._drain(data);
+        data.tick++;
+      } finally {
+        this._stepping = false;
+      }
+    }
+    _drain(data) {
+      let rounds = 0;
+      while (this._queue.length || this._pending.length) {
+        if (++rounds > MAX_EVENT_ROUNDS) {
+          const dropped = this._queue.map((e) => e.name);
+          this._queue = [];
+          this._root.logger("world").error("事件与销毁连锁超过 %d 轮，本步剩余的事件已丢弃：%s", MAX_EVENT_ROUNDS, dropped.join("、") || "（death）");
+          for (const id of this._pending.splice(0)) {
+            const e = data.entities[id];
+            this._pendingSet.delete(id);
+            if (e) this._remove(data, e, true);
+          }
+          return;
+        }
+        const batch = this._queue.splice(0);
+        for (const event of batch) this._dispatch(event);
+        const pending = this._pending.splice(0);
+        for (const id of pending) {
+          this._pendingSet.delete(id);
+          const e = data.entities[id];
+          if (!e) continue;
+          this._remove(data, e, true);
+          this._queue.push({ name: "death", args: [e] });
+        }
+      }
+    }
+    _detect(data) {
+      const colliders = [];
+      for (const key in data.entities) {
+        const e = data.entities[key];
+        const t = e.b.trigger;
+        if (!t || this._pendingSet.has(e.id)) continue;
+        const [sx, sy, sz] = e.scale.map(Math.abs);
+        const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] : null;
+        colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box });
+      }
+      const now = /* @__PURE__ */ new Set();
+      const events = [];
+      for (const [a, b] of overlappingPairs(colliders)) {
+        const key = `${a.id}:${b.id}`;
+        now.add(key);
+        if (!data.contacts[key]) {
+          data.contacts[key] = true;
+          events.push({ name: "touch", args: [data.entities[a.id], data.entities[b.id]] });
+        }
+      }
+      for (const key of Object.keys(data.contacts)) {
+        if (!now.has(key)) delete data.contacts[key];
+      }
+      return events;
+    }
+    /** 测试与开发工具用：当前规则表 */
+    rules() {
+      return [...this._rules.values()].flat();
+    }
+    /** 测试与开发工具用：挂载状态 */
+    mounts() {
+      return { attached: [...this._attached.keys()], detached: [...this._detached] };
+    }
+  };
+  __publicField(WorldService, "inject", ["clock", "state", "input", "scene", "ui"]);
+
+  // runtime/src/jsx-runtime.ts
+  var jsx_runtime_exports = {};
+  __export(jsx_runtime_exports, {
+    Fragment: () => Fragment,
+    createElement: () => createElement,
+    jsx: () => jsx,
+    jsxs: () => jsxs
+  });
+  function jsx(type, props, key) {
+    return makeNode(type, props, key);
+  }
+  var jsxs = jsx;
+  function createElement(type, config, ...children) {
+    const props = {};
+    let key;
+    for (const name in config ?? {}) {
+      if (name === "key") key = config[name];
+      else if (name !== "__self" && name !== "__source") props[name] = config[name];
+    }
+    if (children.length === 1) props.children = children[0];
+    else if (children.length > 1) props.children = children;
+    return makeNode(type, props, key);
+  }
+
+  // runtime/src/jsx-dev-runtime.ts
+  var jsx_dev_runtime_exports = {};
+  __export(jsx_dev_runtime_exports, {
+    Fragment: () => Fragment,
+    jsxDEV: () => jsxDEV
+  });
+  function jsxDEV(type, props, key, _isStatic, source, _self) {
+    const pos = source && source.fileName ? { file: source.fileName, line: source.lineNumber ?? 0, col: source.columnNumber ?? 0 } : void 0;
+    return makeNode(type, props, key, pos);
+  }
+
+  // runtime/src/runtime.ts
+  var API_VERSION = "0.1";
+  var VERSION = "0.1.0";
+  var current;
+  function currentRuntime() {
+    return current;
+  }
+  function bind(Base, ...args) {
+    const Bound = class extends Base {
+      constructor(ctx) {
+        super(ctx, ...args);
+      }
+    };
+    Object.defineProperty(Bound, "name", { value: Base.name });
+    return Bound;
+  }
+  var Runtime = class {
+    constructor(host, options = {}) {
+      __publicField(this, "host", host);
+      __publicField(this, "options", options);
+      __publicField(this, "root");
+      __publicField(this, "manifest");
+      __publicField(this, "status", "idle");
+      /** 启动阶段失败的单元 */
+      __publicField(this, "failures", []);
+      this.root = new Context();
+      current = this;
+      const exporter = {
+        colors: false,
+        export(message) {
+          const level = ["error", "warn", "info", "debug"].includes(message.type) ? message.type : "info";
+          try {
+            host.log(level, Logger.format(exporter, message));
+          } catch {
+            host.log(level, String(message.args?.[0]));
+          }
+        }
+      };
+      this.root.logger.exporter(exporter);
+    }
+    get clock() {
+      return this.root.clock;
+    }
+    get state() {
+      return this.root.state;
+    }
+    get plugins() {
+      return this.root.plugins;
+    }
+    get scene() {
+      return this.root.scene;
+    }
+    get data() {
+      return this.root.data;
+    }
+    get cache() {
+      return this.root.cache;
+    }
+    get loading() {
+      return this.root.loading;
+    }
+    /** 安装核心服务 */
+    async init() {
+      const { root, host } = this;
+      const pot = globalThis.pot;
+      const modules = this.options.modules ?? {
+        "@pot/core": pot,
+        "cordis": pot,
+        "@pot/core/jsx-runtime": jsx_runtime_exports,
+        "@pot/core/jsx-dev-runtime": jsx_dev_runtime_exports
+      };
+      const install = (plugin) => root.plugin(plugin, void 0);
+      await install(ClockService);
+      await install(TimerService);
+      await install(bind(StateService));
+      await install(CacheService);
+      await install(bind(DataService, host));
+      await install(bind(SceneService, host));
+      await install(bind(InputService, host));
+      await install(bind(UIService, host));
+      await install(bind(AudioService, host));
+      await install(bind(GfxService, host));
+      await install(bind(LoadingService, host));
+      await install(WorldService);
+      await install(bind(PluginsService, host, modules, this.options.loader));
+      if (this.options.state) this.root.state.importJSON(this.options.state);
+      return this;
+    }
+    readManifest() {
+      const text = this.host.readText("manifest.json");
+      if (!text) throw new Error("找不到 manifest.json");
+      const manifest = JSON.parse(text);
+      if (!manifest.id) throw new Error("manifest.json 缺少 id");
+      if (!Array.isArray(manifest.plugins)) throw new Error("manifest.json 缺少 plugins 数组");
+      if (manifest.apiVersion && manifest.apiVersion.split(".")[0] !== API_VERSION.split(".")[0]) {
+        throw new Error(`manifest.apiVersion=${manifest.apiVersion} 与运行时 ${API_VERSION} 不兼容`);
+      }
+      return manifest;
+    }
+    /**
+     * 读取 manifest 并挂载入口单元。单个单元失败不影响其他单元。
+     * 注意：不要在这里持有入口 fiber 的引用，否则热重载后旧 fiber 无法回收。
+     */
+    async start() {
+      this.status = "starting";
+      this.root.loading.begin();
+      try {
+        this.manifest = this.readManifest();
+      } catch (error) {
+        this.status = "failed";
+        this.root.loading.end();
+        this.root.logger("pot").error(error);
+        throw error;
+      }
+      for (const item of this.manifest.plugins) {
+        const entry = typeof item === "string" ? { name: item } : item;
+        try {
+          await this.root.plugins.use(entry.name, entry.config);
+        } catch (error) {
+          this.failures.push({ name: entry.name, error: error?.stack ?? String(error) });
+          this.root.logger("pot").error("单元 %s 启动失败：%s", entry.name, error?.stack ?? error);
+        }
+      }
+      this.root.loading.end();
+      this.status = "running";
+      return this;
+    }
+    tick(dt) {
+      const clock = this.root.clock;
+      const frame = clock.frame;
+      this.root.loading.pump();
+      clock.tick(dt);
+      if (clock.frame !== frame) this.root.ui.flush();
+    }
+    /** 卸载所有单元（服务保留，state 保留） */
+    async stop() {
+      for (const unit of this.root.plugins.units.values()) {
+        for (const fiber of [...unit.mounts]) {
+          try {
+            await fiber.dispose();
+          } catch (error) {
+            this.root.logger("pot").warn(error);
+          }
+        }
+      }
+      this.status = "stopped";
+    }
+    exportState() {
+      return this.root.state.exportJSON();
+    }
+    info() {
+      return {
+        status: this.status,
+        game: this.manifest?.id,
+        apiVersion: API_VERSION,
+        time: this.root.clock.time,
+        frame: this.root.clock.frame,
+        paused: this.root.clock.paused,
+        frozen: this.root.clock.frozen,
+        units: this.root.plugins.list().map((u) => ({ name: u.name, hash: u.hash, mounts: u.mounts.length })),
+        objects: this.root.scene.objects.size,
+        timers: this.root.clock.pending,
+        state: this.root.state.keys(),
+        failures: this.failures,
+        loading: { active: this.root.loading.active, progress: this.root.loading.progress, text: this.root.loading.text, yields: this.root.loading.yields }
+      };
+    }
+  };
+  async function createRuntime(host, options) {
+    const runtime = new Runtime(host, options);
+    await runtime.init();
+    return runtime;
+  }
+
+  // runtime/src/unity.ts
+  function createUnityHost() {
+    const Pot = CS.Pot;
+    const H = Pot.PotHost;
+    const FS2 = Pot.GameFS;
+    const S = Pot.PotScene;
+    const I = Pot.PotInput;
+    const U = Pot.PotUI;
+    const A = Pot.PotAudio;
+    const R = Pot.PotRender;
+    const G = Pot.PotGfx;
+    return {
+      platform: "unity",
+      log: (level, text) => H.Log(level, text),
+      readText: (path) => {
+        const text = FS2.ReadText(path);
+        return text === null || text === void 0 ? null : text;
+      },
+      cacheRead: (bucket, key) => {
+        const text = FS2.CacheRead(bucket, key);
+        return text === null || text === void 0 ? null : text;
+      },
+      cacheWrite: (bucket, key, text) => FS2.CacheWrite(bucket, key, text),
+      gc: () => H.RequestGC(),
+      send: (message) => H.Send(message),
+      frames: true,
+      loading: (progress, text) => H.OnLoading(progress, text),
+      engine: {
+        spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
+        destroy: (id) => S.Destroy(id),
+        exists: (id) => S.Exists(id),
+        setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
+        setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
+        visible: (id, visible) => S.SetVisible(id, visible),
+        skin: (id, bones) => S.Skin(id, bones) ?? "",
+        getVec: (id, prop) => {
+          S.GetVec(id, prop);
+          return [S.vx, S.vy, S.vz];
+        },
+        setColor: (id, r, g, b, a) => S.SetColor(id, r, g, b, a),
+        setActive: (id, active) => S.SetActive(id, active),
+        lookAt: (id, x, y, z) => S.LookAt(id, x, y, z),
+        light: (id, type, intensity, r, g, b, range) => S.Light(id, type, intensity, r, g, b, range),
+        cameraId: () => S.CameraId(),
+        setBackground: (r, g, b) => S.SetBackground(r, g, b),
+        axis: (name) => {
+          I.Axis(name);
+          return [I.ax, I.ay];
+        },
+        key: (name, mode) => I.Key(name, mode),
+        count: () => S.Count(),
+        material: (id, mode, castShadows, cull) => S.SetMaterial(id, mode, castShadows, cull),
+        surface: (id, metallic, smoothness) => S.SetSurface(id, metallic, smoothness),
+        emission: (id, r, g, b) => S.SetEmission(id, r, g, b),
+        collider: (id, enabled) => S.SetCollider(id, enabled),
+        colliderShape: (id, kind, dynamic) => S.SetColliderShape(id, kind, dynamic) ?? "",
+        layer: (id, layer) => S.SetLayer(id, layer),
+        raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => {
+          const id = S.Raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask);
+          if (!id) return null;
+          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
+        },
+        sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => {
+          const id = S.SphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask);
+          if (!id) return null;
+          return { id, point: [S.vx, S.vy, S.vz], normal: [S.nx, S.ny, S.nz], distance: S.dist };
+        },
+        view: (fov, near, far) => S.SetCamera(fov, near, far),
+        fog: (r, g, b, density) => S.SetFog(r, g, b, density),
+        ambient: (r, g, b, reflection) => S.SetAmbient(r, g, b, reflection),
+        lightOptions: (id, spotAngle, shadows) => S.LightOptions(id, spotAngle, shadows),
+        lightIntensity: (id, intensity) => S.SetLightIntensity(id, intensity),
+        cursor: (locked) => I.SetCursor(locked),
+        cursorLocked: () => I.CursorLocked(),
+        mouse: () => {
+          I.Mouse();
+          return [I.mx, I.my];
+        },
+        screen: () => {
+          I.ScreenSize();
+          return [I.sw, I.sh];
+        },
+        wheel: () => I.Wheel(),
+        focused: () => I.Focused(),
+        uiSubmit: (list) => U.Submit(list),
+        uiMeasure: (text, size, flags) => {
+          U.Measure(text, size, flags);
+          return [U.tw, U.th];
+        },
+        audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),
+        audioHas: (name) => A.HasClip(name),
+        audioPlay: (name, volume, pitch, x, y, z, spatial) => A.Play(name, volume, pitch, x, y, z, spatial),
+        audioLoop: (name, volume, pitch) => A.Loop(name, volume, pitch),
+        audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => A.SetLoop(handle, volume, pitch, x, y, z, spatial),
+        audioStop: (handle) => A.StopLoop(handle),
+        audioVolume: (volume) => A.Volume(volume),
+        audioPause: (paused) => A.Pause(paused),
+        texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => S.Texture(data, width, height, linear, mipmaps, wrap, filter, aniso),
+        destroyTexture: (id) => S.DestroyTexture(id),
+        textTexture: (json) => R.TextTexture(json),
+        canvasText: (text, family, size, style) => R.CanvasText(text, family, size, style) ?? null,
+        mesh: (name, positions, normals, uvs, colors, indices, key) => S.Mesh(name, positions, normals, uvs, colors, indices, key),
+        meshCached: (name, key) => S.MeshCached(name, key),
+        meshSkin: (name, boneIndices, weights, bindPoses) => S.MeshSkin(name, boneIndices, weights, bindPoses) ?? "",
+        meshTangents: (name, tangents) => S.MeshTangents(name, tangents) ?? "",
+        meshColors: (name, colors, linear) => S.MeshColors(name, colors, linear) ?? "",
+        meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
+        matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
+        matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
+        matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
+        ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
+        render: (kind, json) => R.Configure(kind, json) ?? "",
+        burst: (json) => R.Burst(json),
+        gfxBackend: () => G.Backend() ?? "",
+        gfxUnsupported: () => G.Unsupported() ?? "",
+        gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
+        gfxDestroyProgram: (name) => G.DestroyProgram(name),
+        gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
+        gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
+        gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
+        gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
+        gfxInstances: (id, count, layout, data) => G.Instances(id, count, layout, data) ?? "",
+        gfxBakeBegin: () => G.BakeBegin(),
+        gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
+        gfxPost: (json) => G.Post(json) ?? "",
+        gfxPostEnable: (pass, on) => G.PostEnable(pass, on) ?? ""
+      }
+    };
+  }
+  var unity = {
+    runtime: void 0,
+    /** 启动：异步完成后回调 PotHost.OnBooted(ok, error) */
+    boot(stateJson) {
+      const host = createUnityHost();
+      const loader = globalThis.pot?.devtools?.createLoader?.(host);
+      createRuntime(host, { state: stateJson || void 0, loader }).then((runtime) => {
+        unity.runtime = runtime;
+        globalThis.pot?.devtools?.attach?.(runtime);
+        return runtime.start();
+      }).then(() => CS.Pot.PotHost.OnBooted(true, ""), (error) => CS.Pot.PotHost.OnBooted(false, String(error?.stack ?? error)));
+    },
+    tick(dt) {
+      unity.runtime?.tick(dt);
+    },
+    /** 启动期间（尚未 Running）每帧调用：放行 loading.frame()/step() 的等待 */
+    pump() {
+      unity.runtime?.root.loading.pump();
+    },
+    /** 冷重启前调用：导出 state JSON（失败返回空串） */
+    exportState() {
+      try {
+        return unity.runtime?.exportState() ?? "";
+      } catch (error) {
+        CS.Pot.PotHost.Log("error", `导出 state 失败：${error?.stack ?? error}`);
+        return "";
+      }
+    },
+    stop() {
+      const runtime = unity.runtime;
+      unity.runtime = void 0;
+      runtime?.stop().catch(() => {
+      });
+    },
+    info() {
+      return JSON.stringify(unity.runtime?.info() ?? { status: "idle" });
+    }
+  };
+  function bindEntry(name, fn) {
+    const R = typeof CS === "undefined" ? void 0 : CS?.Pot?.PotRuntime;
+    if (!R || typeof R.Bind !== "function") return false;
+    R.Bind(name, () => {
+      const result = fn(R.TakeArg() ?? "");
+      if (typeof result === "string") R.Return(result);
+    });
+    return true;
+  }
+  function bindUnity() {
+    bindEntry("unity.boot", (state) => unity.boot(state));
+    bindEntry("unity.tick", () => unity.tick(CS.Pot.PotRuntime.frameDt));
+    bindEntry("unity.pump", () => unity.pump());
+    bindEntry("unity.exportState", () => unity.exportState());
+    bindEntry("unity.stop", () => unity.stop());
+    bindEntry("unity.info", () => unity.info());
+  }
+  bindUnity();
 
   // runtime/src/index.ts
   function definePlugin(plugin) {

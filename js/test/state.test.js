@@ -18,7 +18,8 @@ test('define 返回活对象，重复 define 返回同一引用', async () => {
     `,
   })
   assert.deepEqual(runtime.state.get('a-check'), { same: true, n: 2 })
-  assert.deepEqual(runtime.state.info().map((i) => i.owner), ['a', 'a'])
+  assert.deepEqual(runtime.state.info().filter((i) => i.key !== 'world').map((i) => i.owner), ['a', 'a'])
+  assert.equal(runtime.state.info().find((i) => i.key === 'world').owner, '(host)')
 })
 
 test('不同单元定义同一个 key 报错', async () => {

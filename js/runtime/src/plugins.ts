@@ -21,7 +21,7 @@ declare module 'cordis' {
   }
 }
 
-export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'gfx', 'loading', 'plugins']
+export const CORE_SERVICES = ['clock', 'timer', 'state', 'cache', 'data', 'scene', 'input', 'ui', 'audio', 'gfx', 'loading', 'world', 'plugins']
 
 export interface UnitSource {
   exports: any
