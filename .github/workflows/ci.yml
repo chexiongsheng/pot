@@ -1,9 +1,12 @@
 name: build & publish
 
-# 一个 job、一台机器、只激活一次 Unity 授权（Personal 授权同时只能在一台机器上激活），依次完成：
-#   1. Win64（IL2CPP）：构建 Runner 与 games/ 下各游戏，打 zip 作为 artifact
-#   2. WebGL：构建各游戏的 WebGL，汇总成静态站点部署到 GitHub Pages
-#   3. 手动运行且填了版本号：发布 GitHub Release v<版本号>（附 Runner 与各游戏的 Win64 zip）
+# Personal 授权同一时间只能在一台机器上激活，所以用到 Unity 的 job 严格串行：
+#   build（Windows）：激活一次授权，依次完成
+#     1. Win64（IL2CPP）：构建 Runner 与 games/ 下各游戏，打 zip 作为 artifact
+#     2. WebGL：构建各游戏的 WebGL，汇总成静态站点部署到 GitHub Pages
+#   build-macos（只在发 Release 时）：等 build 结束（其 post 步骤已归还授权）后再激活，
+#     构建 macOS（IL2CPP，arm64+x86_64）的 Runner 与各游戏，打 zip 作为 artifact
+#   release：手动运行且填了版本号、且上面都成功时，发布 GitHub Release v<版本号>（附 Win64 与 macOS 的 zip）
 # 需要的 secrets：UNITY_USERNAME、UNITY_PASSWORD。
 # 仓库 Settings → Pages → Build and deployment → Source 需选 "GitHub Actions"。
 
@@ -229,16 +232,158 @@ jobs:
             games/*/.pot/release/unity-*.log
           if-no-files-found: warn
 
-      # 只有前面全部成功（含 Win64 与 WebGL）才发 Release
-      - name: Publish release
-        if: ${{ success() && env.VERSION != '' }}
+  # ---------- macOS（只在发 Release 时构建） ----------
+  # needs: build 保证 Windows 的 job（含归还授权的 post 步骤）结束后才开始，两台机器不会同时占用授权。
+  # job 级 if 不能用 env 上下文，直接判断 inputs.version
+  build-macos:
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' && needs.build.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 与 Windows 相同的仓库脚本安装（macOS 镜像自带 pwsh）；不出 WebGL，只要 core / v8
+      - name: Install Puerts
         shell: pwsh
+        run: |
+          $src = Join-Path $env:RUNNER_TEMP 'puerts'
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          foreach ($n in 'Core', 'V8') {
+            $file = Join-Path $env:RUNNER_TEMP "PuerTS_$n.tar.gz"
+            curl -fsSL --retry 3 -o $file "https://github.com/Tencent/puerts/releases/download/Unity_v$env:PUERTS_VERSION/PuerTS_${n}_$env:PUERTS_VERSION.tar.gz"
+            if ($LASTEXITCODE -ne 0) { throw "download PuerTS_$n failed" }
+            tar -xzf $file -C $src
+            if ($LASTEXITCODE -ne 0) { throw "extract PuerTS_$n failed" }
+          }
+          & ./tools/install-puerts.ps1 -Source $src
+
+      - name: Download Noto Sans SC
+        shell: bash
+        run: |
+          font="$RUNNER_TEMP/NotoSansSC-Regular.otf"
+          curl -fsSL --retry 3 -o "$font" https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
+          echo "POT_FONT=$font" >> "$GITHUB_ENV"
+
+      - name: Build JS runtime
+        shell: bash
+        working-directory: js
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/build.js
+
+      - name: Setup Unity
+        uses: RageAgainstThePixel/unity-setup@v3
+        with:
+          unity-version: ${{ env.UNITY_VERSION }}
+          build-targets: StandaloneOSX
+          modules: mac-il2cpp
+          cache-installation: true
+          version-file: None
+
+      - uses: RageAgainstThePixel/activate-unity-license@v3
+        with:
+          license: 'Personal'
+          username: ${{ secrets.UNITY_USERNAME }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+
+      # pot_gfx.bundle 不入库：CMake + Xcode clang 编译（Metal 后端，需要 Unity 自带的 PluginAPI 头文件）
+      - name: Build pot_gfx
+        shell: bash
+        run: node js/devserver/cli.js native --platform macos --force --unity "$UNITY_EDITOR_PATH"
+
+      - name: Build Runner (macOS)
+        id: runner
+        shell: bash
+        run: |
+          code=0
+          node js/devserver/cli.js runner --platform macos --unity "$UNITY_EDITOR_PATH" --out out/runner || code=$?
+          log=release/runner/unity-macos.log
+          if [ $code -ne 0 ] && [ -f "$log" ]; then echo '----- unity-macos.log: tail -----'; tail -n 80 "$log"; fi
+          exit $code
+
+      - name: Build games (macOS)
+        if: ${{ !cancelled() && steps.runner.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          IFS=',' read -ra wanted <<< "$GAMES"
+          failed=()
+          for dir in games/*/; do
+            name=$(basename "$dir")
+            [ -f "$dir/manifest.json" ] || continue
+            if [ -n "$GAMES" ]; then
+              hit=0
+              for w in "${wanted[@]}"; do [ "$(echo "$w" | xargs)" = "$name" ] && hit=1; done
+              [ $hit = 1 ] || continue
+            fi
+            echo "===== $name ====="
+            if ! node js/devserver/cli.js release "games/$name" --platform macos --unity "$UNITY_EDITOR_PATH" --out "out/games/$name"; then
+              failed+=("$name")
+              log="games/$name/.pot/release/unity-macos.log"
+              if [ -f "$log" ]; then echo "----- $log tail -----"; tail -n 80 "$log"; fi
+            fi
+          done
+          if [ ${#failed[@]} -gt 0 ]; then echo "macOS 构建失败：${failed[*]}"; exit 1; fi
+
+      # ditto 打 zip：保留 .app 内的符号链接与可执行权限（zip -r 会破坏 framework 结构）
+      - name: Package macOS
+        id: package
+        if: ${{ !cancelled() && steps.runner.outcome == 'success' }}
+        shell: bash
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent out/runner/PotRunner.app "dist/PotRunner-$VERSION-macos.zip"
+          if [ -d out/games ]; then
+            for dir in out/games/*/; do
+              name=$(basename "$dir")
+              app=$(find "$dir" -maxdepth 1 -name '*.app' | head -n 1)
+              [ -n "$app" ] || continue
+              ditto -c -k --sequesterRsrc --keepParent "$app" "dist/$name-$VERSION-macos.zip"
+            done
+          fi
+          ls -lh dist
+
+      - name: Upload macOS builds
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pot-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload Unity logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-logs-macos
+          path: |
+            release/runner/unity-*.log
+            games/*/.pot/release/unity-*.log
+          if-no-files-found: warn
+
+  # 只有 Win64、WebGL、macOS 全部成功才发 Release
+  release:
+    needs: [build, build-macos]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pot-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $files = (Get-ChildItem dist -Filter *.zip).FullName
-          gh release create "v$env:VERSION" @files --title "pot v$env:VERSION" --target $env:GITHUB_SHA --generate-notes
-          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          ls -lh dist
+          gh release create "v$VERSION" dist/*.zip --repo "$GITHUB_REPOSITORY" --title "pot v$VERSION" --target "$GITHUB_SHA" --generate-notes
 
   deploy:
     needs: build
