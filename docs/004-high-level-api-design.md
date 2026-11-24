@@ -105,8 +105,8 @@ import { defineGame } from '@pot/core'
 export default defineGame({
   vars: { score: 0 },
   scene: (s) => <>
-    <stage background="#1e2230" sun={[50, -30, 0]} camera={{ at: [0, 12, -10], look: [0, 0, 0] }} />
-    <ground scale={2} color="#3a4a3a" />
+    <stage background="#1e2230" sun={{ rot: [50, -30, 0], intensity: 1.1 }} camera={{ at: [0, 12, -10], look: [0, 0, 0] }} />
+    <ground scale={2} shape={{ color: '#3a4a3a' }} />
     <player at={[0, 0.5, 0]} shape={{ kind: 'cube', color: '#4fc3f7' }} moveTopdown={{ speed: 5 }} />
     {s.data.load('coins.json').coins.map((at, i) => <coin key={i} at={at} />)}
     <rule on="touch" a="player" b="coin" do={(w, p, c) => { w.destroy(c); w.vars.score++ }} />
@@ -841,6 +841,8 @@ interface MountData {
 
 `vars` 的合并：`defineGame` 的 `vars` 里有、`WorldData.vars` 里没有的键补上初值，已有的键保留。
 
+冷重启时 `runtime.init` 先安装服务、后 `importJSON`，构造时 define 的 `world` 条目会被导入的整个替换（`defined` 也变回 false）。所以 `WorldService` 只在构造时 define 一次占住归属，之后一律 `get`，不保留构造时拿到的引用。
+
 ### 15.6 挂载与对比
 
 `ctx.world.mount(tree, { id })` 求值后按 5.4 的表对比，挂载 id 缺省为调用单元的名字。对比时对每个 `EntitySpec`：
@@ -855,7 +857,16 @@ interface MountData {
 
 玩法中销毁一个属于挂载的实体时，把它的记录标为 `dead`，不删除。
 
-单元回收与重载：`mount` 通过调用单元的 `ctx.effect` 登记。单元被回收时，挂载只标记为“脱离”，实体不动；如果在下一次 `fixed-update` 之前同一 id 被重新挂载，就是热重载，按上表对比；否则就是单元被移除，销毁它的全部实体并删除记录。实施前要读 `plugins.ts` 的重载流程，确认回收与重新 `apply` 之间不会插进 `fixed-update`，否则改用重载完成后的事件判断。
+对比造成的销毁（`prefab` 变了、新树里没有）不是玩法事件，不发 `death`。
+
+单元回收与重载：`mount` 通过调用单元的 `ctx.effect` 登记。单元被回收时，挂载只标记为“脱离”，实体不动；如果在下一次清扫之前同一 id 被重新挂载，就是热重载，按上表对比；否则就是单元被移除，销毁它的全部实体并删除记录。
+
+已确认（读 `devtools/src/hmr.ts` 的 `reload`）：热重载事务从开始到提交或回滚全程持有 `clock.freeze()`，冻结时 `clock.tick` 在触发 `fixed-update`、`update` 之前就返回；回滚也在冻结期内。所以回收与重新 `apply` 之间不会插进任何一步，上面的做法成立，不需要额外的重载完成事件。
+
+清扫的时机与范围：
+
+- 清扫在 `fixed-update` 与 `update` 中先到的那一处执行。帧率高于步频时一帧可能没有 `fixed-update`，只挂在 `fixed-update` 上会让被移除单元的实体多显示若干帧。
+- 冷重启（`importJSON` 带回 `mounts`）后，本次运行里还没有被挂载过的记录一律视为脱离，第一次清扫时处理。例如 manifest 去掉了某个单元，它挂的实体在冷重启后也要清掉，不能永远留在数据里。
 
 `scene` 的重新求值不需要额外的触发机制：热重载、数据文件变化都会让 `defineGame` 生成的单元重新 `apply`，`apply` 里求值并挂载即可。
 
@@ -916,7 +927,7 @@ interface Cmd {
 
 在 `update` 里，`ui` 之前：
 
-1. 应用 `stage`：与上次应用的值比较，变了才调用 `ctx.scene.background`、`ctx.scene.light`（`sun` 为平行光的旋转）、相机的 `position` 与 `lookAt`。
+1. 应用 `stage`：与上次应用的值比较，变了才调用 `ctx.scene.background`、`ctx.scene.light`、相机的 `position` 与 `lookAt`。`stage` 的属性：`background`（颜色）；`sun`，写成欧拉角数组时为平行光的旋转、强度 1，写成 `{ rot, intensity, color }` 时逐项指定；`camera: { at, look }`。平行光对象由 `WorldService` 持有，`sun` 变了时先销毁旧的再建。
 2. 新出现的实体，对它的每个积木调用 `view.enter(me, e, ctx, w)`，返回的场景对象（一个、数组或空）记在内存表里，并记下每个对象创建时的缩放。消失的实体，先调 `view.exit`，再销毁它的场景对象。积木定义对象被替换（热重载）时，对拥有它的实体重做 `exit` 与 `enter`。
 3. 调用各积木的 `view.update(me, e, objs, ctx, w)`。
 4. 变换同步：`enter` 返回的对象都跟随实体。位置为上一步与本步按 `ctx.clock.fixedAlpha` 线性插值，旋转为两个四元数球面插值，缩放为实体缩放乘以对象创建时的缩放。所有对象写进一个复用的 `Float32Array`（每个 10 个数），一帧只调用一次 `ctx.scene.setTransforms`。
@@ -948,7 +959,7 @@ function definePrefab(name: string, def: { is?: Prefab; tags?: string[]; [block:
 
 M1 的官方积木：`shape`（`kind` 为 cube、sphere、plane、cylinder 等 `scene.spawn` 支持的形状，`color`，`scale`）、`spin`（`speed`，度每秒，绕 y 轴）、`moveTopdown`（`speed`，读 `move` 轴，写 `pos` 的 x、z）、`trigger`（15.9）、`lifetime`（`seconds`，到时销毁）、`projectile`（`speed`、`dir`）、`cameraFollow`（`offset`，在 `view.update` 里移动相机）、`light`（点光源）。
 
-M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`moveTopdown`、`trigger`，标签 `player`）、`coin`（`shape` 黄色球、`trigger`、`spin`，标签 `coin`）、`ground`（`shape` 平面）、`wall`（`shape` 方块）、`bullet`（`shape` 小球、`projectile`、`lifetime`、`trigger`）。
+M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`moveTopdown`、`trigger` 半径 0，标签 `player`；半径 0 即按玩家中心点判定，与 hello 的“玩家中心进入金币 0.8 米内即拾取”一致）、`coin`（`shape` 黄色球、`trigger`、`spin`，标签 `coin`）、`ground`（`shape` 平面）、`wall`（`shape` 方块）、`bullet`（`shape` 小球、`projectile`、`lifetime`、`trigger`）。
 
 界面求值器：`ui(w, ctx.ui)` 每帧在表现之后调用，返回的树里只认片段、数组、函数组件和 `<text>`。`<text>` 的子节点里的字符串和数字拼成一行；`at` 是九宫格位置名（`top-left`、`top`、`top-right`、`left`、`center`、`right`、`bottom-left`、`bottom`、`bottom-right`）或像素坐标 `[x, y]`，九宫格离屏幕边缘 16 像素；`size`、`color`、`bold` 原样传给 `ctx.ui.text`，对齐方式由 `at` 推出。其他标签报错，同一个标签只报一次。
 
