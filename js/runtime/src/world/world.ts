@@ -18,6 +18,8 @@ import type { EntitySpec, RuleSpec, StageSpec } from './tree'
 import { overlappingPairs } from './collide'
 import type { Collider } from './collide'
 import { WorldView } from './view'
+import { BUILTIN_BLOCKS } from './blocks'
+import { BUILTIN_PREFABS } from './prefabs'
 
 declare module 'cordis' {
   interface Context {
@@ -151,10 +153,15 @@ export class WorldService extends Service {
   private _stepping = false
   /** 当前 stage（由挂载给出，最后一个带 stage 的挂载生效） */
   private _stages = new Map<string, StageSpec>()
+  /** 实体 id → 积木属性被挂载对比改过的次数（表现据此重做 enter；内存表，丢了只会多重建一次） */
+  private _revs = new Map<number, number>()
 
   constructor(ctx: Context) {
     super(ctx, 'world')
     this._root = ctx
+    // 官方积木与预制件垫在栈底，游戏的同名登记覆盖它们
+    for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block)
+    for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab)
     // 构造时 define 一次占住归属（host）；冷重启的 importJSON 会整个替换，之后一律 get
     ctx.state.define<WorldData>('world', { init: initData })
     ctx.on('fixed-update', () => this._step())
@@ -197,6 +204,11 @@ export class WorldService extends Service {
     let last: StageSpec | null = null
     for (const s of this._stages.values()) last = s
     return last
+  }
+
+  /** 当前的指令映射 */
+  get controls(): Required<Controls> {
+    return this._controls
   }
 
   /** 设置指令映射（defineGame 的 controls） */
@@ -280,6 +292,7 @@ export class WorldService extends Service {
       }
       if (!same(old.tags, spec.tags)) e.tags = [...spec.tags]
       const added: string[] = []
+      let changed = false
       for (const name of Object.keys(spec.blocks)) {
         const props = spec.blocks[name]
         if (!e.b[name]) {
@@ -287,8 +300,10 @@ export class WorldService extends Service {
           added.push(name)
         } else if (!same(old.blocks?.[name], props)) {
           Object.assign(e.b[name], clone(props))
+          changed = true
         }
       }
+      if (changed) this._revs.set(e.id, (this._revs.get(e.id) ?? 0) + 1)
       for (const name of Object.keys(e.b)) {
         if (!(name in spec.blocks)) delete e.b[name]
       }
@@ -363,6 +378,7 @@ export class WorldService extends Service {
   private _remove(data: WorldData, e: EntityData, gameplay: boolean) {
     delete data.entities[e.id]
     this.prev.delete(e.id)
+    this._revs.delete(e.id)
     if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id)
     if (gameplay && e.mount !== null && e.path !== null) {
       const rec = data.mounts[e.mount]?.keys[e.path]
@@ -372,6 +388,11 @@ export class WorldService extends Service {
 
   private _alive(e: EntityData | undefined): e is EntityData {
     return !!e && !this._pendingSet.has(e.id) && this.data.entities[e.id] === e
+  }
+
+  /** 实体的积木属性修订号：挂载对比改了已有积木的属性时加一，表现据此重做 view.enter */
+  revision(id: number) {
+    return this._revs.get(id) ?? 0
   }
 
   spawn(prefab: string | Prefab, props: SpawnProps = {}): EntityData {

@@ -734,8 +734,8 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | `js/runtime/src/world/view.ts` | 表现：`view.enter/update/exit`、`stage`、帧末批量变换 |
 | `js/runtime/src/world/ui-eval.ts` | 界面求值器 |
 | `js/runtime/src/world/game.ts` | `defineGame` |
-| `js/runtime/src/world/blocks/*.ts`、`world/prefabs.ts` | 官方积木与预制件（15.10） |
-| `js/test/jsx.test.js`、`world-tree.test.js`、`world-diff.test.js`、`world-sim.test.js`、`world-view.test.js`、`world-hmr.test.js` | 见 15.12 |
+| `js/runtime/src/world/blocks/index.ts`、`world/prefabs.ts` | 官方积木与预制件（15.11） |
+| `js/test/jsx.test.js`、`world-tree.test.js`、`world-diff.test.js`、`world-sim.test.js`、`world-view.test.js`、`world-hmr.test.js`、`world-builtin.test.js` | 见 15.12 |
 | `games/hello-tsx/`：`manifest.json`、`tsconfig.json`、`src/plugins/game.tsx`、`data/coins.json` | 5.1 的写法；`coins.json` 复制自 hello |
 
 修改：`runtime.ts`（安装 `WorldService`，模块表加两个 jsx 子路径）、`index.ts`（导出 `defineGame`、`defineBlock`、`definePrefab`、`Fragment` 和 World 相关类型，另以 `jsxRuntime`、`jsxDevRuntime` 两个名字导出 jsx 模块供模块表引用）、`plugins.ts`（`CORE_SERVICES` 加 `'world'`）、`js/devtools/src/loader.ts`、`js/devserver/builder.js`、各 `tsconfig.json`（均见 5.8）。`WorldService` 装在 `LoadingService` 之后、`PluginsService` 之前，并声明 `static inject = ['clock', 'state', 'input', 'scene', 'ui']`：cordis 4 里服务访问别的服务必须声明依赖，否则构造时就报错。
@@ -951,6 +951,7 @@ interface Cmd {
 - 跟随实体的对象位置与实体位置相同，不保留创建时的位置偏移；需要偏移的效果在 `view.update` 里自己摆放、不要从 `enter` 返回。
 - `sun` 写成对象时缺省 `rot: [50, -30, 0]`、`intensity: 1`、`color: '#ffffff'`；`stage` 去掉 `sun`（或整个 `stage`）时平行光销毁，背景与相机保持最后一次的值。`camera` 的 `at`、`look` 任一变化时两者一起重新应用（`lookAt` 依赖位置）。
 - 欧拉角换算新增在 `scene.ts`：`eulerToQuaternion`（`q = qY * qX * qZ`，即 Unity 的 `Quaternion.Euler`）与 `slerpQuaternion`（取短弧）。
+- 积木属性被挂载对比改了（热重载改了 `<coin shape={{ color }}>`、改了预制件定义）时，也对该实体重做 `exit` 与 `enter`，否则 `shape` 这类只在 `enter` 里读属性的积木看不到新值。判据是 `WorldService` 的内存表 `revision(id)`：对比改动已有积木的属性时加一，表现记下 `enter` 时的值，不同就重建。只按实体计，一个积木改了，该实体的全部表现对象都重建。玩法里 `step` 改 `me` 的字段不算，需要逐帧反映的积木在 `view.update` 里自己读。
 
 ### 15.11 积木、预制件、界面、defineGame
 
@@ -983,6 +984,16 @@ M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`m
 
 `defineGame(def)` 返回 `{ apply(ctx) }`，不设 `name`，由加载器按文件名命名。`apply` 依次：登记 `blocks`、`prefabs`；合并 `vars`；以 `s = { state: 'play', params: {}, data: ctx.data }` 求值 `scene` 并 `ctx.world.mount`；有 `ui` 时 `ctx.on('update', ...)` 每帧求值界面。登记和 `on` 都随单元回收。
 
+实施时补充的约定（M1）：
+
+- 文件：官方积木都在 `world/blocks/index.ts`（导出 `BUILTIN_BLOCKS`），官方预制件在 `world/prefabs.ts`（`BUILTIN_PREFABS`），`defineGame` 在 `world/game.ts`，标签类型在 `world/types.ts`。`WorldService` 构造时把它们登记在栈底，不随任何单元撤销。
+- 官方积木的缺省值：`shape { kind: 'cube', color: '#ffffff', scale: 1 }`，`enter` 时 `scene.spawn`，名字取实体的 `name`，没有就取预制件名；`spin { speed: 90 }`，写 `rot[1]` 并对 360 取模；`moveTopdown { speed: 5 }`，读 `w.cmd(e).axis('move')`；`trigger { radius: 0.5, box: null }`；`lifetime { seconds: 2 }`，状态 `age` 按 `w.dt` 累加，到时 `w.destroy(e)`；`projectile { speed: 10, dir: [0, 0, 1] }`，`dir` 为世界方向、内部归一化；`cameraFollow { offset: [0, 12, -10] }`，在 `view.update` 里按插值后的位置摆相机并 `lookAt` 实体，晚于 `stage` 的相机，所以两者都写时跟随生效；`light { color: '#ffffff', intensity: 1, range: 10 }`，`enter` 时建点光源。
+- 官方预制件：`bullet` 为白色 0.2 小球、`projectile { speed: 20 }`、`lifetime { seconds: 2 }`、`trigger { radius: 0.1 }`，标签 `bullet`；`ground` 是 Unity 的 plane（10 米见方）。其余见上文。
+- `defineGame` 也设置 `controls`（`w.setControls`），撤销时只在当前映射仍是自己设的情况下恢复默认（热重载新旧单元先后不定）。`w.controls` 读当前映射。
+- `flow` 在 M1 传了就报错（“M1 还不支持”），不静默忽略；`scene`、`ui` 不是函数、`prefabs` 不是 `definePrefab` 的结果时同样在 `defineGame` 调用处报错。
+- `ui` 函数本身抛错时，报一次（同一信息连续出现不重复），该帧不画；求值器内部的报错走 `createUIRenderer` 的去重。日志都用 `world` 记录器。
+- `JSX.IntrinsicElements` 给出六个官方预制件、`stage`、`rule`、`text` 的属性类型；实体标签的属性是六个保留属性加八个官方积木的可选覆盖（对象、`true`、`false`、`null`），另有索引签名放行游戏自写的积木（M2 由 `.pot/types.d.ts` 收紧）。`rule` 的 `do` 统一为 `(w, ...args: any[]) => unknown`：按 `on` 区分签名的联合类型会让箭头函数参数失去上下文类型，在 `noImplicitAny` 下报错。
+
 ### 15.12 测试与验收
 
 测试放在 `js/test/`，用 `helpers.js` 的 `startGame(files)`、`frames`、`run` 和 `MockEngine`，单元源码以 `.tsx` 文件放进 `files`。`MockEngine` 没有注入轴的口子就加一个。
@@ -994,7 +1005,8 @@ M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`m
 | `world-diff.test.js` | 15.6 表的每一行；`at` 未变时实体位置不被拉回；`dead` 的实体不重建；`vars` 合并 |
 | `world-sim.test.js` | `moveTopdown` 在注入轴后移动；`touch` 规则销毁金币并加分；`death`、`every`、自定义事件；第 7 步的轮数上限；同一输入跑两次 World 完全相同 |
 | `world-view.test.js` | 实体出现与消失时场景对象创建与回收；一帧只调用一次 `setTransforms`；`stage` 不变时不重复调用 |
-| `world-hmr.test.js` | 改 `game.tsx` 后：吃掉的金币不回来、玩家位置保留、`vars` 保留、新规则生效；改金币坐标后金币移动；从 manifest 去掉单元后实体全部销毁；`exportJSON` 后冷重启 World 一致 |
+| `world-hmr.test.js` | 改 `game.tsx` 后：吃掉的金币不回来、玩家位置保留、`vars` 保留、新规则生效；改金币坐标后金币移动；从 manifest 去掉单元后实体全部销毁；`exportJSON` 后冷重启 World 一致；另：改预制件属性后表现重建。manifest 变化在 Runner 里由 C# 冷重启，测试以“导出状态、换 manifest 冷启动”模拟 |
+| `world-builtin.test.js` | 官方积木与预制件已登记；`shape`、`spin`、`projectile`、`lifetime`、`cameraFollow`、`light` 的行为；游戏同名覆盖与撤销后露出官方的；`controls` 生效与撤销 |
 
 另在 `devserver.test.js` 里加一例：`buildRelease` 一个含 `.tsx` 的游戏，产物能在 Node 宿主上跑起来。
 

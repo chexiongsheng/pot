@@ -22,6 +22,8 @@ interface BlockView {
   objs: Entity[]
   /** 每个对象创建时的缩放 */
   scales: number[][]
+  /** enter 时实体的积木属性修订号（world.revision） */
+  rev: number
 }
 
 interface EntityView {
@@ -82,8 +84,9 @@ export class WorldView {
       let v = this._entities.get(e.id)
       if (!v) this._entities.set(e.id, (v = { e, blocks: new Map() }))
       v.e = e
+      const rev = w.revision(e.id)
       for (const [name, rec] of v.blocks) {
-        if (e.b[name] && registry.block(name) === rec.def) continue
+        if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue
         this._exit(rec, e)
         v.blocks.delete(name)
       }
@@ -95,7 +98,7 @@ export class WorldView {
           rec.me = me
           continue
         }
-        const created: BlockView = { def, me, objs: [], scales: [] }
+        const created: BlockView = { def, me, objs: [], scales: [], rev }
         v.blocks.set(def.name, created)
         if (def.view.enter) {
           this._guard(`积木 ${def.name}.view.enter`, () => {

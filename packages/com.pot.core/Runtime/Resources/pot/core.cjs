@@ -26,6 +26,8 @@ var pot = (() => {
     ANCHORS: () => ANCHORS,
     API_VERSION: () => API_VERSION,
     AudioService: () => AudioService,
+    BUILTIN_BLOCKS: () => BUILTIN_BLOCKS,
+    BUILTIN_PREFABS: () => BUILTIN_PREFABS,
     BUILTIN_UNIFORMS: () => BUILTIN_UNIFORMS,
     CORE_SERVICES: () => CORE_SERVICES,
     CacheService: () => CacheService,
@@ -94,6 +96,7 @@ var pot = (() => {
     deepClone: () => deepClone,
     defaultFormatters: () => defaultFormatters,
     defineBlock: () => defineBlock,
+    defineGame: () => defineGame,
     definePlugin: () => definePlugin,
     definePrefab: () => definePrefab,
     encode: () => encode,
@@ -2165,7 +2168,7 @@ var pot = (() => {
         return () => cancel();
       }, "ctx.interval()");
     }
-    _schedule(label, trigger, isDisposed = false) {
+    _schedule(label, trigger2, isDisposed = false) {
       let cancel;
       const dispose = this.ctx.effect(() => () => {
         isDisposed = true;
@@ -2173,7 +2176,7 @@ var pot = (() => {
       }, label);
       const wrapper = (...args) => {
         cancel?.();
-        cancel = trigger(args, isDisposed);
+        cancel = trigger2(args, isDisposed);
       };
       wrapper.dispose = dispose;
       return wrapper;
@@ -4176,14 +4179,14 @@ var pot = (() => {
     }
     spawn(options = {}) {
       const engine = this.host.engine;
-      const shape = options.shape ?? "cube";
-      const name = options.name ?? shape;
+      const shape2 = options.shape ?? "cube";
+      const name = options.name ?? shape2;
       const unit = unitOf(this.ctx) ?? "(host)";
       const bones = options.bones;
-      if (bones && !shape.startsWith("mesh:")) throw new Error(`scene.spawn(${name})：bones 只能配 mesh: 形状`);
+      if (bones && !shape2.startsWith("mesh:")) throw new Error(`scene.spawn(${name})：bones 只能配 mesh: 形状`);
       let id = 0;
       const dispose = this.ctx.effect(() => {
-        id = engine.spawn(bones ? `skin:${shape.slice(5)}` : shape, name, options.parent?.id ?? 0);
+        id = engine.spawn(bones ? `skin:${shape2.slice(5)}` : shape2, name, options.parent?.id ?? 0);
         if (bones) {
           const ids = new Int32Array(bones.length);
           for (let i = 0; i < bones.length; i++) ids[i] = bones[i].id;
@@ -4194,7 +4197,7 @@ var pot = (() => {
           }
           this.skinned.add(id);
         }
-        this.objects.set(id, { id, name, shape, unit });
+        this.objects.set(id, { id, name, shape: shape2, unit });
         return () => {
           this.objects.delete(id);
           this.skinned.delete(id);
@@ -4202,33 +4205,33 @@ var pot = (() => {
           engine.destroy(id);
         };
       }, `scene.spawn(${name})`);
-      const entity = new Entity(this, id, dispose);
+      const entity2 = new Entity(this, id, dispose);
       if (options.parent) {
-        if (options.position) entity.localPosition = options.position;
-        if (options.rotation) entity.localRotation = options.rotation;
+        if (options.position) entity2.localPosition = options.position;
+        if (options.rotation) entity2.localRotation = options.rotation;
       } else {
-        if (options.position) entity.position = options.position;
-        if (options.rotation) entity.rotation = options.rotation;
+        if (options.position) entity2.position = options.position;
+        if (options.rotation) entity2.rotation = options.rotation;
       }
       if (options.scale !== void 0) {
         const s = options.scale;
-        entity.scale = typeof s === "number" ? [s, s, s] : s;
+        entity2.scale = typeof s === "number" ? [s, s, s] : s;
       }
-      if (options.color) entity.color(options.color);
-      if (options.material) entity.material(options.material);
-      if (options.collider === false) entity.collider(false);
+      if (options.color) entity2.color(options.color);
+      if (options.material) entity2.material(options.material);
+      if (options.collider === false) entity2.collider(false);
       else if (typeof options.collider === "string" || options.dynamic) {
         try {
-          entity.collider(options.collider ?? true, { dynamic: options.dynamic });
+          entity2.collider(options.collider ?? true, { dynamic: options.dynamic });
         } catch (e) {
-          entity.destroy();
+          entity2.destroy();
           throw new Error(`scene.spawn(${name})：${e.message}`);
         }
       }
-      if (options.layer !== void 0) entity.layer(options.layer);
-      if (options.active === false) entity.active(false);
-      if (options.visible === false) entity.visible(false);
-      return entity;
+      if (options.layer !== void 0) entity2.layer(options.layer);
+      if (options.active === false) entity2.active(false);
+      if (options.visible === false) entity2.visible(false);
+      return entity2;
     }
     /**
      * 批量设置变换：一次跨语言调用写完一批实体（骨骼、成群的动态物体），比逐个设 position/rotation/scale 省得多。
@@ -4258,20 +4261,20 @@ var pot = (() => {
       return this.host.engine.setTransforms(bytesOf(ids, Int32Array), bytesOf(data, Float32Array), count, flags);
     }
     light(options = {}) {
-      const entity = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, parent: options.parent, position: options.position, rotation: options.rotation });
+      const entity2 = this.spawn({ shape: "empty", name: options.name ?? `${options.type ?? "directional"} light`, parent: options.parent, position: options.position, rotation: options.rotation });
       const [r, g, b] = parseColor(options.color ?? [1, 1, 1]);
       const engine = this.host.engine;
       const three = options.units === "three";
       if (options.units !== void 0 && options.units !== "unity" && !three) throw new Error(`scene.light：未知的 units "${options.units}"，可用 unity / three`);
       const scale = three ? 1 / Math.PI : 1;
-      if (scale !== 1) this.lightScale.set(entity.id, scale);
+      if (scale !== 1) this.lightScale.set(entity2.id, scale);
       const range = options.range ?? (three && options.distance && options.distance > 0 ? options.distance : 10);
-      engine.light(entity.id, options.type ?? "directional", (options.intensity ?? 1) * scale, r, g, b, range);
+      engine.light(entity2.id, options.type ?? "directional", (options.intensity ?? 1) * scale, r, g, b, range);
       if (options.spotAngle !== void 0 || options.shadows !== void 0) {
         const shadows = options.shadows === void 0 ? -1 : options.shadows === "none" ? 0 : options.shadows === "hard" ? 1 : 2;
-        engine.lightOptions(entity.id, options.spotAngle ?? 0, shadows);
+        engine.lightOptions(entity2.id, options.spotAngle ?? 0, shadows);
       }
-      return entity;
+      return entity2;
     }
     /** 主相机参数：视野（度）、近/远裁剪面 */
     view(options) {
@@ -7100,7 +7103,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       const path = join(layer, segment(layer, prefab.prefab, node.key));
       if (!claim(path, node)) return;
-      const spec = entity(node, prefab, path);
+      const spec = entity2(node, prefab, path);
       if (spec) result.entities.push(spec);
     };
     const chainOf = (prefab, node) => {
@@ -7163,7 +7166,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       return ok;
     };
-    const entity = (node, prefab, path) => {
+    const entity2 = (node, prefab, path) => {
       const where = sourcePrefix(node.source);
       const props = node.props;
       if (flatChildren(props.children).length) {
@@ -7364,8 +7367,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         let v = this._entities.get(e.id);
         if (!v) this._entities.set(e.id, v = { e, blocks: /* @__PURE__ */ new Map() });
         v.e = e;
+        const rev = w.revision(e.id);
         for (const [name, rec] of v.blocks) {
-          if (e.b[name] && registry.block(name) === rec.def) continue;
+          if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue;
           this._exit(rec, e);
           v.blocks.delete(name);
         }
@@ -7377,7 +7381,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             rec.me = me;
             continue;
           }
-          const created = { def, me, objs: [], scales: [] };
+          const created = { def, me, objs: [], scales: [], rev };
           v.blocks.set(def.name, created);
           if (def.view.enter) {
             this._guard(`积木 ${def.name}.view.enter`, () => {
@@ -7503,6 +7507,118 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
+  // runtime/src/world/blocks/index.ts
+  var shape = defineBlock({
+    name: "shape",
+    about: "外形：kind 为 scene.spawn 支持的形状（cube、sphere、plane、cylinder、capsule、quad 或 mesh:名字），color 颜色，scale 相对实体的缩放",
+    props: { kind: "cube", color: "#ffffff", scale: 1 },
+    view: {
+      enter(me, e, ctx) {
+        return ctx.scene.spawn({ shape: me.kind, name: e.name ?? e.prefab, color: me.color, scale: me.scale, position: e.pos, rotation: e.rot });
+      }
+    }
+  });
+  var spin = defineBlock({
+    name: "spin",
+    about: "绕 y 轴旋转，speed 为度每秒",
+    props: { speed: 90 },
+    step(me, e, w) {
+      e.rot[1] = (e.rot[1] + me.speed * w.dt) % 360;
+    }
+  });
+  var moveTopdown = defineBlock({
+    name: "moveTopdown",
+    about: "俯视角移动：读指令轴 move，按 speed（米每秒）改 pos 的 x、z",
+    props: { speed: 5 },
+    step(me, e, w) {
+      const { x, y } = w.cmd(e).axis("move");
+      if (!x && !y) return;
+      e.pos[0] += x * me.speed * w.dt;
+      e.pos[2] += y * me.speed * w.dt;
+    }
+  });
+  var trigger = defineBlock({
+    name: "trigger",
+    about: "触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch",
+    props: { radius: 0.5, box: null }
+  });
+  var lifetime = defineBlock({
+    name: "lifetime",
+    about: "存活 seconds 秒后销毁",
+    props: { seconds: 2 },
+    state: { age: 0 },
+    step(me, e, w) {
+      me.age += w.dt;
+      if (me.age >= me.seconds) w.destroy(e);
+    }
+  });
+  var projectile = defineBlock({
+    name: "projectile",
+    about: "沿世界方向 dir 以 speed（米每秒）匀速飞行",
+    props: { speed: 10, dir: [0, 0, 1] },
+    step(me, e, w) {
+      const [x, y, z] = me.dir;
+      const len = Math.hypot(x, y, z);
+      if (!len) return;
+      const k = me.speed * w.dt / len;
+      e.pos[0] += x * k;
+      e.pos[1] += y * k;
+      e.pos[2] += z * k;
+    }
+  });
+  var cameraFollow = defineBlock({
+    name: "cameraFollow",
+    about: "相机跟随：相机放在实体位置加 offset 处并看向实体（每帧，按插值后的位置）",
+    props: { offset: [0, 12, -10] },
+    view: {
+      update(me, e, _objs, ctx, w) {
+        const prev = w.prev.get(e.id)?.pos ?? e.pos;
+        const a = ctx.clock.fixedAlpha;
+        const p = [prev[0] + (e.pos[0] - prev[0]) * a, prev[1] + (e.pos[1] - prev[1]) * a, prev[2] + (e.pos[2] - prev[2]) * a];
+        const o = me.offset;
+        const cam = ctx.scene.camera;
+        cam.position = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
+        cam.lookAt(p);
+      }
+    }
+  });
+  var light = defineBlock({
+    name: "light",
+    about: "点光源：color 颜色，intensity 强度，range 照射范围（米）",
+    props: { color: "#ffffff", intensity: 1, range: 10 },
+    view: {
+      enter(me, e, ctx) {
+        return ctx.scene.light({ type: "point", name: e.name ?? `${e.prefab} light`, color: me.color, intensity: me.intensity, range: me.range, position: e.pos });
+      }
+    }
+  });
+  var BUILTIN_BLOCKS = [shape, spin, moveTopdown, trigger, lifetime, projectile, cameraFollow, light];
+
+  // runtime/src/world/prefabs.ts
+  var entity = definePrefab("entity", {});
+  var player = definePrefab("player", {
+    tags: ["player"],
+    shape: { kind: "cube", color: "#4fc3f7" },
+    moveTopdown: true,
+    trigger: { radius: 0 }
+  });
+  var coin = definePrefab("coin", {
+    tags: ["coin"],
+    shape: { kind: "sphere", scale: 0.5, color: "#ffd54f" },
+    trigger: { radius: 0.8 },
+    spin: { speed: 90 }
+  });
+  var ground = definePrefab("ground", { shape: { kind: "plane" } });
+  var wall = definePrefab("wall", { shape: { kind: "cube" } });
+  var bullet = definePrefab("bullet", {
+    tags: ["bullet"],
+    shape: { kind: "sphere", scale: 0.2, color: "#ffffff" },
+    projectile: { speed: 20 },
+    lifetime: { seconds: 2 },
+    trigger: { radius: 0.1 }
+  });
+  var BUILTIN_PREFABS = [entity, player, coin, ground, wall, bullet];
+
   // runtime/src/world/world.ts
   var DEFAULT_CONTROLS = {
     axes: { move: "move", look: "look" },
@@ -7550,7 +7666,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_stepping", false);
       /** 当前 stage（由挂载给出，最后一个带 stage 的挂载生效） */
       __publicField(this, "_stages", /* @__PURE__ */ new Map());
+      /** 实体 id → 积木属性被挂载对比改过的次数（表现据此重做 enter；内存表，丢了只会多重建一次） */
+      __publicField(this, "_revs", /* @__PURE__ */ new Map());
       this._root = ctx;
+      for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
+      for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
       ctx.state.define("world", { init: initData });
       ctx.on("fixed-update", () => this._step());
       this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, void 0, fn));
@@ -7586,6 +7706,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       let last = null;
       for (const s of this._stages.values()) last = s;
       return last;
+    }
+    /** 当前的指令映射 */
+    get controls() {
+      return this._controls;
     }
     /** 设置指令映射（defineGame 的 controls） */
     setControls(controls) {
@@ -7665,6 +7789,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
         if (!same(old.tags, spec.tags)) e.tags = [...spec.tags];
         const added = [];
+        let changed = false;
         for (const name of Object.keys(spec.blocks)) {
           const props = spec.blocks[name];
           if (!e.b[name]) {
@@ -7672,8 +7797,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             added.push(name);
           } else if (!same(old.blocks?.[name], props)) {
             Object.assign(e.b[name], clone(props));
+            changed = true;
           }
         }
+        if (changed) this._revs.set(e.id, (this._revs.get(e.id) ?? 0) + 1);
         for (const name of Object.keys(e.b)) {
           if (!(name in spec.blocks)) delete e.b[name];
         }
@@ -7748,6 +7875,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     _remove(data, e, gameplay) {
       delete data.entities[e.id];
       this.prev.delete(e.id);
+      this._revs.delete(e.id);
       if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id);
       if (gameplay && e.mount !== null && e.path !== null) {
         const rec = data.mounts[e.mount]?.keys[e.path];
@@ -7756,6 +7884,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
     _alive(e) {
       return !!e && !this._pendingSet.has(e.id) && this.data.entities[e.id] === e;
+    }
+    /** 实体的积木属性修订号：挂载对比改了已有积木的属性时加一，表现据此重做 view.enter */
+    revision(id) {
+      return this._revs.get(id) ?? 0;
     }
     spawn(prefab, props = {}) {
       if (typeof prefab !== "string" && this.registry.prefab(prefab.prefab) !== prefab) {
@@ -8235,7 +8367,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       frames: true,
       loading: (progress, text) => H2.OnLoading(progress, text),
       engine: {
-        spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
+        spawn: (shape2, name, parent) => S.Spawn(shape2, name, parent),
         destroy: (id) => S.Destroy(id),
         exists: (id) => S.Exists(id),
         setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
@@ -8489,6 +8621,54 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       report(`${sourcePrefix(node.source)}界面树里不认识 <${nodeName(node)}>，只能用 <text>、片段和函数组件`);
     };
     return (tree, ui) => visit(tree, ui, 0);
+  }
+
+  // runtime/src/world/game.ts
+  function defineGame(def) {
+    if (!def || typeof def !== "object") throw new Error("defineGame 的参数必须是对象");
+    for (const key of ["scene", "ui"]) {
+      if (def[key] !== void 0 && typeof def[key] !== "function") throw new Error(`defineGame：${key} 必须是返回标签树的函数`);
+    }
+    if (def.blocks !== void 0 && !Array.isArray(def.blocks)) throw new Error("defineGame：blocks 必须是 defineBlock 结果的数组");
+    if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
+      throw new Error("defineGame：prefabs 必须是 definePrefab 结果的数组");
+    }
+    if (def.flow !== void 0) throw new Error("defineGame：flow 在 M1 还不支持");
+    return {
+      apply(ctx) {
+        const w = ctx.world;
+        for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block), `world.block(${block.name})`);
+        for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`);
+        ctx.effect(() => {
+          w.setControls(def.controls);
+          const applied = w.controls;
+          return () => {
+            if (w.controls === applied) w.setControls(void 0);
+          };
+        }, "world.controls");
+        w.mergeVars(def.vars);
+        if (def.scene) w.mount(def.scene({ state: "play", params: {}, data: ctx.data }));
+        const ui = def.ui;
+        if (ui) {
+          const logger = ctx.logger("world");
+          const render = createUIRenderer((message) => logger.error(message));
+          let lastError = "";
+          ctx.on("update", () => {
+            let tree;
+            try {
+              tree = ui(w, ctx.ui);
+            } catch (error) {
+              const message = `ui 出错：${error?.stack ?? error?.message ?? error}`;
+              if (message !== lastError) logger.error(message);
+              lastError = message;
+              return;
+            }
+            lastError = "";
+            render(tree, ctx.ui);
+          });
+        }
+      }
+    };
   }
 
   // runtime/src/index.ts
