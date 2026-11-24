@@ -9,9 +9,9 @@
  *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
  *   pot release <游戏目录> [--platform win64|android|webgl[,…]] [--unity Unity.exe] [--out 目录]
  *                                           出包：TS 编译 → 暂存 → Unity -batchmode 打包（通用工程 player/），不用打开编辑器
- *   pot runner [--platform win64|android[,…]] [--unity Unity.exe] [--out 目录]
- *                                           构建 Runner（runner/ 工程），默认输出 release/runner/<平台>/PotRunner.exe|.apk
- *   pot native [--platform win64|webgl|android[,…]] [--force] [--unity Unity.exe]
+ *   pot runner [--platform win64|android|macos[,…]] [--unity Unity.exe|Unity.app] [--out 目录]
+ *                                           构建 Runner（runner/ 工程），默认输出 release/runner/<平台>/PotRunner.exe|.apk|.app
+ *   pot native [--platform win64|webgl|android|macos[,…]] [--force] [--unity Unity.exe]
  *                                           检查/构建原生库 pot_gfx（release、runner 构建前会自动检查，缺了才编；--force 强制重建）
  *   pot stage <游戏目录> <暂存目录>           只暂存（game/ + release.json + 图标），供 Unity 菜单 pot/Build Game 使用
  *   pot mcp [--port 7788]                   以 stdio MCP 方式暴露调试工具
@@ -115,8 +115,8 @@ async function main() {
       return exitBy(brief.length === 1 ? brief[0] : { ok: brief.every((r) => r.ok), results: brief })
     }
     case 'runner': {
-      const { releaseRunner } = require('./release')
-      const platforms = String(flags.platform ?? 'win64').split(',')
+      const { releaseRunner, defaultPlatform } = require('./release')
+      const platforms = String(flags.platform ?? defaultPlatform()).split(',')
       const results = []
       for (const platform of platforms) {
         results.push(await releaseRunner({ platform, unity: flags.unity, out: platforms.length > 1 && flags.out ? path.join(flags.out, platform) : flags.out }))
@@ -126,11 +126,11 @@ async function main() {
       return exitBy(brief.length === 1 ? brief[0] : { ok: brief.every((r) => r.ok), results: brief })
     }
     case 'native': {
-      const { ensureNative } = require('./native')
-      const { findUnity, normalizePlatform } = require('./release')
+      const { ensureNative, normalizeNativePlatform, hostPlatform } = require('./native')
+      const { findUnity } = require('./release')
       let unity = null
       try { unity = findUnity(flags.unity) } catch {}
-      const results = String(flags.platform ?? 'win64').split(',').map((p) => ensureNative(normalizePlatform(p), { unity, force: !!flags.force }))
+      const results = String(flags.platform ?? hostPlatform()).split(',').map((p) => ensureNative(normalizeNativePlatform(p), { unity, force: !!flags.force }))
       return exitBy({ ok: true, results })
     }
     case 'mcp':

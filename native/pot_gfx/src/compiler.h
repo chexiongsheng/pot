@@ -7,7 +7,8 @@
 
 namespace pot {
 
-enum class Target { HLSL50, GLSLES300 };
+// MSL21：Metal Shading Language 2.1（macOS），资源索引直接取 SPIR-V 的 binding（统一块 buffer(0)，贴图/采样器同号）
+enum class Target { HLSL50, GLSLES300, MSL21 };
 
 // 统一块（loose uniform 汇成的默认块）里的一个成员
 struct UniformMember {
@@ -33,7 +34,7 @@ struct CompiledProgram {
     std::string vsCode, fsCode;           // 目标语言源码（调试用，也供后端编译）
     std::vector<uint32_t> vsSpirv, fsSpirv;
     StageReflection vs, fs;
-    // 后端原生字节码（D3D11 为 DXBC）。非空时后端直接创建，跳过编译；后端编译后也写回这里供缓存
+    // 后端原生字节码（D3D11 为 DXBC；Metal 为 MSL 源码，驱动另有自己的编译缓存）。非空时后端直接创建，跳过编译；后端编译后也写回这里供缓存
     std::vector<uint8_t> vsBin, fsBin;
     bool cached = false;
 };

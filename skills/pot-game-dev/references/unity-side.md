@@ -9,7 +9,7 @@
 | `com.pot.runner-shell` | PotRunner（首页、状态条、F1 / 三指触摸面板）、GameSession（打开目录 / .potg / URL、文件监听、镜像同步、存档） | 否 |
 | `com.pot.build` | 编辑器构建：导入游戏包、生成启动场景、BuildPlayer | 编辑器 |
 
-依赖 Puerts 3.0.3 core + v8，放在 `third_party/puerts/`（`tools/install-puerts.ps1 -Source <含 core 和 v8 的目录>`）。
+依赖 Puerts 3.0.4 core + v8，放在 `third_party/puerts/`（`tools/install-puerts.ps1 -Source <含 core 和 v8 的目录>`）。
 
 ## Runner
 

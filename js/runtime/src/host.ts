@@ -127,7 +127,7 @@ export interface Engine {
   burst(json: string): void
 
   // ---- 运行时着色器（PotGfx.cs / native/pot_gfx） ----
-  /** 后端名（d3d11）；空串表示不支持 */
+  /** 后端名（d3d11 / metal / gles3）；空串表示不支持 */
   gfxBackend(): string
   /** 运行时着色器不可用的原因（可用时为空串）；旧宿主可不实现 */
   gfxUnsupported?(): string

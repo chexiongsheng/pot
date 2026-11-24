@@ -108,11 +108,11 @@ namespace Pot
                 }
             }
             if (available == false) return "Runner 未包含 pot_gfx 原生插件";
-            if (string.IsNullOrEmpty(backendName)) return "当前图形 API（" + SystemInfo.graphicsDeviceType + "）不支持运行时着色器，目前支持 D3D11、WebGL2（GLES3）";
+            if (string.IsNullOrEmpty(backendName)) return "当前图形 API（" + SystemInfo.graphicsDeviceType + "）不支持运行时着色器，目前支持 D3D11、Metal、WebGL2（GLES3）";
             return null;
         }
 
-        /// <summary>后端名（d3d11）；不可用时返回空串</summary>
+        /// <summary>后端名（d3d11 / metal / gles3）；不可用时返回空串</summary>
         [Preserve]
         public static string Backend()
         {
@@ -1543,7 +1543,9 @@ namespace Pot
             bakes.TryGetValue(chain.cfg.shared, out shared);
             var quad = BakeQuad();
             var env = PotRender.EnvTexture;
-            var glLike = SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3 || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore;
+            // GL / Metal：SetRenderTarget 惰性生效（Metal 的渲染通道也是延迟开启），输出贴图需显式交给后端（事件 1）
+            var gdt = SystemInfo.graphicsDeviceType;
+            var glLike = gdt == GraphicsDeviceType.OpenGLES3 || gdt == GraphicsDeviceType.OpenGLCore || gdt == GraphicsDeviceType.Metal;
 
             for (var i = 0; i < chain.cfg.passes.Length; i++)
             {

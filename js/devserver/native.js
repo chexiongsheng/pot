@@ -5,6 +5,7 @@
  *   win64    Plugins/Windows/x86_64/pot_gfx.dll        ← CMake + MSVC 编译 native/pot_gfx（不入库）
  *   webgl    Plugins/WebGL/pot_gfx/*.cpp|*.h           ← sync-webgl.js 从 native/pot_gfx/src 同步源码（Unity 用 emscripten 编译）
  *   android  Plugins/Android/arm64-v8a/libpot_gfx.so   ← CMake + Unity 自带 NDK + Ninja 精简构建（只有 GLES3 后端，不入库）
+ *   macos    Plugins/macOS/pot_gfx.bundle              ← CMake + Xcode 命令行工具（clang）编译，arm64+x86_64 通用包，Metal 后端（不入库）
  *
  * 只检查是否存在，不比较新旧：改了 native/pot_gfx/src 后用 `pot native --platform win64 --force` 重建。
  */
@@ -17,6 +18,7 @@ const NATIVE = path.join(REPO, 'native/pot_gfx')
 const PLUGINS = path.join(REPO, 'packages/com.pot.core/Plugins')
 const WIN64_DLL = path.join(PLUGINS, 'Windows/x86_64/pot_gfx.dll')
 const ANDROID_SO = path.join(PLUGINS, 'Android/arm64-v8a/libpot_gfx.so')
+const MACOS_BUNDLE = path.join(PLUGINS, 'macOS/pot_gfx.bundle')
 /** 仓库内自带的 Unity PluginAPI 头文件（IUnityInterface.h / IUnityGraphics.h），找不到 Unity 时用它 */
 const BUNDLED_PLUGIN_API = path.join(PLUGINS, 'WebGL/pot_gfx')
 
@@ -30,6 +32,7 @@ function requiredFiles(platform) {
   if (platform === 'win64') return [WIN64_DLL]
   if (platform === 'webgl') return webglFiles()
   if (platform === 'android') return [ANDROID_SO]
+  if (platform === 'macos') return [MACOS_BUNDLE]
   return []
 }
 
@@ -37,12 +40,17 @@ function missingFiles(platform) {
   return requiredFiles(platform).filter((f) => !fs.existsSync(f))
 }
 
-/** Unity.exe → Editor/Data/PluginAPI；没有则用仓库自带头文件 */
-function pluginApiDir(unity) {
+/**
+ * Unity.exe → Editor/Data/PluginAPI；macOS 的 Unity.app/Contents/MacOS/Unity → Contents/PluginAPI；
+ * 没有则用仓库自带头文件（requireMetal 时不行：自带的没有 IUnityGraphicsMetal.h）
+ */
+function pluginApiDir(unity, requireMetal = false) {
   if (unity) {
-    const dir = path.join(path.dirname(unity), 'Data/PluginAPI')
-    if (fs.existsSync(path.join(dir, 'IUnityGraphics.h'))) return dir
+    for (const dir of [path.join(path.dirname(unity), 'Data/PluginAPI'), path.join(path.dirname(unity), '../PluginAPI')]) {
+      if (fs.existsSync(path.join(dir, 'IUnityGraphics.h'))) return path.resolve(dir)
+    }
   }
+  if (requireMetal) throw new Error('找不到 Unity 的 PluginAPI（需要 IUnityGraphicsMetal.h），用 --unity 指定 Unity.app 路径')
   if (fs.existsSync(path.join(BUNDLED_PLUGIN_API, 'IUnityGraphics.h'))) return BUNDLED_PLUGIN_API
   throw new Error('找不到 Unity PluginAPI 头文件（IUnityGraphics.h），用 --unity 指定 Unity.exe')
 }
@@ -66,6 +74,20 @@ function buildWin64(unity, say) {
   if (!dll) throw new Error(`构建完成但没找到 pot_gfx.dll（${build}）`)
   fs.mkdirSync(path.dirname(WIN64_DLL), { recursive: true })
   fs.copyFileSync(dll, WIN64_DLL)
+}
+
+/** macOS：CMake（Unix Makefiles）+ clang，arm64;x86_64 通用 bundle，D3D11 不编、Metal 后端编入 */
+function buildMacos(unity, say) {
+  if (process.platform !== 'darwin') throw new Error('pot_gfx.bundle 只能在 macOS 上构建（需要 CMake 与 Xcode 命令行工具）')
+  const build = path.join(NATIVE, 'build-macos')
+  const api = pluginApiDir(unity, true)
+  run('cmake', ['-S', NATIVE, '-B', build, '-DCMAKE_BUILD_TYPE=Release', `-DUNITY_PLUGIN_API=${api}`], say)
+  run('cmake', ['--build', build, '--config', 'Release', '--target', 'pot_gfx', '--parallel'], say)
+  const bundle = [path.join(build, 'pot_gfx.bundle'), path.join(build, 'Release/pot_gfx.bundle')].find((f) => fs.existsSync(f))
+  if (!bundle) throw new Error(`构建完成但没找到 pot_gfx.bundle（${build}）`)
+  fs.mkdirSync(path.dirname(MACOS_BUNDLE), { recursive: true })
+  fs.rmSync(MACOS_BUNDLE, { recursive: true, force: true })
+  fs.cpSync(bundle, MACOS_BUNDLE, { recursive: true })
 }
 
 function syncWebgl(unity) {
@@ -114,10 +136,23 @@ function ensureNative(platform, options = {}) {
   if (platform === 'win64') buildWin64(options.unity, say)
   else if (platform === 'webgl') syncWebgl(options.unity)
   else if (platform === 'android') buildAndroid(options.unity, say)
+  else if (platform === 'macos') buildMacos(options.unity, say)
   const still = missingFiles(platform)
   if (still.length) throw new Error(`原生库构建后仍缺少：${still.map(rel).join('、')}`)
   say(`[native] ${platform} 完成（${Math.round((Date.now() - started) / 1000)} 秒）`)
   return { platform, built: true, files: requiredFiles(platform) }
 }
 
-module.exports = { ensureNative, requiredFiles, missingFiles, WIN64_DLL, ANDROID_SO }
+/** native 命令的平台名：release 的平台（win64 / android / webgl）之外再接受 macos（mac / osx） */
+function normalizeNativePlatform(name) {
+  const p = String(name).trim().toLowerCase()
+  if (['macos', 'mac', 'osx', 'darwin'].includes(p)) return 'macos'
+  return require('./release').normalizePlatform(name)
+}
+
+/** 当前主机默认构建的平台 */
+function hostPlatform() {
+  return process.platform === 'darwin' ? 'macos' : 'win64'
+}
+
+module.exports = { ensureNative, requiredFiles, missingFiles, normalizeNativePlatform, hostPlatform, WIN64_DLL, ANDROID_SO, MACOS_BUNDLE }

@@ -1,7 +1,7 @@
 // pot_gfx：Unity 原生渲染插件入口与 C 导出（C# 侧 Pot.PotGfx 调用）。
 //
 // 两种构建：
-// - 桌面（CMake）：带 glslang/SPIRV-Cross 编译器和编译缓存（D3D11 需要先转 HLSL）；
+// - 桌面（CMake）：带 glslang/SPIRV-Cross 编译器和编译缓存（D3D11 先转 HLSL，macOS Metal 先转 MSL）；
 // - WebGL（__EMSCRIPTEN__，由 Unity 的 emscripten 编译 Plugins/WebGL 下的源码）与 Android（NDK + CMake 精简构建）：
 //   不带编译器，GLES3 后端直接把游戏源码交给驱动编译。WebGL 没有动态库加载，C# 先调 PotGfx_RegisterPlugin 注册渲染插件。
 // Unity 头文件用引号：WebGL 版的头文件和源码在同一目录（桌面版由 CMake 按 UNITY_PLUGIN_API 提供）。
@@ -42,6 +42,9 @@ static void UNITY_INTERFACE_API OnDeviceEvent(UnityGfxDeviceEventType type) {
         UnityGfxRenderer r = g_graphics->GetRenderer();
 #if defined(_WIN32)
         if (r == kUnityGfxRendererD3D11) g_backend = CreateBackendD3D11(g_unity);
+#endif
+#if defined(__APPLE__)
+        if (r == kUnityGfxRendererMetal) g_backend = CreateBackendMetal(g_unity);
 #endif
 #if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
         if (r == kUnityGfxRendererOpenGLES30) g_backend = CreateBackendGLES3();
@@ -115,7 +118,7 @@ static bool Passthrough() { return g_backend && g_backend->ShaderTarget() == Tar
 
 extern "C" {
 
-// 当前后端名（"d3d11" / "gles3"）；不支持的图形 API 返回空串
+// 当前后端名（"d3d11" / "metal" / "gles3"）；不支持的图形 API 返回空串
 UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Backend() {
     return g_backend ? g_backend->Name() : "";
 }
@@ -124,7 +127,7 @@ UNITY_INTERFACE_EXPORT const char* UNITY_INTERFACE_API PotGfx_Backend() {
 // 设置了缓存目录时先按源码 hash 查缓存，命中则跳过全部编译步骤。
 UNITY_INTERFACE_EXPORT int UNITY_INTERFACE_API PotGfx_Create(const char* vs, const char* fs) {
     if (!g_backend) {
-        g_info = "当前图形 API 不支持运行时着色器（pot_gfx 目前支持 D3D11、GLES3/WebGL2）";
+        g_info = "当前图形 API 不支持运行时着色器（pot_gfx 目前支持 D3D11、Metal、GLES3/WebGL2）";
         return 0;
     }
     std::string vsrc = vs ? vs : "", fsrc = fs ? fs : "";

@@ -5,6 +5,7 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <spirv_hlsl.hpp>
 #include <spirv_glsl.hpp>
+#include <spirv_msl.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -52,6 +53,15 @@ static std::unique_ptr<spirv_cross::CompilerGLSL> MakeCompiler(std::vector<uint3
         ho.shader_model = 50;
         h->set_hlsl_options(ho);
         c = std::move(h);
+    } else if (target == Target::MSL21) {
+        auto m = std::make_unique<spirv_cross::CompilerMSL>(std::move(spirv));
+        spirv_cross::CompilerMSL::Options mo;
+        mo.platform = spirv_cross::CompilerMSL::Options::macOS;
+        mo.set_msl_version(2, 1);
+        // buffer/texture/sampler 索引直接用 binding：统一块 buffer(0)，贴图与采样器同号，和 D3D11 的寄存器约定一致
+        mo.enable_decoration_binding = true;
+        m->set_msl_options(mo);
+        c = std::move(m);
     } else {
         c = std::make_unique<spirv_cross::CompilerGLSL>(std::move(spirv));
         spirv_cross::CompilerGLSL::Options o;
@@ -65,7 +75,7 @@ static std::unique_ptr<spirv_cross::CompilerGLSL> MakeCompiler(std::vector<uint3
 }
 
 // 阶段间变量按名字配对（GLSL 链接语义）：片元不读的顶点输出屏蔽掉，两边按名字统一重排 location。
-// D3D11 要求 VS 输出与 PS 输入签名寄存器一致，所以两边必须是同一组变量、同一顺序。
+// D3D11 要求 VS 输出与 PS 输入签名寄存器一致（Metal 按 [[user(locnN)]] 配对，同样适用），所以两边必须是同一组变量、同一顺序。
 static bool LinkVaryings(spirv_cross::CompilerGLSL& vsc, spirv_cross::CompilerGLSL& fsc, std::string& err) {
     auto vres = vsc.get_shader_resources();
     auto fres = fsc.get_shader_resources();
@@ -103,7 +113,7 @@ static bool LinkVaryings(spirv_cross::CompilerGLSL& vsc, spirv_cross::CompilerGL
 static std::string Finish(spirv_cross::CompilerGLSL& c, Target target, StageReflection& refl, std::string& err) {
     try {
         Reflect(c, refl);
-        if (target != Target::HLSL50) c.build_combined_image_samplers();
+        if (target == Target::GLSLES300) c.build_combined_image_samplers();
         return c.compile();
     } catch (const std::exception& e) {
         err = std::string("SPIRV-Cross: ") + e.what();

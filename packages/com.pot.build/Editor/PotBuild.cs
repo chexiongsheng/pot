@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -64,7 +65,7 @@ namespace Pot.Build
                 var stage = Arg("potStage");
                 var game = Arg("potGame");
                 if (string.IsNullOrEmpty(stage) && string.IsNullOrEmpty(game))
-                    throw new Exception("用法：-executeMethod Pot.Build.PotBuild.Build -potStage=<暂存目录>|-potGame=<游戏目录> [-potOut=<输出路径>] [-potTarget=Win64|Android|WebGL]");
+                    throw new Exception("用法：-executeMethod Pot.Build.PotBuild.Build -potStage=<暂存目录>|-potGame=<游戏目录> [-potOut=<输出路径>] [-potTarget=Win64|Android|WebGL|OSXUniversal]");
                 var targetArg = Arg("potTarget");
                 var target = string.IsNullOrEmpty(targetArg) ? EditorUserBuildSettings.activeBuildTarget : ParseTarget(targetArg);
                 if (string.IsNullOrEmpty(stage)) stage = StageGame(game);
@@ -319,6 +320,7 @@ namespace Pot.Build
             // pot_gfx 的桌面后端是 D3D11
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64, new[] { UnityEngine.Rendering.GraphicsDeviceType.Direct3D11 });
+            ConfigureMacGfx();
 
             // Android：IL2CPP + ARM64（Google Play 要求 64 位）；版本号
             PlayerSettings.Android.bundleVersionCode = Math.Max(1, config.versionCode);
@@ -351,6 +353,7 @@ namespace Pot.Build
                 case BuildTarget.StandaloneWindows64:
                     return "Win64 运行时着色器只有 D3D11 后端；若改用 D3D12 / Vulkan 会退回普通材质";
                 case BuildTarget.WebGL:
+                case BuildTarget.StandaloneOSX:
                     return null;
                 case BuildTarget.Android:
                     return "Android 运行时着色器只有 GLES3 后端（arm64-v8a），未在真机上做过完整验证";
@@ -368,6 +371,22 @@ namespace Pot.Build
             PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
             PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
             PlayerSettings.SetMobileMTRendering(BuildTargetGroup.Android, false);
+        }
+
+        /// <summary>macOS 的 pot_gfx 后端是 Metal；IL2CPP 出 arm64 + x86_64 通用包</summary>
+        public static void ConfigureMacGfx()
+        {
+            PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneOSX, false);
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneOSX, new[] { UnityEngine.Rendering.GraphicsDeviceType.Metal });
+            // UnityEditor.OSXStandalone 在 Mac Build Support 模块里，Windows 未装该模块时直接引用会编译失败，故用反射
+            Type ubs = null;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                ubs = asm.GetType("UnityEditor.OSXStandalone.UserBuildSettings");
+                if (ubs != null) break;
+            }
+            var arch = ubs != null ? ubs.GetProperty("architecture", BindingFlags.Public | BindingFlags.Static) : null;
+            if (arch != null) arch.SetValue(null, Enum.Parse(arch.PropertyType, "x64ARM64"));
         }
 
         public static void CreateBootScene()
@@ -418,7 +437,7 @@ namespace Pot.Build
                 case "android": return BuildTarget.Android;
                 case "ios": return BuildTarget.iOS;
                 case "webgl": return BuildTarget.WebGL;
-                case "osx": case "mac": return BuildTarget.StandaloneOSX;
+                case "osx": case "mac": case "macos": case "osxuniversal": return BuildTarget.StandaloneOSX;
                 case "linux": return BuildTarget.StandaloneLinux64;
                 default: throw new Exception("未知目标平台：" + name);
             }
@@ -431,6 +450,7 @@ namespace Pot.Build
                 case BuildTarget.StandaloneWindows64: return "win64";
                 case BuildTarget.Android: return "android";
                 case BuildTarget.WebGL: return "webgl";
+                case BuildTarget.StandaloneOSX: return "macos";
                 default: return target.ToString().ToLowerInvariant();
             }
         }
@@ -442,6 +462,7 @@ namespace Pot.Build
             {
                 case BuildTarget.StandaloneWindows64: return ".exe";
                 case BuildTarget.Android: return ".apk";
+                case BuildTarget.StandaloneOSX: return ".app";
                 default: return "";
             }
         }

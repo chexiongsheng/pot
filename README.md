@@ -25,7 +25,7 @@
 
 ## 快速开始
 
-环境：Node 22、Unity 2022.3、Puerts 3.0.3（core + v8）。
+环境：Node 22、Unity 2022.3、Puerts 3.0.4（core + v8）。
 
 ```powershell
 # 1. 安装 Puerts 到 third_party（目录中需含 core/ 和 v8/）

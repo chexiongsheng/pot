@@ -1,5 +1,5 @@
 // pot_shaderc：离线检查着色器（与 Runner 内置同一套编译器）。
-// 用法：pot_shaderc <vertex.glsl> <fragment.glsl> [--hlsl|--gles]
+// 用法：pot_shaderc <vertex.glsl> <fragment.glsl> [--hlsl|--gles|--msl]
 // 退出码 0 成功；输出反射 JSON（--hlsl/--gles 时另输出生成的源码）
 #include <cstdio>
 #include <fstream>
@@ -24,7 +24,7 @@ static bool ReadFile(const char* path, std::string& out) {
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "用法：pot_shaderc <vertex> <fragment> [--hlsl|--gles]\n";
+        std::cerr << "用法：pot_shaderc <vertex> <fragment> [--hlsl|--gles|--msl]\n";
         return 2;
     }
     std::string vs, fs;
@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string mode = argc > 3 ? argv[3] : "";
-    pot::Target target = mode == "--gles" ? pot::Target::GLSLES300 : pot::Target::HLSL50;
+    pot::Target target = mode == "--gles" ? pot::Target::GLSLES300 : mode == "--msl" ? pot::Target::MSL21 : pot::Target::HLSL50;
     pot::CompiledProgram p;
     if (!pot::CompileProgram(vs, fs, target, p)) {
         std::cerr << p.error << "\n";

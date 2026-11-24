@@ -1,4 +1,4 @@
-// pot_gfx 后端接口：每种图形 API 一个实现（D3D11、GLES3/WebGL2；Metal/Vulkan 待补）
+// pot_gfx 后端接口：每种图形 API 一个实现（D3D11、Metal、GLES3/WebGL2；Vulkan 待补）
 #pragma once
 #include <cstdint>
 #include <cstring>
@@ -52,12 +52,14 @@ public:
     virtual void Render(const uint8_t* data, size_t len) = 0;
     // 渲染线程调用，紧接着的一次 Render 画到这张贴图（原生句柄，宽高）。
     // GL 上 Unity 的 CommandBuffer.SetRenderTarget 是惰性的，插件事件发生时 FBO 还没切换，后端须自己绑定；
-    // D3D11 在事件前已绑定好，忽略即可
+    // D3D11 在事件前已绑定好，忽略即可；Metal 据此自建渲染通道
     virtual void SetNextTarget(int64_t tex, int width, int height) { (void)tex; (void)width; (void)height; }
     virtual void Shutdown() = 0;
 };
 
 Backend* CreateBackendD3D11(void* unityInterfaces);
+// macOS Metal（backend_metal.mm，Objective-C++）
+Backend* CreateBackendMetal(void* unityInterfaces);
 // GLES3 / WebGL2：ShaderTarget 为 GLSLES300 时 plugin.cpp 不走 glslang，CreateProgram 收到的 vsCode/fsCode 是游戏原始源码，
 // 由后端交给驱动编译并填写反射（p.vs/p.fs）
 Backend* CreateBackendGLES3();

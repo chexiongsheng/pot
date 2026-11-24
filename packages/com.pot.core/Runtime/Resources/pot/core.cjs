@@ -6365,7 +6365,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     get unsupported() {
       return this.backend ? "" : this._host.engine.gfxUnsupported?.() ?? "当前平台没有 pot_gfx 后端";
     }
-    /** 后端名（d3d11 / gles3）；为空表示当前平台不支持运行时着色器，原因见 unsupported */
+    /** 后端名（d3d11 / metal / gles3）；为空表示当前平台不支持运行时着色器，原因见 unsupported */
     get backend() {
       return this._host.engine.gfxBackend();
     }

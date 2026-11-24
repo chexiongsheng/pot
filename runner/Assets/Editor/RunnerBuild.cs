@@ -8,7 +8,7 @@ using UnityEngine;
 
 /// <summary>
 /// Runner 构建。Runner 场景是空的：PotRunner 通过 RuntimeInitializeOnLoadMethod 自动创建。
-/// batchmode：-executeMethod RunnerBuild.BuildWin64 [-potOut=Builds/Win64/PotRunner.exe]
+/// batchmode：-executeMethod RunnerBuild.BuildWin64|BuildAndroid|BuildMacOS [-potOut=Builds/Win64/PotRunner.exe]
 /// </summary>
 public static class RunnerBuild
 {
@@ -24,6 +24,12 @@ public static class RunnerBuild
     public static void BuildAndroid()
     {
         Build(BuildTarget.Android, "Builds/Android/PotRunner.apk");
+    }
+
+    [MenuItem("pot/Build Runner (macOS)", false, 22)]
+    public static void BuildMacOS()
+    {
+        Build(BuildTarget.StandaloneOSX, "Builds/macOS/PotRunner.app");
     }
 
     static void Build(BuildTarget target, string defaultOut)
@@ -54,6 +60,8 @@ public static class RunnerBuild
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             // pot_gfx：Android 只有 GLES3 后端（单线程渲染）
             Pot.Build.PotBuild.ConfigureAndroidGfx();
+            // pot_gfx：macOS 只有 Metal 后端，出 arm64 + x86_64 通用包
+            Pot.Build.PotBuild.ConfigureMacGfx();
             AssetDatabase.SaveAssets();
 
             var output = Arg("potOut") ?? defaultOut;

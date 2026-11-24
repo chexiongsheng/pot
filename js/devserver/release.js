@@ -4,7 +4,7 @@
  * - stageGame：TS 编译为 bundle.cjs（buildRelease）→ <stage>/game/**，再写 <stage>/release.json 与图标
  * - findUnity：--unity / 环境变量 POT_UNITY / 按 player 工程的 Unity 版本在 Hub 安装目录里找
  * - releaseGame：检查原生库（native.js）→ 暂存 → Unity -batchmode -executeMethod Pot.Build.PotBuild.Build → 汇报产物与日志
- * - releaseRunner：检查原生库 → Unity -batchmode -executeMethod RunnerBuild.BuildWin64|BuildAndroid（runner/ 工程）
+ * - releaseRunner：检查原生库 → Unity -batchmode -executeMethod RunnerBuild.BuildWin64|BuildAndroid|BuildMacOS（runner/ 工程）
  *
  * manifest.json 中与发布相关的字段（都可省略）：
  *   name / id / version          产品名 / 包名缺省来源 / 版本
@@ -34,13 +34,19 @@ const PLATFORMS = {
   win64: { unity: 'Win64', ext: '.exe' },
   android: { unity: 'Android', ext: '.apk' },
   webgl: { unity: 'WebGL', ext: '' },
+  macos: { unity: 'OSXUniversal', ext: '.app' },
+}
+
+/** 不指定 --platform 时：macOS 主机为 macos，其他为 win64 */
+function defaultPlatform() {
+  return process.platform === 'darwin' ? 'macos' : 'win64'
 }
 
 function normalizePlatform(name) {
   const key = String(name ?? '').toLowerCase()
-  const alias = { windows: 'win64', win: 'win64', apk: 'android', web: 'webgl' }
+  const alias = { windows: 'win64', win: 'win64', apk: 'android', web: 'webgl', mac: 'macos', osx: 'macos', darwin: 'macos' }
   const platform = alias[key] ?? key
-  if (!PLATFORMS[platform]) throw new Error(`不支持的平台：${name}（可选 win64 | android | webgl）`)
+  if (!PLATFORMS[platform]) throw new Error(`不支持的平台：${name}（可选 win64 | android | webgl | macos）`)
   return platform
 }
 
@@ -130,7 +136,7 @@ function findUnity(explicit, project = DEFAULT_PROJECT) {
   if (given) {
     let exe = path.resolve(given)
     if (fs.existsSync(exe) && fs.statSync(exe).isDirectory()) {
-      const inner = [path.join(exe, 'Unity.exe'), path.join(exe, 'Editor/Unity.exe'), path.join(exe, 'Unity.app/Contents/MacOS/Unity')]
+      const inner = [path.join(exe, 'Unity.exe'), path.join(exe, 'Editor/Unity.exe'), path.join(exe, 'Unity.app/Contents/MacOS/Unity'), path.join(exe, 'Contents/MacOS/Unity')]
       exe = inner.find((f) => fs.existsSync(f)) ?? exe
     }
     if (!fs.existsSync(exe)) throw new Error(`找不到 Unity：${exe}`)
@@ -172,6 +178,7 @@ function projectLocked(project) {
 function outputPath(outDir, platform, config) {
   if (platform === 'win64') return path.join(outDir, `${config.fileName}.exe`)
   if (platform === 'android') return path.join(outDir, `${config.fileName}-${config.version}.apk`)
+  if (platform === 'macos') return path.join(outDir, `${config.fileName}.app`)
   return outDir
 }
 
@@ -288,17 +295,17 @@ async function runUnity({ unity, project, platform, args, log, say }) {
 }
 
 /** Runner 支持的平台 → RunnerBuild 入口 */
-const RUNNER_METHODS = { win64: 'RunnerBuild.BuildWin64', android: 'RunnerBuild.BuildAndroid' }
+const RUNNER_METHODS = { win64: 'RunnerBuild.BuildWin64', android: 'RunnerBuild.BuildAndroid', macos: 'RunnerBuild.BuildMacOS' }
 
 /**
  * 构建 Runner（runner/ 工程）。options：{ platform, unity, out, quiet, log }
- * 产物：win64 → <out>/PotRunner.exe；android → <out>/PotRunner.apk
+ * 产物：win64 → <out>/PotRunner.exe；android → <out>/PotRunner.apk；macos → <out>/PotRunner.app
  * 返回 { ok, platform, output, log, seconds, errors? }
  */
 async function releaseRunner(options = {}) {
   const started = Date.now()
-  const platform = normalizePlatform(options.platform ?? 'win64')
-  if (!RUNNER_METHODS[platform]) throw new Error(`Runner 不支持平台 ${platform}（可选 win64 | android）`)
+  const platform = normalizePlatform(options.platform ?? defaultPlatform())
+  if (!RUNNER_METHODS[platform]) throw new Error(`Runner 不支持平台 ${platform}（可选 win64 | android | macos）`)
   const project = path.join(REPO, 'runner')
   const unity = findUnity(options.unity, project)
   if (projectLocked(project)) throw new Error(`工程 ${project} 正被 Unity 编辑器打开，请先关闭编辑器，或在编辑器里用菜单 pot/Build Runner`)
@@ -336,4 +343,4 @@ function removeDoNotShip(dir) {
   }
 }
 
-module.exports = { resolveRelease, stageGame, findUnity, releaseGame, releaseRunner, toPackageId, toVersionCode, normalizePlatform, PLATFORMS }
+module.exports = { defaultPlatform, resolveRelease, stageGame, findUnity, releaseGame, releaseRunner, toPackageId, toVersionCode, normalizePlatform, PLATFORMS }
