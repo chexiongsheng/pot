@@ -21,6 +21,12 @@ export * from './canvas'
 export * from './plugins'
 export * from './runtime'
 export * from './unity'
+export * from './world/node'
+export { createElement } from './jsx-runtime'
+import * as jsxRuntime from './jsx-runtime'
+import * as jsxDevRuntime from './jsx-dev-runtime'
+/** 模块表里的 @pot/core/jsx-runtime、@pot/core/jsx-dev-runtime */
+export { jsxRuntime, jsxDevRuntime }
 
 import type { Context } from 'cordis'
 

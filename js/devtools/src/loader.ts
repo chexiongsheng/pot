@@ -2,9 +2,10 @@
  * 源码加载器（仅 Runner / 开发期）：直接读取游戏目录里的 TS/JS 源码，用 sucrase 转译成 CommonJS 后执行。
  * 不需要 Dev Server、不需要预先构建；发布包里没有 devtools，单元改从 bundle.cjs 读取。
  *
- * - 单元：src/plugins/<name>.ts（或 .js）。每次 load 都重新执行单元文件，得到新的模块对象（热重载需要）。
+ * - 单元：src/plugins/<name>.ts（或 .tsx、.js）。每次 load 都重新执行单元文件，得到新的模块对象（热重载需要）。
  * - 共享模块：单元 import 的相对路径文件（如 src/lib/math.ts），按路径缓存，同一时刻只有一个实例。
- * - require：@pot/core、cordis 映射到运行时；相对路径依次尝试 原样 / .ts / .js / .json / /index.ts / /index.js。
+ * - require：@pot/core、cordis 及 jsx 子路径映射到运行时；相对路径依次尝试 原样 / .ts / .tsx / .js / .json / /index.ts / /index.tsx / /index.js。
+ * - .tsx 走两遍转译：先去掉类型和 JSX（保留 ESM），再拆多变量导出、转 CommonJS。splitMultiExports 不认识 JSX。
  * - sucrase 保留行号，sourceURL 为游戏内相对路径，报错栈直接指向 TS 源码行。
  * - 依赖图：invalidate(paths) 返回受影响的单元，供热重载使用。
  */
@@ -23,8 +24,8 @@ interface ModuleRecord {
 }
 
 const UNIT_DIR = 'src/plugins/'
-const UNIT_EXTS = ['.ts', '.js']
-const RESOLVE_SUFFIXES = ['', '.ts', '.js', '.json', '/index.ts', '/index.js']
+const UNIT_EXTS = ['.ts', '.tsx', '.js']
+const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.json', '/index.ts', '/index.tsx', '/index.js']
 
 export function normalizePath(path: string) {
   const out: string[] = []
@@ -58,8 +59,21 @@ export function transpile(code: string, path: string) {
     JSON.parse(code)
     return `module.exports = ${code}`
   }
-  const transforms: any[] = path.endsWith('.ts') || path.endsWith('.tsx') ? ['typescript', 'imports'] : ['imports']
   try {
+    if (path.endsWith('.tsx')) {
+      // 第一遍：去掉类型与 JSX，保留 ESM；开发期用 jsxDEV，节点带源文件与行号
+      const esm = transform(code, {
+        transforms: ['typescript', 'jsx'],
+        jsxRuntime: 'automatic',
+        jsxImportSource: '@pot/core',
+        disableESTransforms: true,
+        filePath: path,
+        production: false,
+      }).code
+      // 第二遍：此时已没有 JSX，文本级的多变量导出拆分是安全的
+      return transform(splitMultiExports(esm), { transforms: ['imports'], disableESTransforms: true, filePath: path, production: true }).code
+    }
+    const transforms: any[] = path.endsWith('.ts') ? ['typescript', 'imports'] : ['imports']
     return transform(splitMultiExports(code), { transforms, disableESTransforms: true, filePath: path, production: true }).code
   } catch (error: any) {
     const loc = error?.loc ? `:${error.loc.line}:${error.loc.column + 1}` : ''
@@ -68,7 +82,7 @@ export function transpile(code: string, path: string) {
 }
 
 /** 转译器版本：transpile() 或 sucrase、multi-export 的行为变了就改它，旧缓存自动失效 */
-export const TRANSPILER_ID = 'sucrase-3.35.1/multi-export-1'
+export const TRANSPILER_ID = 'sucrase-3.35.1/multi-export-1/tsx-2pass-1'
 /** 宿主持久缓存的 bucket */
 export const TRANSPILE_BUCKET = 'js'
 
@@ -124,7 +138,7 @@ export class SourceLoader implements UnitLoader {
     const base = normalizePath(`${dirname(from)}/${id}`)
     for (const suffix of RESOLVE_SUFFIXES) {
       const path = base + suffix
-      if (suffix === '' && !/\.(ts|js|json)$/.test(path)) continue
+      if (suffix === '' && !/\.(tsx?|js|json)$/.test(path)) continue
       const code = this._read(path)
       if (code !== null) return { path, code }
     }

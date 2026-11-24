@@ -13,7 +13,8 @@ const { spawnSync } = require('child_process')
 const externalPot = {
   name: 'pot-external',
   setup(build) {
-    build.onResolve({ filter: /^(@pot\/core|cordis)$/ }, () => ({ path: '@pot/core', external: true }))
+    // jsx 子路径保留各自的名字，运行时的模块表里有对应项
+    build.onResolve({ filter: /^(@pot\/core(\/jsx-runtime|\/jsx-dev-runtime)?|cordis)$/ }, (args) => ({ path: args.path === 'cordis' ? '@pot/core' : args.path, external: true }))
   },
 }
 
@@ -34,8 +35,8 @@ function listUnits(gameDir) {
   const dir = path.join(gameDir, 'src/plugins')
   if (!fs.existsSync(dir)) return []
   return fs.readdirSync(dir)
-    .filter((f) => /\.(ts|js)$/.test(f) && !f.endsWith('.d.ts'))
-    .map((f) => ({ name: f.replace(/\.(ts|js)$/, ''), file: path.join(dir, f) }))
+    .filter((f) => /\.(tsx?|js)$/.test(f) && !f.endsWith('.d.ts'))
+    .map((f) => ({ name: f.replace(/\.(tsx?|js)$/, ''), file: path.join(dir, f) }))
 }
 
 function formatErrors(error) {
@@ -68,6 +69,8 @@ async function bundleUnits(gameDir) {
     charset: 'utf8',
     write: false,
     logLevel: 'silent',
+    jsx: 'automatic',
+    jsxImportSource: '@pot/core',
     plugins: [externalPot],
   })
   return { code: result.outputFiles[0].text, units: units.map((u) => u.name) }
@@ -127,7 +130,7 @@ async function checkGame(gameDir) {
   const names = new Set(listUnits(gameDir).map((u) => u.name))
   for (const item of manifest.plugins ?? []) {
     const name = typeof item === 'string' ? item : item?.name
-    if (!names.has(name)) errors.push(`manifest.plugins 中的 "${name}" 没有对应的 src/plugins/${name}.ts`)
+    if (!names.has(name)) errors.push(`manifest.plugins 中的 "${name}" 没有对应的 src/plugins/${name}.ts（或 .tsx）`)
   }
   try {
     await bundleUnits(gameDir)

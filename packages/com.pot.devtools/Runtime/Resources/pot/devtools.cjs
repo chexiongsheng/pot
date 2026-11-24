@@ -22036,8 +22036,8 @@ ${namesToRegister.map(
   // devtools/src/loader.ts
   var import_core3 = __toESM(require_pot());
   var UNIT_DIR = "src/plugins/";
-  var UNIT_EXTS = [".ts", ".js"];
-  var RESOLVE_SUFFIXES = ["", ".ts", ".js", ".json", "/index.ts", "/index.js"];
+  var UNIT_EXTS = [".ts", ".tsx", ".js"];
+  var RESOLVE_SUFFIXES = ["", ".ts", ".tsx", ".js", ".json", "/index.ts", "/index.tsx", "/index.js"];
   function normalizePath(path) {
     const out = [];
     for (const part of path.replace(/\\/g, "/").split("/")) {
@@ -22066,15 +22066,26 @@ ${namesToRegister.map(
       JSON.parse(code);
       return `module.exports = ${code}`;
     }
-    const transforms = path.endsWith(".ts") || path.endsWith(".tsx") ? ["typescript", "imports"] : ["imports"];
     try {
+      if (path.endsWith(".tsx")) {
+        const esm = transform(code, {
+          transforms: ["typescript", "jsx"],
+          jsxRuntime: "automatic",
+          jsxImportSource: "@pot/core",
+          disableESTransforms: true,
+          filePath: path,
+          production: false
+        }).code;
+        return transform(splitMultiExports(esm), { transforms: ["imports"], disableESTransforms: true, filePath: path, production: true }).code;
+      }
+      const transforms = path.endsWith(".ts") ? ["typescript", "imports"] : ["imports"];
       return transform(splitMultiExports(code), { transforms, disableESTransforms: true, filePath: path, production: true }).code;
     } catch (error) {
       const loc = error?.loc ? `:${error.loc.line}:${error.loc.column + 1}` : "";
       throw new SyntaxError(`${path}${loc} ${error?.message ?? error}`);
     }
   }
-  var TRANSPILER_ID = "sucrase-3.35.1/multi-export-1";
+  var TRANSPILER_ID = "sucrase-3.35.1/multi-export-1/tsx-2pass-1";
   var TRANSPILE_BUCKET = "js";
   function transpileKey(code, path) {
     return (0, import_core3.hash)(TRANSPILER_ID, path, code) + (0, import_core3.hash)(code, path, TRANSPILER_ID);
@@ -22124,7 +22135,7 @@ ${namesToRegister.map(
       const base = normalizePath(`${dirname(from)}/${id}`);
       for (const suffix of RESOLVE_SUFFIXES) {
         const path = base + suffix;
-        if (suffix === "" && !/\.(ts|js|json)$/.test(path)) continue;
+        if (suffix === "" && !/\.(tsx?|js|json)$/.test(path)) continue;
         const code = this._read(path);
         if (code !== null) return { path, code };
       }

@@ -17,6 +17,8 @@ import { UIService } from './ui'
 import { AudioService } from './audio'
 import { GfxService } from './gfx'
 import { LoadingService } from './loading'
+import * as jsxRuntime from './jsx-runtime'
+import * as jsxDevRuntime from './jsx-dev-runtime'
 
 export const API_VERSION = '0.1'
 export const VERSION = '0.1.0'
@@ -99,7 +101,13 @@ export class Runtime {
   /** 安装核心服务 */
   async init() {
     const { root, host } = this
-    const modules = this.options.modules ?? { '@pot/core': (globalThis as any).pot, 'cordis': (globalThis as any).pot }
+    const pot = (globalThis as any).pot
+    const modules = this.options.modules ?? {
+      '@pot/core': pot,
+      'cordis': pot,
+      '@pot/core/jsx-runtime': jsxRuntime,
+      '@pot/core/jsx-dev-runtime': jsxDevRuntime,
+    }
     const install = (plugin: any) => root.plugin(plugin as any, undefined as never)
     await install(ClockService)
     await install(TimerService)

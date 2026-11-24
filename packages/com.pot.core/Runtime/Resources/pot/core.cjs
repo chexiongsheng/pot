@@ -41,6 +41,7 @@ var pot = (() => {
     Fiber: () => Fiber,
     FiberState: () => FiberState,
     Flow: () => Flow,
+    Fragment: () => Fragment,
     GfxService: () => GfxService,
     Inject: () => Inject,
     InputService: () => InputService,
@@ -50,6 +51,7 @@ var pot = (() => {
     LoggerLevel: () => LoggerLevel,
     LoggerService: () => LoggerService,
     MAX_VERTEX_INPUTS: () => MAX_VERTEX_INPUTS,
+    PREFAB: () => PREFAB,
     PluginsService: () => PluginsService,
     PostChain: () => PostChain,
     RegistryService: () => RegistryService,
@@ -75,6 +77,7 @@ var pot = (() => {
     compileModule: () => compileModule,
     composeError: () => composeError,
     createCallable: () => createCallable,
+    createElement: () => createElement,
     createRuntime: () => createRuntime,
     createUnit: () => createUnit,
     createUnityHost: () => createUnityHost,
@@ -88,17 +91,24 @@ var pot = (() => {
     estimateSize: () => estimateSize,
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
+    formatSource: () => formatSource,
     getPropertyDescriptor: () => getPropertyDescriptor,
     getTraceable: () => getTraceable,
     hash: () => hash,
     instanceLayout: () => instanceLayout,
     isBailed: () => isBailed,
     isConstructor: () => isConstructor,
+    isNode: () => isNode,
     isObject: () => isObject,
+    isPrefab: () => isPrefab,
     joinPrototype: () => joinPrototype,
+    jsxDevRuntime: () => jsx_dev_runtime_exports,
+    jsxRuntime: () => jsx_runtime_exports,
     layoutRects: () => layoutRects,
+    makeNode: () => makeNode,
     mapErrors: () => mapErrors,
     markFiber: () => markFiber,
+    nodeName: () => nodeName,
     parseColor: () => parseColor,
     parseCssColor: () => parseCssColor,
     parseFont: () => parseFont,
@@ -106,6 +116,7 @@ var pot = (() => {
     rayPlane: () => rayPlane,
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
+    sourcePrefix: () => sourcePrefix,
     symbols: () => symbols,
     threeChunks: () => threeChunks,
     unitOf: () => unitOf,
@@ -6769,6 +6780,78 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
+  // runtime/src/jsx-runtime.ts
+  var jsx_runtime_exports = {};
+  __export(jsx_runtime_exports, {
+    Fragment: () => Fragment,
+    createElement: () => createElement,
+    jsx: () => jsx,
+    jsxs: () => jsxs
+  });
+
+  // runtime/src/world/node.ts
+  var Fragment = /* @__PURE__ */ Symbol.for("pot.fragment");
+  var PREFAB = /* @__PURE__ */ Symbol.for("pot.prefab");
+  var Node = class {
+    constructor(type, key, props) {
+      __publicField(this, "type", type);
+      __publicField(this, "key", key);
+      __publicField(this, "props", props);
+    }
+  };
+  function makeNode(type, props, key, source) {
+    const node = new Node(type, key === void 0 || key === null ? null : String(key), props ?? {});
+    if (source) node.source = source;
+    return node;
+  }
+  function isNode(value) {
+    return value instanceof Node;
+  }
+  function isPrefab(value) {
+    return typeof value === "function" && value[PREFAB] === true;
+  }
+  function nodeName(node) {
+    const t = node.type;
+    if (typeof t === "string") return t;
+    if (t === Fragment) return "#fragment";
+    if (isPrefab(t)) return t.prefab;
+    return t.name || "anonymous";
+  }
+  function formatSource(source) {
+    return source ? `${source.file}:${source.line}` : "";
+  }
+  function sourcePrefix(source) {
+    return source ? `${formatSource(source)} ` : "";
+  }
+
+  // runtime/src/jsx-runtime.ts
+  function jsx(type, props, key) {
+    return makeNode(type, props, key);
+  }
+  var jsxs = jsx;
+  function createElement(type, config, ...children) {
+    const props = {};
+    let key;
+    for (const name in config ?? {}) {
+      if (name === "key") key = config[name];
+      else if (name !== "__self" && name !== "__source") props[name] = config[name];
+    }
+    if (children.length === 1) props.children = children[0];
+    else if (children.length > 1) props.children = children;
+    return makeNode(type, props, key);
+  }
+
+  // runtime/src/jsx-dev-runtime.ts
+  var jsx_dev_runtime_exports = {};
+  __export(jsx_dev_runtime_exports, {
+    Fragment: () => Fragment,
+    jsxDEV: () => jsxDEV
+  });
+  function jsxDEV(type, props, key, _isStatic, source, _self) {
+    const pos = source && source.fileName ? { file: source.fileName, line: source.lineNumber ?? 0, col: source.columnNumber ?? 0 } : void 0;
+    return makeNode(type, props, key, pos);
+  }
+
   // runtime/src/runtime.ts
   var API_VERSION = "0.1";
   var VERSION = "0.1.0";
@@ -6833,7 +6916,13 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     /** 安装核心服务 */
     async init() {
       const { root, host } = this;
-      const modules = this.options.modules ?? { "@pot/core": globalThis.pot, "cordis": globalThis.pot };
+      const pot = globalThis.pot;
+      const modules = this.options.modules ?? {
+        "@pot/core": pot,
+        "cordis": pot,
+        "@pot/core/jsx-runtime": jsx_runtime_exports,
+        "@pot/core/jsx-dev-runtime": jsx_dev_runtime_exports
+      };
       const install = (plugin) => root.plugin(plugin, void 0);
       await install(ClockService);
       await install(TimerService);
