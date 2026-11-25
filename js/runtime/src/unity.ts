@@ -9,6 +9,8 @@ import { createRuntime, Runtime } from './runtime'
 declare const CS: any
 
 export function createUnityHost(): Host {
+  /** Resources/pot/kits.json 的 files，第一次用到时解析 */
+  let bundledKits: Record<string, string> | null | undefined
   const Pot = CS.Pot
   const H = Pot.PotHost
   const FS = Pot.GameFS
@@ -24,6 +26,19 @@ export function createUnityHost(): Host {
     readText: (path) => {
       const text = FS.ReadText(path)
       return text === null || text === undefined ? null : text
+    },
+    readKit: (path) => {
+      const disk = FS.ReadKitFile(path)
+      if (disk !== null && disk !== undefined) return disk
+      if (bundledKits === undefined) {
+        const text = FS.KitsBundle()
+        try {
+          bundledKits = text ? JSON.parse(text).files ?? null : null
+        } catch {
+          bundledKits = null
+        }
+      }
+      return bundledKits?.[path] ?? null
     },
     cacheRead: (bucket, key) => {
       const text = FS.CacheRead(bucket, key)

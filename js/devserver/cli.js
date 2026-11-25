@@ -11,6 +11,7 @@
  *                                           在 Runner 里录制指令，停止时写成 pot test 的脚本（--reset 先清空存档重开）
  *   pot blocks [关键字] [--name 名字] [--dir 游戏目录] [--json]
  *                                           列出积木、预制件、界面标签、内置节点（系统级加游戏自写的），不需要 Runner
+ *   pot eject --kit <名字> [游戏目录]        把套件复制进游戏 src/kits/<名字>/ 并改写 import（之后归游戏所有）
  *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
  *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
  *   pot release <游戏目录> [--platform win64|android|webgl[,…]] [--unity Unity.exe] [--out 目录]
@@ -139,16 +140,24 @@ async function main() {
       const word = args[0]?.toLowerCase()
       const hit = word ? items.filter((i) => i.name.toLowerCase().includes(word) || String(i.about).toLowerCase().includes(word)) : items
       if (flags.json) return print(hit)
-      const KIND = { block: '积木', prefab: '预制件', ui: '界面', node: '节点' }
+      const KIND = { block: '积木', prefab: '预制件', ui: '界面', node: '节点', kit: '套件' }
       const brief = (i) => {
+        if (i.kind === 'kit') return [...i.blocks, ...i.prefabs].join(', ')
         if (i.kind === 'block') return Object.keys(i.props).join(', ')
         if (i.kind === 'prefab') return Object.keys(i.blocks).join(' + ') || '（空）'
         return Object.keys(i.props).filter((k) => !['at', 'w', 'h', 'grow', 'pad', 'hidden'].includes(k)).join(', ')
       }
-      console.log(game ? `游戏 ${game}（系统级 + 游戏自写）` : '系统级（不在用 defineGame 的游戏目录下）')
-      for (const i of hit) console.log(`[${i.layer}] ${KIND[i.kind]} ${i.name}：${i.about}${brief(i) ? `  {${brief(i)}}` : ''}`)
+      console.log(game ? `游戏 ${game}（系统级 + 套件 + 游戏自写）` : '系统级与套件（不在用 defineGame 的游戏目录下）')
+      for (const i of hit) {
+        const mark = i.kind === 'kit' ? (i.imported ? '（已引入）' : `（未引入：${i.usage}）`) : i.available ? '（未引入）' : ''
+        console.log(`[${i.layer}] ${KIND[i.kind]} ${i.name}${mark}：${i.about}${brief(i) ? `  {${brief(i)}}` : ''}`)
+      }
       console.log('详情：pot blocks --name <名字>')
       return
+    }
+    case 'eject': {
+      if (!flags.kit || flags.kit === true) return exitBy({ ok: false, error: '用法：pot eject --kit <名字> [游戏目录]' })
+      return exitBy(require('./eject').ejectKit(flags.kit, path.resolve(args[0] ?? '.')))
     }
     case 'build': {
       const { buildRelease } = require('./builder')

@@ -168,6 +168,11 @@ export interface Host {
   /** 读游戏文件（游戏目录相对路径，如 manifest.json、src/plugins/player.ts、data/levels/1.json）。不存在返回 null */
   readText(path: string): string | null
   /**
+   * 读套件文件（17.2）：path 为 kits 目录内的相对路径，如 topdown/index.ts。不存在返回 null。
+   * Unity 先读套件目录（-potKits、POT_KITS、编辑器下的 <工程>/../kits），再回退包里的 kits.json；不实现时不能引入套件
+   */
+  readKit?(path: string): string | null
+  /**
    * 持久缓存（Unity：persistentDataPath/cache/<bucket>/<key>.txt，可随时整体删除）。
    * bucket、key 只能含字母、数字、_、-，最长 64；不存在返回 null。旧宿主与 node 可不实现
    */

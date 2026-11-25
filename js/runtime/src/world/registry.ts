@@ -3,6 +3,7 @@
  * - defineBlock / definePrefab 只构造定义，不登记；登记由 Registry 完成（官方的在 WorldService 构造时，游戏的在 defineGame 里）。
  * - 同名登记按栈处理：后登记的覆盖先登记的（游戏覆盖官方），撤销后露出原来的。
  * - 积木的执行顺序：order 小的先，同 order 按名字第一次登记的先后（热重载后不变）。
+ * - 每个条目带来源（17.2）：system、kit:<套件名>、game，供 pot blocks 与冲突检查使用。
  */
 import type { Context } from 'cordis'
 import { PREFAB, isPrefab, makeNode } from './node'
@@ -55,9 +56,13 @@ export function definePrefab<P = any>(name: string, def: { is?: Prefab | string;
   return prefab
 }
 
+/** 登记来源：system、kit:<套件名>、game */
+export type RegistrySource = string
+
 interface Entry<T> {
   value: T
   token: object
+  source: RegistrySource
 }
 
 export class Registry {
@@ -69,22 +74,22 @@ export class Registry {
   version = 0
 
   /** 登记积木，返回撤销函数 */
-  addBlock(def: BlockDef): () => void {
+  addBlock(def: BlockDef, source: RegistrySource = 'game'): () => void {
     defineBlock(def)
     if (!this._seen.has(def.name)) this._seen.set(def.name, this._seen.size)
-    return this._push(this._blocks, def.name, def)
+    return this._push(this._blocks, def.name, def, source)
   }
 
   /** 登记预制件，返回撤销函数 */
-  addPrefab(prefab: Prefab): () => void {
+  addPrefab(prefab: Prefab, source: RegistrySource = 'game'): () => void {
     if (!isPrefab(prefab)) throw new Error('登记预制件：需要 definePrefab 的返回值')
-    return this._push(this._prefabs, prefab.prefab, prefab)
+    return this._push(this._prefabs, prefab.prefab, prefab, source)
   }
 
-  private _push<T>(map: Map<string, Entry<T>[]>, name: string, value: T) {
+  private _push<T>(map: Map<string, Entry<T>[]>, name: string, value: T, source: RegistrySource) {
     let stack = map.get(name)
     if (!stack) map.set(name, stack = [])
-    const entry = { value, token: {} }
+    const entry = { value, token: {}, source }
     stack.push(entry)
     this.version++
     return () => {
@@ -105,6 +110,12 @@ export class Registry {
   prefab(name: string): Prefab | undefined {
     const stack = this._prefabs.get(name)
     return stack?.[stack.length - 1].value
+  }
+
+  /** 栈顶条目的来源；没登记返回 undefined */
+  sourceOf(kind: 'block' | 'prefab', name: string): RegistrySource | undefined {
+    const stack = (kind === 'block' ? this._blocks : this._prefabs).get(name) as Entry<unknown>[] | undefined
+    return stack?.[stack.length - 1].source
   }
 
   /** 预制件链上的名字（从根到叶）；未知的预制件只返回它自己 */

@@ -8,6 +8,8 @@ import type { UIService } from '../ui'
 import type { PotChild, Prefab } from './node'
 import { isPrefab } from './node'
 import type { BlockDef } from './registry'
+import { expandKits, isKit, kitConflicts, mergeControls } from './kit'
+import type { Kit } from './kit'
 import { checkFlow } from './flow'
 import type { FlowDef } from './flow'
 import { unitOf } from '../units'
@@ -42,6 +44,8 @@ export type GameWorld<V> = World & { vars: V }
 export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   /** 全局变量及初值：WorldData.vars 里没有的键补上，已有的保留 */
   vars?: V
+  /** 引入的套件（17.2）：按 requires 展开后先于 blocks、prefabs 登记，controls 先于游戏的合并 */
+  kits?: Kit[]
   /** 键位到指令的映射，不写用默认映射 */
   controls?: Controls
   /** 流程：状态、事件到状态的映射、叠加状态（16.2） */
@@ -88,16 +92,28 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
   if (def.prefabs !== undefined && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
     throw new Error('defineGame：prefabs 必须是 definePrefab 结果的数组')
   }
+  if (def.kits !== undefined && (!Array.isArray(def.kits) || !def.kits.every(isKit))) {
+    throw new Error('defineGame：kits 必须是套件的数组（import 套件 from \'@pot/kit/<名字>\'）')
+  }
+  const kits = expandKits(def.kits ?? [])
+  const conflicts = kitConflicts(kits, (def.blocks ?? []).map((b) => b.name), (def.prefabs ?? []).map((p) => p.prefab))
+  if (conflicts.length) throw new Error(`defineGame：${conflicts.join('；')}`)
+  const controls = mergeControls(kits, def.controls)
   const flow = def.flow === undefined ? undefined : checkFlow(def.flow)
   return {
     apply(ctx: Context) {
       const w = ctx.world
       const unit = unitOf(ctx) ?? '(host)'
       if (flow) ctx.effect(() => w.setFlow(flow, unit), 'world.flow')
-      for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block), `world.block(${block.name})`)
-      for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`)
+      for (const kit of kits) {
+        const source = `kit:${kit.name}`
+        for (const block of kit.blocks) ctx.effect(() => w.registry.addBlock(block, source), `world.block(${block.name})`)
+        for (const prefab of kit.prefabs) ctx.effect(() => w.registry.addPrefab(prefab, source), `world.prefab(${prefab.prefab})`)
+      }
+      for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, 'game'), `world.block(${block.name})`)
+      for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, 'game'), `world.prefab(${prefab.prefab})`)
       ctx.effect(() => {
-        w.setControls(def.controls)
+        w.setControls(controls)
         const applied = w.controls
         // 热重载时新旧单元的先后不定：只撤销自己设的
         return () => {

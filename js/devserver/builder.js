@@ -4,6 +4,7 @@
  *   连同 manifest.json、data/** 写入输出目录。@pot/core / cordis 保持 require，由运行时注入。
  * - packGame：再压成 .potg（zip），Runner 可直接打开 / 安装。
  * - checkGame：tsc 类型检查 + 试打包，发现 Runner 运行前就能看出的错误。
+ * - 套件（004 第 17.2 节）：@pot/kit/<名字> 解析到仓库的 kits/，打进 bundle，发布的游戏不依赖 Runner 里的套件。
  */
 const esbuild = require('esbuild')
 const fs = require('fs')
@@ -15,6 +16,35 @@ const externalPot = {
   setup(build) {
     // jsx 子路径保留各自的名字，运行时的模块表里有对应项
     build.onResolve({ filter: /^(@pot\/core(\/jsx-runtime|\/jsx-dev-runtime)?|cordis)$/ }, (args) => ({ path: args.path === 'cordis' ? '@pot/core' : args.path, external: true }))
+  },
+}
+
+/** 仓库的套件目录（Dev Server 与 Runner 编辑器下用同一份） */
+const KITS_DIR = path.resolve(__dirname, '../../kits')
+const KIT_SUFFIXES = ['', '.ts', '.tsx', '.js', '.json', '/index.ts', '/index.tsx', '/index.js']
+
+/** 把 @pot/kit/<名字>[/子路径] 解析到 kits/ 下的文件 */
+function resolveKitFile(id) {
+  const m = /^@pot\/kit\/([a-z][a-z0-9-]*)(\/.*)?$/.exec(id)
+  if (!m) return null
+  const root = path.join(KITS_DIR, m[1])
+  const base = path.resolve(root, '.' + (m[2] ?? ''))
+  if (base !== root && !base.startsWith(root + path.sep)) return null
+  for (const suffix of KIT_SUFFIXES) {
+    const file = base + suffix
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) return file
+  }
+  return null
+}
+
+const kitResolver = {
+  name: 'pot-kit',
+  setup(build) {
+    build.onResolve({ filter: /^@pot\/kit\// }, (args) => {
+      const file = resolveKitFile(args.path)
+      if (!file) return { errors: [{ text: `找不到套件模块 "${args.path}"（套件目录 ${KITS_DIR}）` }] }
+      return { path: file }
+    })
   },
 }
 
@@ -71,7 +101,7 @@ async function bundleUnits(gameDir) {
     logLevel: 'silent',
     jsx: 'automatic',
     jsxImportSource: '@pot/core',
-    plugins: [externalPot],
+    plugins: [externalPot, kitResolver],
   })
   return { code: result.outputFiles[0].text, units: units.map((u) => u.name) }
 }
@@ -175,4 +205,4 @@ async function generateGameTypes(gameDir) {
   return { ok: true, file: headless.writeTypes(gameDir, result.types) }
 }
 
-module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk }
+module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk, KITS_DIR, resolveKitFile }

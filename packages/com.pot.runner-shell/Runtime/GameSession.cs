@@ -69,6 +69,9 @@ namespace Pot.Runner
         public event Action<bool, string> Opened;
 
         FileSystemWatcher watcher;
+        /// <summary>套件目录的监视器（GameFS.KitRoot 存在时）：变化路径加前缀 @pot/kit/ 交给 devtools.changed</summary>
+        FileSystemWatcher kitWatcher;
+        public const string KitPrefix = "@pot/kit/";
         readonly ConcurrentQueue<string> changes = new ConcurrentQueue<string>();
         readonly HashSet<string> pendingPaths = new HashSet<string>();
         float flushAt = -1;
@@ -368,23 +371,60 @@ namespace Pot.Runner
             };
             watcher.Error += (s, e) => Debug.LogWarning("[pot] 文件监听出错：" + e.GetException().Message);
             watcher.EnableRaisingEvents = true;
+            StartKitWatcher();
+        }
+
+        void StartKitWatcher()
+        {
+            var kits = GameFS.KitRoot;
+            if (string.IsNullOrEmpty(kits) || !Directory.Exists(kits)) return;
+            try
+            {
+                kitWatcher = new FileSystemWatcher(kits)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                };
+                FileSystemEventHandler onChange = (s, e) => Enqueue(kits, e.FullPath, KitPrefix);
+                kitWatcher.Changed += onChange;
+                kitWatcher.Created += onChange;
+                kitWatcher.Deleted += onChange;
+                kitWatcher.Renamed += (s, e) =>
+                {
+                    Enqueue(kits, e.OldFullPath, KitPrefix);
+                    Enqueue(kits, e.FullPath, KitPrefix);
+                };
+                kitWatcher.Error += (s, e) => Debug.LogWarning("[pot] 套件目录监听出错：" + e.GetException().Message);
+                kitWatcher.EnableRaisingEvents = true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[pot] 套件目录监听失败：" + e.Message);
+                kitWatcher = null;
+            }
         }
 
         void StopWatcher()
         {
+            if (kitWatcher != null)
+            {
+                kitWatcher.EnableRaisingEvents = false;
+                kitWatcher.Dispose();
+                kitWatcher = null;
+            }
             if (watcher == null) return;
             watcher.EnableRaisingEvents = false;
             watcher.Dispose();
             watcher = null;
         }
 
-        /// <summary>后台线程调用</summary>
-        void Enqueue(string root, string full)
+        /// <summary>后台线程调用；prefix 用于套件目录（@pot/kit/）</summary>
+        void Enqueue(string root, string full, string prefix = "")
         {
             var rel = Relative(root, full);
             if (rel == null) return;
             if (Directory.Exists(full)) return;
-            changes.Enqueue(rel);
+            changes.Enqueue(prefix + rel);
         }
 
         static string Relative(string root, string full)

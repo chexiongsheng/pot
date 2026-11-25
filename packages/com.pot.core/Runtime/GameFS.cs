@@ -60,6 +60,84 @@ if (path.Length == 0 || path == ".." || path.StartsWith("../") || path.Contains(
             return null;
         }
 
+        // ---- 套件（004 第 17.1、17.2 节）：@pot/kit/<名字> 的源码 ----
+
+        static string kitRoot;
+        static bool kitRootResolved;
+
+        /// <summary>
+        /// 套件目录（含 topdown/、fps/ 等）。按顺序取第一个存在的：-potKits=&lt;目录&gt;、环境变量 POT_KITS、
+        /// 从 Application.dataPath 向上找到的仓库根（同时有 kits/ 与 packages/com.pot.core/）下的 kits/。
+        /// 都没有时为 null，只读 Resources/pot/kits.json，套件不热重载。
+        /// </summary>
+        public static string KitRoot
+        {
+            get
+            {
+                if (!kitRootResolved)
+                {
+                    kitRoot = FindKitRoot();
+                    kitRootResolved = true;
+                }
+                return kitRoot;
+            }
+            set
+            {
+                kitRoot = value;
+                kitRootResolved = true;
+            }
+        }
+
+        static string FindKitRoot()
+        {
+            foreach (var arg in System.Environment.GetCommandLineArgs())
+            {
+                if (arg.StartsWith("-potKits=", System.StringComparison.Ordinal))
+                {
+                    var dir = arg.Substring("-potKits=".Length);
+                    if (Directory.Exists(dir)) return Path.GetFullPath(dir);
+                    Debug.LogWarning("[pot] -potKits 指定的目录不存在：" + dir);
+                }
+            }
+            var env = System.Environment.GetEnvironmentVariable("POT_KITS");
+            if (!string.IsNullOrEmpty(env) && Directory.Exists(env)) return Path.GetFullPath(env);
+            try
+            {
+                var dir = new DirectoryInfo(Application.dataPath);
+                for (var i = 0; dir != null && i < 6; i++, dir = dir.Parent)
+                {
+                    var kits = Path.Combine(dir.FullName, "kits");
+                    if (Directory.Exists(kits) && Directory.Exists(Path.Combine(dir.FullName, "packages", "com.pot.core"))) return kits;
+                }
+            }
+            catch (IOException) { }
+            catch (System.UnauthorizedAccessException) { }
+            catch (System.Security.SecurityException) { }
+            return null;
+        }
+
+        /// <summary>读套件目录里的文件（path 如 topdown/index.ts）；没有套件目录或文件不存在返回 null</summary>
+        [Preserve]
+        public static string ReadKitFile(string path)
+        {
+            path = Normalize(path);
+            if (path.Length == 0 || path == ".." || path.StartsWith("../") || path.Contains("/../")) return null;
+            var root = KitRoot;
+            if (string.IsNullOrEmpty(root)) return null;
+            var full = Path.Combine(root, path);
+            if (!File.Exists(full)) return null;
+            try { return File.ReadAllText(full); }
+            catch (IOException) { return null; }
+        }
+
+        /// <summary>包里的套件源码 Resources/pot/kits.json（{ files: { 路径: 源码 } }），由 JS 解析；没有返回 null</summary>
+        [Preserve]
+        public static string KitsBundle()
+        {
+            var asset = Resources.Load<TextAsset>("pot/kits");
+            return asset != null ? asset.text : null;
+        }
+
         // ---- 持久缓存：persistentDataPath/cache/<bucket>/<key>.txt（devtools 转译结果等，可随时删除） ----
 
         /// <summary>缓存根目录（persistentDataPath/cache）</summary>

@@ -213,8 +213,8 @@ export class WorldService extends Service {
     super(ctx, 'world')
     this._root = ctx
     // 官方积木与预制件垫在栈底，游戏的同名登记覆盖它们
-    for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block)
-    for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab)
+    for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, 'system')
+    for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, 'system')
     // 构造时 define 一次占住归属（host）；冷重启的 importJSON 会整个替换，之后一律 get
     ctx.state.define<WorldData>('world', { init: initData })
     ctx.on('fixed-update', () => this._step())

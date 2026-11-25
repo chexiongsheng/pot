@@ -7,6 +7,7 @@ import type { PotChild, PotNode, Prefab, SourcePos } from './node'
 import { PREFAB_RESERVED, RESERVED, Registry, clone, isPlainObject, merge } from './registry'
 import type { Vec3 } from '../host'
 import { UI_TAG_NAMES } from './ui-tags'
+import { kitHint } from './kit'
 
 export interface EntitySpec {
   path: string
@@ -191,7 +192,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
       prefab = registry.prefab(type)
       if (!prefab) {
         if (UI_TAG_NAMES.includes(type)) errors.push(`${sourcePrefix(node.source)}<${type}> 是界面标签，放错了树：界面写在 ui 里，scene 里只能用实体标签、rule、stage`)
-        else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`)
+        else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${kitHint('prefab', type) || similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`)
         return
       }
     } else {
@@ -210,7 +211,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
     while (current !== undefined) {
       const p: Prefab | undefined = typeof current === 'string' ? registry.prefab(current) : current
       if (!p) {
-        errors.push(`${sourcePrefix(node.source)}预制件 ${chain[0]?.prefab ?? prefab.prefab} 继承的 "${current}" 没有登记${similar(String(current), registry.prefabNames())}`)
+        errors.push(`${sourcePrefix(node.source)}预制件 ${chain[0]?.prefab ?? prefab.prefab} 继承的 "${current}" 没有登记${kitHint('prefab', String(current)) || similar(String(current), registry.prefabNames())}`)
         return null
       }
       if (chain.includes(p) || chain.length > 32) {
@@ -239,7 +240,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
       if (reserved.has(key)) continue
       const block = registry.block(key)
       if (!block) {
-        errors.push(`${where}未知的积木 ${key}${similar(key, registry.blockNames())}`)
+        errors.push(`${where}未知的积木 ${key}${kitHint('block', key) || similar(key, registry.blockNames())}`)
         ok = false
         continue
       }

@@ -8,6 +8,8 @@
  * - .tsx 走两遍转译：先去掉类型和 JSX（保留 ESM），再拆多变量导出、转 CommonJS。splitMultiExports 不认识 JSX。
  * - sucrase 保留行号，sourceURL 为游戏内相对路径，报错栈直接指向 TS 源码行。
  * - 依赖图：invalidate(paths) 返回受影响的单元，供热重载使用。
+ * - 套件（004 第 17.2 节）：@pot/kit/<名字>[/子路径] 经 host.readKit 读套件目录，记录路径为 @pot/kit/topdown/index.ts 这样的形式，
+ *   与游戏文件共用缓存与依赖图（套件文件变化时传入同样形式的路径即可热重载）。套件内的相对路径不能越出该套件。
  */
 import { transform } from 'sucrase'
 import { splitMultiExports } from './multi-export'
@@ -26,6 +28,14 @@ interface ModuleRecord {
 const UNIT_DIR = 'src/plugins/'
 const UNIT_EXTS = ['.ts', '.tsx', '.js']
 const RESOLVE_SUFFIXES = ['', '.ts', '.tsx', '.js', '.json', '/index.ts', '/index.tsx', '/index.js']
+export const KIT_PREFIX = '@pot/kit/'
+const KIT_ID = /^@pot\/kit\/([a-z][a-z0-9-]*)(\/.*)?$/
+
+/** 套件文件的记录路径里的套件根（@pot/kit/<名字>/）；不是套件文件返回 undefined */
+function kitRootOf(path: string) {
+  const m = KIT_ID.exec(path)
+  return m ? `${KIT_PREFIX}${m[1]}/` : undefined
+}
 
 export function normalizePath(path: string) {
   const out: string[] = []
@@ -130,12 +140,27 @@ export class SourceLoader implements UnitLoader {
   }
 
   private _read(path: string) {
-    const text = this._host.readText(path)
+    let text: string | null | undefined
+    if (path.startsWith(KIT_PREFIX)) {
+      if (!this._host.readKit) throw new Error(`当前宿主不支持套件，读不到 ${path}`)
+      text = this._host.readKit(path.slice(KIT_PREFIX.length))
+    } else text = this._host.readText(path)
     return text === null || text === undefined ? null : text
   }
 
   private _resolve(id: string, from: string) {
-    const base = normalizePath(`${dirname(from)}/${id}`)
+    let base: string
+    if (id.startsWith(KIT_PREFIX)) {
+      const m = KIT_ID.exec(id)
+      if (!m) throw new Error(`${from}: 套件路径不对："${id}"，应为 @pot/kit/<名字>[/子路径]`)
+      base = normalizePath(id)
+      if (base !== `${KIT_PREFIX}${m[1]}` && !base.startsWith(`${KIT_PREFIX}${m[1]}/`)) throw new Error(`${from}: 套件路径越出套件目录："${id}"`)
+    } else {
+      base = normalizePath(`${dirname(from)}/${id}`)
+      const root = kitRootOf(from)
+      if (root && !base.startsWith(root)) throw new Error(`${from}: 套件内的相对路径不能越出套件目录："${id}"`)
+      if (!root && base.startsWith('@pot/')) throw new Error(`${from}: 不能用相对路径引用套件，请写 import ... from '@pot/kit/<名字>'`)
+    }
     for (const suffix of RESOLVE_SUFFIXES) {
       const path = base + suffix
       if (suffix === '' && !/\.(tsx?|js|json)$/.test(path)) continue
@@ -155,12 +180,12 @@ export class SourceLoader implements UnitLoader {
       const factory = compileModule(this.transpileCached(code, path), path)
       const require = (id: string) => {
         if (id in modules) return modules[id]
-        if (id.startsWith('./') || id.startsWith('../')) {
+        if (id.startsWith('./') || id.startsWith('../') || id.startsWith(KIT_PREFIX)) {
           const dep = this._require(id, path, modules)
           record.deps.add(dep.path)
           return dep.exports
         }
-        throw new Error(`${path}: 不支持 require("${id}")。游戏代码只能依赖 @pot/core 和游戏目录内的相对路径文件`)
+        throw new Error(`${path}: 不支持 require("${id}")。游戏代码只能依赖 @pot/core、@pot/kit/* 和游戏目录内的相对路径文件`)
       }
       factory.call(module.exports, module.exports, require, module, path)
     } catch (error) {

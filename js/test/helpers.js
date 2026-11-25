@@ -240,6 +240,12 @@ function createHost(files = new Map()) {
       if (process.env.POT_LOG) console.log(`[${level}] ${text}`)
     },
     readText(p) { return files.has(p) ? files.get(p) : null },
+    /** 套件：host.kits（Map）有就读它，否则读仓库的 kits/ */
+    readKit(p) {
+      if (host.kits) return host.kits.has(p) ? host.kits.get(p) : null
+      const file = path.resolve(KITS_DIR, p)
+      return file.startsWith(KITS_DIR + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile() ? fs.readFileSync(file, 'utf8') : null
+    },
     writeText(p, content) {
       if (content === null) files.delete(p)
       else files.set(p, content)
@@ -250,6 +256,7 @@ function createHost(files = new Map()) {
   return host
 }
 
+const KITS_DIR = path.resolve(__dirname, '../../kits')
 const helloDir = path.resolve(__dirname, '../../games/hello')
 
 /** 读取游戏目录全部文件到 Map（与 Runner 读游戏目录相同的视图） */

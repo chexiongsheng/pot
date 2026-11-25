@@ -1467,3 +1467,15 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 ### 17.12 实施时补充的约定
 
 按实施顺序记录，与上文不一致的以这里为准。
+
+第 1 步（套件机制）：
+
+- KitRoot 的第三个来源不是固定的 `<Unity 工程>/../kits`，而是从 `Application.dataPath` 向上最多 6 层，找同时有 `kits/` 和 `packages/com.pot.core` 的目录（仓库根），取其下的 `kits/`。这样编辑器与本机构建出的 Runner（`release/runner/<平台>/`）都能找到，不必传 `-potKits`。
+- C# 侧不是一个 `GameFS.ReadKit`，而是两个：`GameFS.ReadKitFile(path)` 只读 KitRoot 下的文件，`GameFS.KitsBundle()` 返回 `kits.json` 的原文。回退与 JSON 解析放在 `unity.ts` 的 `readKit` 里（先读文件，读不到再查懒解析的 `files`），C# 不解析 JSON。
+- `kits.json` 由 `build.js` 在打包之后生成，内容不变时不重写（避免无谓的 Unity 导入）；`.meta` 用 `TextScriptImporter`，与 `core.cjs` 一样入库。
+- 测试宿主（`test/helpers.js`）的 `readKit`：`host.kits`（`Map`，键形如 `base/index.ts`）存在时只读它，否则读仓库的 `kits/`。`startGame` 的 `setupHost` 用来注入测试套件。
+- 加载器里套件的判定：记录路径以 `@pot/kit/<名字>/` 开头即属于该套件；相对路径解析后不在这个前缀下就报“越出套件目录”。游戏代码用相对路径走进 `@pot/` 同样报错。17.10 里 `loader.test.js` 的增补并进了 `world-kit.test.js`（经真实的加载器与无画面宿主跑）。
+- `pot blocks`：层按 `registry.sourceOf` 判定（`system`、套件名、`game`）。每个套件另有一项 `kind: 'kit'`，带 `usage`（引入写法）、`imported`、`blocks`、`prefabs`、`requires`；未引入套件里的积木、预制件照常列出，标 `available: true`。CLI 文本输出在名字后标“（已引入）”或“（未引入：写法）”。不在 `defineGame` 游戏目录下时列系统级与全部套件。
+- `.pot/types.d.ts` 只为来源是 `game`、不与系统同名、且不属于任何套件的积木生成类型；套件积木的类型靠套件自己的声明合并。
+- `pot eject --kit` 只改写本套件的 import（`'@pot/kit/<名字>'` 与 `'@pot/kit/<名字>/子路径'`，前缀相同的别的套件如 `<名字>-two` 不动）；副本里对其他套件的 `@pot/kit/*` 引用保持不变。目标目录已存在时报错，不覆盖。MCP 对应工具 `pot_eject`（`kit`、`dir`）。测试见 `eject.test.js`。
+- 仓库在第 1 步还没有真实套件，17.10 里 `devserver.test.js` 的增补（套件层、`pot build` 打进套件）放到第 2 步，用 `topdown` 做。

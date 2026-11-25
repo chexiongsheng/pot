@@ -5,7 +5,7 @@
 const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
-const { walk } = require('./builder')
+const { walk, KITS_DIR } = require('./builder')
 
 const DIST = path.resolve(__dirname, '../dist')
 const PACKAGES = path.resolve(__dirname, '../../packages')
@@ -83,7 +83,30 @@ function wrapEngine(engine) {
   })
 }
 
-function createHeadlessHost(files) {
+/** 读仓库 kits/ 下的套件文件（17.2）；kits 给了 Map 时只读它（测试用） */
+function kitReader(kits) {
+  if (kits) return (p) => (kits.has(p) ? kits.get(p) : null)
+  return (p) => {
+    const file = path.resolve(KITS_DIR, p)
+    if (!file.startsWith(KITS_DIR + path.sep)) return null
+    try {
+      return fs.statSync(file).isFile() ? fs.readFileSync(file, 'utf8') : null
+    } catch {
+      return null
+    }
+  }
+}
+
+/** 仓库里的全部套件名（kits/ 下有 index 的目录） */
+function listKitNames() {
+  if (!fs.existsSync(KITS_DIR)) return []
+  return fs.readdirSync(KITS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && ['index.ts', 'index.tsx', 'index.js'].some((f) => fs.existsSync(path.join(KITS_DIR, e.name, f))))
+    .map((e) => e.name)
+    .sort()
+}
+
+function createHeadlessHost(files, kits) {
   const engine = new HeadlessEngine()
   const logs = []
   return {
@@ -94,6 +117,7 @@ function createHeadlessHost(files) {
     raw: engine,
     log(level, text) { logs.push({ level, text: String(text) }) },
     readText(p) { return files.has(p) ? files.get(p) : null },
+    readKit: kitReader(kits),
     writeText(p, content) {
       if (content === null) files.delete(p)
       else files.set(p, content)
@@ -118,7 +142,7 @@ function usesWorld(dir) {
 async function loadGame(dir, options = {}) {
   const pot = loadPot()
   const files = options.files ?? readGameFiles(dir)
-  const host = createHeadlessHost(files)
+  const host = createHeadlessHost(files, options.kits)
   const runtime = await pot.createRuntime(host, { loader: pot.devtools.createLoader(host), ...(options.state ? { state: options.state } : {}) })
   await runtime.start()
   return { pot, host, runtime, engine: host.raw }
@@ -150,7 +174,25 @@ function visitFlowStates(runtime, steps, errors = []) {
   return errors
 }
 
-/** pot blocks：积木、预制件、界面标签、内置节点（16.8） */
+/** 登记来源到 pot blocks 的层：system、套件名、game */
+const layerOf = (source) => (source?.startsWith('kit:') ? source.slice(4) : source ?? 'game')
+
+/** 加载一个套件（不登记），返回 defineKit 的结果；加载失败返回 null */
+async function loadKit(name) {
+  const files = new Map([
+    ['manifest.json', JSON.stringify({ id: 'pot.kit', plugins: ['kit'] })],
+    ['src/plugins/kit.ts', `import kit from '@pot/kit/${name}'\nexport const name = 'kit'\nexport function apply() {}\nexport { kit }\n`],
+  ])
+  const { pot, runtime } = await loadGame(null, { files })
+  try {
+    if (runtime.failures.length) return null
+    return pot.knownKits().find((k) => k.name === name) ?? null
+  } finally {
+    await runtime.stop?.()
+  }
+}
+
+/** pot blocks：积木、预制件、界面标签、内置节点（16.8）；套件（17.2），未引入的标 available */
 async function listBlocks(dir) {
   const inGame = !!dir && fs.existsSync(path.join(dir, 'manifest.json')) && usesWorld(dir)
   const { pot, runtime } = await loadGame(dir, inGame ? {} : { files: emptyGame() })
@@ -158,21 +200,35 @@ async function listBlocks(dir) {
     runtime.tick(1 / 60)
     if (inGame && !runtime.failures.length) visitFlowStates(runtime, 1)
     const reg = runtime.root.world.registry
-    const sysBlocks = new Set(pot.BUILTIN_BLOCKS)
-    const sysPrefabs = new Set(pot.BUILTIN_PREFABS)
     const items = []
+    const prefabItem = (name, p, layer, extra = {}) => {
+      const def = p.def ?? {}
+      return {
+        kind: 'prefab', name, layer, about: def.about ?? '',
+        is: typeof def.is === 'string' ? def.is : def.is?.prefab, chain: extra.chain ?? [name], tags: def.tags ?? [],
+        blocks: plain(Object.fromEntries(Object.entries(def).filter(([k]) => !['is', 'tags', 'about'].includes(k)))),
+        ...extra,
+      }
+    }
     for (const name of reg.blockNames()) {
       const b = reg.block(name)
-      items.push({ kind: 'block', name, layer: sysBlocks.has(b) ? 'system' : 'game', about: b.about ?? '', props: plain(b.props), state: plain(b.state) })
+      items.push({ kind: 'block', name, layer: layerOf(reg.sourceOf('block', name)), about: b.about ?? '', props: plain(b.props), state: plain(b.state) })
     }
-    for (const name of reg.prefabNames()) {
-      const p = reg.prefab(name)
-      const def = p.def ?? {}
+    for (const name of reg.prefabNames()) items.push(prefabItem(name, reg.prefab(name), layerOf(reg.sourceOf('prefab', name)), { chain: reg.chain(name) }))
+    // 套件：引入了的列出组成，没引入的连同积木、预制件一起列出并给出引入写法
+    const imported = new Set(items.map((i) => i.layer))
+    for (const kitName of listKitNames()) {
+      const kit = await loadKit(kitName)
+      if (!kit) continue
+      const available = !imported.has(kitName)
+      const usage = `import ${kitName.replace(/-(\w)/g, (_m, c) => c.toUpperCase())} from '@pot/kit/${kitName}'，并写进 defineGame 的 kits`
       items.push({
-        kind: 'prefab', name, layer: sysPrefabs.has(p) ? 'system' : 'game', about: def.about ?? '',
-        is: typeof def.is === 'string' ? def.is : def.is?.prefab, chain: reg.chain(name), tags: def.tags ?? [],
-        blocks: plain(Object.fromEntries(Object.entries(def).filter(([k]) => !['is', 'tags', 'about'].includes(k)))),
+        kind: 'kit', name: kitName, layer: kitName, about: kit.about, usage, imported: !available,
+        blocks: kit.blocks.map((b) => b.name), prefabs: kit.prefabs.map((p) => p.prefab), requires: kit.requires.map((k) => k.name),
       })
+      if (!available) continue
+      for (const b of kit.blocks) items.push({ kind: 'block', name: b.name, layer: kitName, available: true, usage, about: b.about ?? '', props: plain(b.props), state: plain(b.state) })
+      for (const p of kit.prefabs) items.push(prefabItem(p.prefab, p, kitName, { available: true, usage }))
     }
     for (const [name, doc] of Object.entries(pot.UI_TAG_DOCS)) items.push({ kind: 'ui', name, layer: 'system', about: doc.about, props: { ...doc.props, ...pot.UI_COMMON_PROPS } })
     items.push({ kind: 'node', name: 'stage', layer: 'system', about: '环境与相机（scene 里最多一个）', props: { background: '背景色', sun: '平行光：欧拉角，或 { rot, intensity, color }；false 不要', camera: '{ at, look }' } })
@@ -195,9 +251,11 @@ async function evaluateGame(dir, options = {}) {
     let types = null
     if (!runtime.failures.length) {
       const w = runtime.root.world
-      const sys = new Set(pot.BUILTIN_BLOCKS)
+      // 只生成游戏自写的：系统与套件的类型由 @pot/core 与套件源码的声明合并提供，同名的覆盖也不生成
       const sysNames = new Set(pot.BUILTIN_BLOCKS.map((b) => b.name))
-      const blocks = w.registry.blockNames().map((n) => w.registry.block(n)).filter((b) => !sys.has(b) && !sysNames.has(b.name))
+      const blocks = w.registry.blockNames()
+        .filter((n) => w.registry.sourceOf('block', n) === 'game' && !sysNames.has(n) && !pot.kitOf('block', n))
+        .map((n) => w.registry.block(n))
       types = pot.generateTypes(blocks, w.vars)
     }
     if (!runtime.failures.length) visitFlowStates(runtime, options.steps ?? 2, errors)
@@ -221,4 +279,4 @@ function writeTypes(dir, content) {
   return file
 }
 
-module.exports = { loadPot, HeadlessEngine, createHeadlessHost, readGameFiles, usesWorld, loadGame, listBlocks, evaluateGame, writeTypes }
+module.exports = { loadPot, HeadlessEngine, createHeadlessHost, kitReader, listKitNames, readGameFiles, usesWorld, loadGame, listBlocks, evaluateGame, writeTypes }

@@ -13,6 +13,7 @@ namespace Pot.Runner
     /// - PotRunner.exe D:/games/hello            第一个像游戏的位置参数（目录含 manifest.json、.potg 或 URL）
     /// - -potOpen=&lt;目录|.potg|URL&gt;             同上
     /// - -potServer=ws://host:7788/runner       Dev Server 地址（仅本次生效，不保存）
+    /// - -potKits=&lt;目录&gt;                       套件目录（缺省依次为环境变量 POT_KITS、向上找到的仓库 kits/，见 GameFS.KitRoot）
     /// 没有参数时显示首页：输入框 + 最近打开。F1 / 三指触摸打开面板。
     /// </summary>
     public class PotRunner : MonoBehaviour

@@ -102,6 +102,7 @@ var pot = (() => {
     defaultFormatters: () => defaultFormatters,
     defineBlock: () => defineBlock,
     defineGame: () => defineGame,
+    defineKit: () => defineKit,
     definePlugin: () => definePlugin,
     definePrefab: () => definePrefab,
     encode: () => encode,
@@ -109,6 +110,7 @@ var pot = (() => {
     estimateSize: () => estimateSize,
     eulerToQuaternion: () => eulerToQuaternion,
     evaluate: () => evaluate,
+    expandKits: () => expandKits,
     expandScript: () => expandScript,
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
@@ -120,6 +122,7 @@ var pot = (() => {
     instanceLayout: () => instanceLayout,
     isBailed: () => isBailed,
     isConstructor: () => isConstructor,
+    isKit: () => isKit,
     isNode: () => isNode,
     isObject: () => isObject,
     isPrefab: () => isPrefab,
@@ -127,6 +130,8 @@ var pot = (() => {
     joinPrototype: () => joinPrototype,
     jsxDevRuntime: () => jsx_dev_runtime_exports,
     jsxRuntime: () => jsx_runtime_exports,
+    kitOf: () => kitOf,
+    knownKits: () => knownKits,
     layoutRects: () => layoutRects,
     makeNode: () => makeNode,
     mapErrors: () => mapErrors,
@@ -6954,20 +6959,20 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "version", 0);
     }
     /** 登记积木，返回撤销函数 */
-    addBlock(def) {
+    addBlock(def, source = "game") {
       defineBlock(def);
       if (!this._seen.has(def.name)) this._seen.set(def.name, this._seen.size);
-      return this._push(this._blocks, def.name, def);
+      return this._push(this._blocks, def.name, def, source);
     }
     /** 登记预制件，返回撤销函数 */
-    addPrefab(prefab) {
+    addPrefab(prefab, source = "game") {
       if (!isPrefab(prefab)) throw new Error("登记预制件：需要 definePrefab 的返回值");
-      return this._push(this._prefabs, prefab.prefab, prefab);
+      return this._push(this._prefabs, prefab.prefab, prefab, source);
     }
-    _push(map, name, value) {
+    _push(map, name, value, source) {
       let stack = map.get(name);
       if (!stack) map.set(name, stack = []);
-      const entry = { value, token: {} };
+      const entry = { value, token: {}, source };
       stack.push(entry);
       this.version++;
       return () => {
@@ -6986,6 +6991,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     prefab(name) {
       const stack = this._prefabs.get(name);
       return stack?.[stack.length - 1].value;
+    }
+    /** 栈顶条目的来源；没登记返回 undefined */
+    sourceOf(kind, name) {
+      const stack = (kind === "block" ? this._blocks : this._prefabs).get(name);
+      return stack?.[stack.length - 1].source;
     }
     /** 预制件链上的名字（从根到叶）；未知的预制件只返回它自己 */
     chain(name) {
@@ -7381,6 +7391,100 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     hidden: "为真时不占位、不绘制"
   };
 
+  // runtime/src/world/kit.ts
+  var KIT_NAME = /^[a-z][a-z0-9-]*$/;
+  var KIT = /* @__PURE__ */ Symbol.for("pot.kit");
+  var catalog = /* @__PURE__ */ new Map();
+  function isKit(value) {
+    return !!value && typeof value === "object" && value[KIT] === true;
+  }
+  function defineKit(def) {
+    if (!def || typeof def !== "object") throw new Error("defineKit 的参数必须是对象");
+    if (typeof def.name !== "string" || !KIT_NAME.test(def.name)) {
+      throw new Error(`defineKit：套件名必须是小写字母开头、只含小写字母数字和 -，收到 ${JSON.stringify(def.name)}`);
+    }
+    const where2 = `defineKit(${def.name})`;
+    if (def.blocks !== void 0 && (!Array.isArray(def.blocks) || def.blocks.some((b) => !b || typeof b.name !== "string"))) {
+      throw new Error(`${where2}：blocks 必须是 defineBlock 结果的数组`);
+    }
+    if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
+      throw new Error(`${where2}：prefabs 必须是 definePrefab 结果的数组`);
+    }
+    if (def.requires !== void 0 && (!Array.isArray(def.requires) || !def.requires.every(isKit))) {
+      throw new Error(`${where2}：requires 必须是 defineKit 结果的数组`);
+    }
+    const kit = {
+      name: def.name,
+      about: def.about ?? "",
+      blocks: Object.freeze([...def.blocks ?? []]),
+      prefabs: Object.freeze([...def.prefabs ?? []]),
+      controls: def.controls,
+      requires: Object.freeze([...def.requires ?? []])
+    };
+    Object.defineProperty(kit, KIT, { value: true });
+    Object.freeze(kit);
+    catalog.set(kit.name, kit);
+    return kit;
+  }
+  function expandKits(kits) {
+    const out = [];
+    const done = /* @__PURE__ */ new Set();
+    const visiting = [];
+    const visit = (kit) => {
+      if (done.has(kit.name)) return;
+      if (visiting.includes(kit.name)) throw new Error(`套件的 requires 有循环：${[...visiting, kit.name].join(" → ")}`);
+      visiting.push(kit.name);
+      for (const dep of kit.requires) visit(dep);
+      visiting.pop();
+      done.add(kit.name);
+      out.push(kit);
+    };
+    for (const kit of kits) visit(kit);
+    return out;
+  }
+  function kitConflicts(kits, gameBlocks, gamePrefabs) {
+    const errors = [];
+    const check = (kind, names, own, kit, name) => {
+      const other = names.get(name);
+      if (other !== void 0 && other !== kit.name && !own.has(name)) {
+        errors.push(`${kind} ${name} 同时由套件 ${other} 和 ${kit.name} 提供；在游戏的 ${kind === "积木" ? "blocks" : "prefabs"} 里登记同名的${kind}来决定用哪个`);
+      }
+      names.set(name, kit.name);
+    };
+    const blocks = /* @__PURE__ */ new Map();
+    const prefabs = /* @__PURE__ */ new Map();
+    const ownBlocks = new Set(gameBlocks);
+    const ownPrefabs = new Set(gamePrefabs);
+    for (const kit of kits) {
+      for (const b of kit.blocks) check("积木", blocks, ownBlocks, kit, b.name);
+      for (const p of kit.prefabs) check("预制件", prefabs, ownPrefabs, kit, p.prefab);
+    }
+    return errors;
+  }
+  function mergeControls(kits, own) {
+    const list = [...kits.map((k) => k.controls), own].filter(Boolean);
+    if (!list.length) return void 0;
+    const out = { axes: {}, actions: {} };
+    for (const c of list) {
+      Object.assign(out.axes, c.axes);
+      Object.assign(out.actions, c.actions);
+    }
+    return out;
+  }
+  function kitOf(kind, name) {
+    for (const kit of catalog.values()) {
+      const has = kind === "block" ? kit.blocks.some((b) => b.name === name) : kit.prefabs.some((p) => p.prefab === name);
+      if (has) return kit.name;
+    }
+  }
+  function kitHint(kind, name) {
+    const kit = kitOf(kind, name);
+    return kit ? `，它属于套件 ${kit}，请加到 defineGame 的 kits` : "";
+  }
+  function knownKits() {
+    return [...catalog.values()];
+  }
+
   // runtime/src/world/tree.ts
   var BUILTIN_TAGS = ["rule", "stage"];
   var EVENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -7499,7 +7603,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         prefab = registry.prefab(type);
         if (!prefab) {
           if (UI_TAG_NAMES.includes(type)) errors.push(`${sourcePrefix(node.source)}<${type}> 是界面标签，放错了树：界面写在 ui 里，scene 里只能用实体标签、rule、stage`);
-          else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`);
+          else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${kitHint("prefab", type) || similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`);
           return;
         }
       } else {
@@ -7517,7 +7621,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       while (current2 !== void 0) {
         const p = typeof current2 === "string" ? registry.prefab(current2) : current2;
         if (!p) {
-          errors.push(`${sourcePrefix(node.source)}预制件 ${chain[0]?.prefab ?? prefab.prefab} 继承的 "${current2}" 没有登记${similar(String(current2), registry.prefabNames())}`);
+          errors.push(`${sourcePrefix(node.source)}预制件 ${chain[0]?.prefab ?? prefab.prefab} 继承的 "${current2}" 没有登记${kitHint("prefab", String(current2)) || similar(String(current2), registry.prefabNames())}`);
           return null;
         }
         if (chain.includes(p) || chain.length > 32) {
@@ -7544,7 +7648,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (reserved.has(key)) continue;
         const block = registry.block(key);
         if (!block) {
-          errors.push(`${where2}未知的积木 ${key}${similar(key, registry.blockNames())}`);
+          errors.push(`${where2}未知的积木 ${key}${kitHint("block", key) || similar(key, registry.blockNames())}`);
           ok = false;
           continue;
         }
@@ -8259,8 +8363,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       /** 录制：每一步的指令 */
       __publicField(this, "_recording", null);
       this._root = ctx;
-      for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
-      for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
+      for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, "system");
+      for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, "system");
       ctx.state.define("world", { init: initData });
       ctx.on("fixed-update", () => this._step());
       this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, void 0, fn));
@@ -9185,6 +9289,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
 
   // runtime/src/unity.ts
   function createUnityHost() {
+    let bundledKits;
     const Pot = CS.Pot;
     const H = Pot.PotHost;
     const FS2 = Pot.GameFS;
@@ -9200,6 +9305,19 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       readText: (path) => {
         const text = FS2.ReadText(path);
         return text === null || text === void 0 ? null : text;
+      },
+      readKit: (path) => {
+        const disk = FS2.ReadKitFile(path);
+        if (disk !== null && disk !== void 0) return disk;
+        if (bundledKits === void 0) {
+          const text = FS2.KitsBundle();
+          try {
+            bundledKits = text ? JSON.parse(text).files ?? null : null;
+          } catch {
+            bundledKits = null;
+          }
+        }
+        return bundledKits?.[path] ?? null;
       },
       cacheRead: (bucket, key) => {
         const text = FS2.CacheRead(bucket, key);
@@ -9729,16 +9847,28 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
       throw new Error("defineGame：prefabs 必须是 definePrefab 结果的数组");
     }
+    if (def.kits !== void 0 && (!Array.isArray(def.kits) || !def.kits.every(isKit))) {
+      throw new Error("defineGame：kits 必须是套件的数组（import 套件 from '@pot/kit/<名字>'）");
+    }
+    const kits = expandKits(def.kits ?? []);
+    const conflicts = kitConflicts(kits, (def.blocks ?? []).map((b) => b.name), (def.prefabs ?? []).map((p) => p.prefab));
+    if (conflicts.length) throw new Error(`defineGame：${conflicts.join("；")}`);
+    const controls = mergeControls(kits, def.controls);
     const flow = def.flow === void 0 ? void 0 : checkFlow(def.flow);
     return {
       apply(ctx) {
         const w = ctx.world;
         const unit = unitOf(ctx) ?? "(host)";
         if (flow) ctx.effect(() => w.setFlow(flow, unit), "world.flow");
-        for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block), `world.block(${block.name})`);
-        for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`);
+        for (const kit of kits) {
+          const source = `kit:${kit.name}`;
+          for (const block of kit.blocks) ctx.effect(() => w.registry.addBlock(block, source), `world.block(${block.name})`);
+          for (const prefab of kit.prefabs) ctx.effect(() => w.registry.addPrefab(prefab, source), `world.prefab(${prefab.prefab})`);
+        }
+        for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, "game"), `world.block(${block.name})`);
+        for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, "game"), `world.prefab(${prefab.prefab})`);
         ctx.effect(() => {
-          w.setControls(def.controls);
+          w.setControls(controls);
           const applied = w.controls;
           return () => {
             if (w.controls === applied) w.setControls(void 0);

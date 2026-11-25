@@ -4,6 +4,7 @@
  *   runtime/src  → packages/com.pot.core/Runtime/Resources/pot/core.cjs      (globalThis.pot)
  *   devtools/src → packages/com.pot.devtools/Runtime/Resources/pot/devtools.cjs (globalThis.pot.devtools)
  * 同时在 js/dist/ 下各放一份，供 Node 测试与 Dev Server 使用。
+ *   kits/        → packages/com.pot.core/Runtime/Resources/pot/kits.json （套件源码，Runner 没有套件目录时读它，004 第 17.1 节）
  */
 const esbuild = require('esbuild')
 const fs = require('fs')
@@ -63,7 +64,27 @@ async function main() {
   ])
 }
 
-main().catch((error) => {
+/** 全部套件源码收成 { files: { "topdown/index.ts": "源码" } }，路径排序，内容不变时文件不变 */
+function emitKits() {
+  const dir = path.join(repo, 'kits')
+  const files = {}
+  const walk = (sub) => {
+    const full = path.join(dir, sub)
+    if (!fs.existsSync(full)) return
+    for (const entry of fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const rel = sub ? `${sub}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(rel)
+      else if (/\.(tsx?|js|json)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files[rel] = fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n')
+    }
+  }
+  walk('')
+  const out = path.join(repo, 'packages/com.pot.core/Runtime/Resources/pot/kits.json')
+  const text = JSON.stringify({ files }, null, 1) + '\n'
+  if (!fs.existsSync(out) || fs.readFileSync(out, 'utf8') !== text) fs.writeFileSync(out, text, 'utf8')
+  console.log(`[build] kits: ${Object.keys(files).length} 个文件 → ${path.relative(repo, out)}`)
+}
+
+main().then(emitKits).catch((error) => {
   console.error(error)
   process.exit(1)
 })

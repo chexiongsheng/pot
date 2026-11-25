@@ -38,6 +38,8 @@ export { treeView, applyPatches, generateTypes, typeOfValue, worldHash } from '.
 export { compressRecording, expandScript } from './world/script'
 export type { TestScript, ScriptInput } from './world/script'
 export { defineGame } from './world/game'
+export { defineKit, expandKits, isKit, kitOf, knownKits } from './world/kit'
+export type { Kit, KitDef } from './world/kit'
 export type { GameDef, GameUnit, GameWorld, SceneArgs, GameUI } from './world/game'
 export { BUILTIN_BLOCKS } from './world/blocks'
 export type { FlowDef, FlowStateDef } from './world/flow'

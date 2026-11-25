@@ -16,7 +16,8 @@ const tools = [
   { name: 'pot_check', description: '在本机对游戏目录做类型检查 + 试打包（不需要 Runner）。返回错误列表', inputSchema: { type: 'object', properties: { dir: { type: 'string', description: '游戏目录绝对路径' } }, required: ['dir'] } },
   { name: 'pot_eval', description: '在 Runner 的 JS 运行时中执行代码。可用变量：runtime、ctx（根上下文）、pot。表达式直接返回值；多语句请用 return', inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] } },
   { name: 'pot_state', description: '读写 state。action: keys | get | set | reset', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['keys', 'get', 'set', 'reset'] }, key: { type: 'string' }, value: {} } } },
-  { name: 'pot_blocks', description: '列出积木、预制件、界面标签、内置节点（名字、层、一句话说明、属性及缺省值），不需要 Runner。dir 为游戏目录（缺省只列系统级）；keyword 按名字和说明过滤；name 取单项', inputSchema: { type: 'object', properties: { dir: { type: 'string' }, keyword: { type: 'string' }, name: { type: 'string' } } } },
+  { name: 'pot_blocks', description: '列出积木、预制件、界面标签、内置节点、套件（名字、层、一句话说明、属性及缺省值；套件给出用法与是否已引入，未引入套件里的积木标 available），不需要 Runner。dir 为游戏目录（缺省只列系统级与套件）；keyword 按名字和说明过滤；name 取单项', inputSchema: { type: 'object', properties: { dir: { type: 'string' }, keyword: { type: 'string' }, name: { type: 'string' } } } },
+  { name: 'pot_eject', description: '把套件 kits/<kit> 复制进游戏的 src/kits/<kit>/，并把游戏源码里的 @pot/kit/<kit> 改成相对路径；之后副本归游戏所有，可随意改', inputSchema: { type: 'object', properties: { kit: { type: 'string' }, dir: { type: 'string', description: '游戏目录绝对路径' } }, required: ['kit', 'dir'] } },
   { name: 'pot_test', description: '在无画面宿主上跑游戏的 tests/*.json（没有时跑冒烟测试），不需要 Runner。update 为真时写回 World 哈希', inputSchema: { type: 'object', properties: { dir: { type: 'string' }, update: { type: 'boolean' } }, required: ['dir'] } },
   { name: 'pot_record', description: '在 Runner 里录制指令。action: start | stop | status；stop 返回 { steps, input, expect }，可直接存成 tests/*.json', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['start', 'stop', 'status'] } }, required: ['action'] } },
   { name: 'pot_query', description: '查询运行时。what: info（总体）| objects（场景对象，可按 unit 过滤）| data（数据文件依赖）| cache | modules（源码模块依赖图）| world（tick、流程、vars、实体；unit 作为标签或预制件筛选）| tree（场景树视图：key 路径、属性、源位置；unit 作为挂载 id）', inputSchema: { type: 'object', properties: { what: { type: 'string', enum: ['info', 'objects', 'data', 'cache', 'modules', 'world', 'tree'] }, unit: { type: 'string' } } } },
@@ -43,6 +44,7 @@ async function callTool(api, name, args = {}) {
       const word = args.keyword?.toLowerCase()
       return { ok: true, data: items.filter((i) => (!args.name || i.name === args.name) && (!word || i.name.toLowerCase().includes(word) || String(i.about).toLowerCase().includes(word))) }
     }
+    case 'pot_eject': return require('./eject').ejectKit(args.kit, require('path').resolve(args.dir))
     case 'pot_test': return require('./gametest').testGame(require('path').resolve(args.dir), { update: !!args.update })
     case 'pot_record': return api.call({ type: 'record', action: args.action })
     case 'pot_query': return api.call({ type: 'query', ...args })

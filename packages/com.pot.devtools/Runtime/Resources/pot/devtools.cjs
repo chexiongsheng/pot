@@ -22086,6 +22086,12 @@ ${namesToRegister.map(
   var UNIT_DIR = "src/plugins/";
   var UNIT_EXTS = [".ts", ".tsx", ".js"];
   var RESOLVE_SUFFIXES = ["", ".ts", ".tsx", ".js", ".json", "/index.ts", "/index.tsx", "/index.js"];
+  var KIT_PREFIX = "@pot/kit/";
+  var KIT_ID = /^@pot\/kit\/([a-z][a-z0-9-]*)(\/.*)?$/;
+  function kitRootOf(path) {
+    const m = KIT_ID.exec(path);
+    return m ? `${KIT_PREFIX}${m[1]}/` : void 0;
+  }
   function normalizePath(path) {
     const out = [];
     for (const part of path.replace(/\\/g, "/").split("/")) {
@@ -22176,11 +22182,26 @@ ${namesToRegister.map(
       return out;
     }
     _read(path) {
-      const text = this._host.readText(path);
+      let text;
+      if (path.startsWith(KIT_PREFIX)) {
+        if (!this._host.readKit) throw new Error(`当前宿主不支持套件，读不到 ${path}`);
+        text = this._host.readKit(path.slice(KIT_PREFIX.length));
+      } else text = this._host.readText(path);
       return text === null || text === void 0 ? null : text;
     }
     _resolve(id, from) {
-      const base = normalizePath(`${dirname(from)}/${id}`);
+      let base;
+      if (id.startsWith(KIT_PREFIX)) {
+        const m = KIT_ID.exec(id);
+        if (!m) throw new Error(`${from}: 套件路径不对："${id}"，应为 @pot/kit/<名字>[/子路径]`);
+        base = normalizePath(id);
+        if (base !== `${KIT_PREFIX}${m[1]}` && !base.startsWith(`${KIT_PREFIX}${m[1]}/`)) throw new Error(`${from}: 套件路径越出套件目录："${id}"`);
+      } else {
+        base = normalizePath(`${dirname(from)}/${id}`);
+        const root = kitRootOf(from);
+        if (root && !base.startsWith(root)) throw new Error(`${from}: 套件内的相对路径不能越出套件目录："${id}"`);
+        if (!root && base.startsWith("@pot/")) throw new Error(`${from}: 不能用相对路径引用套件，请写 import ... from '@pot/kit/<名字>'`);
+      }
       for (const suffix of RESOLVE_SUFFIXES) {
         const path = base + suffix;
         if (suffix === "" && !/\.(tsx?|js|json)$/.test(path)) continue;
@@ -22198,12 +22219,12 @@ ${namesToRegister.map(
         const factory = (0, import_core3.compileModule)(this.transpileCached(code, path), path);
         const require2 = (id) => {
           if (id in modules) return modules[id];
-          if (id.startsWith("./") || id.startsWith("../")) {
+          if (id.startsWith("./") || id.startsWith("../") || id.startsWith(KIT_PREFIX)) {
             const dep = this._require(id, path, modules);
             record.deps.add(dep.path);
             return dep.exports;
           }
-          throw new Error(`${path}: 不支持 require("${id}")。游戏代码只能依赖 @pot/core 和游戏目录内的相对路径文件`);
+          throw new Error(`${path}: 不支持 require("${id}")。游戏代码只能依赖 @pot/core、@pot/kit/* 和游戏目录内的相对路径文件`);
         };
         factory.call(module.exports, module.exports, require2, module, path);
       } catch (error) {
