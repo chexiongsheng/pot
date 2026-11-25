@@ -245,7 +245,7 @@ export class WorldService extends Service {
   /** 碰撞层名到位号（18.3 的 layers、18.6 的碰撞体缓冲区），最多 32 层 */
   private _layerBits = new Map<string, number>()
 
-  constructor(ctx: Context, host?: Host) {
+  constructor(ctx: Context, private _host?: Host) {
     super(ctx, 'world')
     this._root = ctx
     this._native = new NativeBlocks({
@@ -256,7 +256,7 @@ export class WorldService extends Service {
       cmd: (e) => this.cmd(e),
       layerMask: (names) => this.layerMask(names),
       syncBodies: () => this._syncNativeBodies(),
-    }, host)
+    }, _host)
     // 官方积木与预制件垫在栈底，游戏的同名登记覆盖它们
     for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, 'system')
     for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, 'system')
@@ -596,8 +596,19 @@ export class WorldService extends Service {
     return verifyNative(this, this._root.state, block, options)
   }
 
-  /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
-  private _syncNativeBodies() {}
+  private _nativeBodies = { table: -1, pending: '' }
+
+  /** 碰撞表或等待销毁的集合变了就发给原生侧（18.6）；与 TS 的 w.move 用同一时刻的碰撞表 */
+  private _syncNativeBodies() {
+    const table = this._table()
+    const pending = [...this._pendingSet].sort((a, b) => a - b)
+    const key = pending.join(',')
+    const sent = this._nativeBodies
+    if (sent.table === table.version && sent.pending === key) return
+    this._host?.nativeBodies?.(table.exportNative((name) => this.layerBit(name), pending))
+    sent.table = table.version
+    sent.pending = key
+  }
 
   /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
   setPatch(mount: string, path: string, patch: Record<string, any>) {

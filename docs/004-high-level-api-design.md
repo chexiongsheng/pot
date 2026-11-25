@@ -1922,3 +1922,15 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - 计时：宿主的 `now()`。Unity 上是 C# 的 `PotNative.Now()`（Stopwatch），`Time.realtimeSinceStartupAsDouble` 被 IL2CPP 裁剪掉了，取不到。Runner 的 V8 没有 `performance`。`tsMs`、`nativeMs` 是这个积木 step 阶段的累计耗时；`tsStepMs`、`nativeStepMs` 是整个模拟步（不含 verify 自己的哈希与记录）。
 - 测试 `block-verify.test.js` 4 个用例（假原生实现）：逐位一致与恢复、偏差的定位与容差、零输入与参数检查、没有原生实现与 devtools 命令。
 - 实机：hello-tsx 的 `tests/all-coins.json`（395 步）与 `tests/first-coin.json` 延长到 2000 步，C# 的 `moveTopdown` 与 TS 逐位一致（`identical: true`）。
+
+第 6 步（原生碰撞、PotMath 与 moveFps）：
+
+- 18.7 的“照搬 V8 的 fdlibm”不成立：这个 Runner 的 V8 的 `Math.sin`、`Math.cos` 是从 glibc 移植的查表实现，与 fdlibm 在约 3% 的输入上差 1 ulp（实测 3.5 万个输入里 sin 1022 个、cos 983 个）；`Math.exp`、`Math.hypot` 与 fdlibm、V8 的 Torque 实现逐位一致。不凭记忆照搬 glibc 的表，改为：内核提供确定性数学 `dmath`（`js/runtime/src/world/dmath.ts`，fdlibm 的 sin、cos，从 `@pot/core` 导出），模拟积木在 `step` 里用 `dmath.sin/cos` 代替 `Math.sin/cos`；C# 的 `PotMath.Sin/Cos` 是同一算法。这对 M5 帧同步与 M6 换 JS 引擎也是必要的（不同引擎的 `Math.sin` 不保证相同）。fps 套件的 `forward`、`right` 已改用 `dmath`，saltline 玩家金标准仍然通过。
+- `dmath` 与 `PotMath` 的三角函数在 `|x|` 超过 `2^19·π/2`（约 82 万弧度）时没有照搬 `__kernel_rem_pio2`，各自退回 `Math`/`System.Math`，不保证一致。`PotMath.Max/Min` 按 JS 语义处理 NaN 与正负零（`System.Math.Max(0, -0)` 是 -0）。
+- 实测（Runner 里 `PotBench.MathBatch` 对 `pot.dmath` 与 `Math`）：sin、cos 对 `dmath` 各 34778 个输入、exp 对 `Math.exp` 34786 个、hypot 对 `Math.hypot` 20007 组，全部逐位相同。
+- C# 碰撞 `PotCollide` 只移植了 `move` 与盒的 `overlap`（`moveFps` 用到的），`raycast` 与球的 `overlap` 没有移植。候选按 XZ 包围盒逐个筛（没有网格），按 id 升序遍历：JS 的网格只是更大的超集，多出的碰撞体在精确判定里都不命中，结果相同。
+- 碰撞体同步：`BodyTable` 加 `version`（增、删、改时加一）与 `exportNative`；World 在用到碰撞的原生积木执行前比较碰撞表版本与等待销毁的 id 列表，变了才发。缓冲区格式见 `PotCollide.cs` 的注释。静态关卡只发一次。
+- verify 结果加了 `changedSteps`（TS 那一遍里积木字段有变化的步数）。起因：第一次在 saltline 上 verify 时玩家已经死了，`moveFps.active` 为 false，两边什么都没做，结果“逐位一致”却没有意义。为 0 时要换一段输入或先让实体动起来。
+- 实机（saltline，开新局、清掉敌人，用玩家金标准的 840 步输入，去掉落水传送）：未锁鼠标（灵敏度被置 0）时 778 步有变化，锁定鼠标、初始 yaw 37.5° 时 788 步有变化，C# 的 `moveFps` 都与 TS 逐位一致（`identical: true`）。
+- 顺带发现：saltline 有 559 个碰撞体，`BodyTable.sync` 每个固定步重算全部签名（字符串拼接），约 0.6 ms，是 `moveFps` 在 TS 与 C# 两边耗时的大头。留给第 7 步的性能对比一并说明。
+- Runner 的 V8 里 `typeof WebAssembly` 为 `undefined`（第 8 步的前提）。

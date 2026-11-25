@@ -5,7 +5,7 @@
  *   import fps, { damage } from '@pot/kit/fps'
  *   export default defineGame({ kits: [fps], ... })
  */
-import { defineBlock, defineKit } from '@pot/core'
+import { defineBlock, defineKit, dmath } from '@pot/core'
 import type { Over, Vec3 } from '@pot/core'
 
 // ---------------------------------------------------------------- 小工具
@@ -14,14 +14,14 @@ const DEG = Math.PI / 180
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v)
 /** 指数逼近：rate 越大越快 */
 const damp = (c: number, t: number, rate: number, dt: number) => t + (c - t) * Math.exp(-rate * dt)
-/** 朝向（度）对应的前方单位向量 */
+/** 朝向（度）对应的前方单位向量。用 dmath：模拟要与原生实现逐位一致（004 第 18.7 节） */
 const forward = (yaw: number, pitch = 0): Vec3 => {
   const y = yaw * DEG, p = pitch * DEG
-  return [Math.sin(y) * Math.cos(p), -Math.sin(p), Math.cos(y) * Math.cos(p)]
+  return [dmath.sin(y) * dmath.cos(p), -dmath.sin(p), dmath.cos(y) * dmath.cos(p)]
 }
 const right = (yaw: number): Vec3 => {
   const y = yaw * DEG
-  return [Math.cos(y), 0, -Math.sin(y)]
+  return [dmath.cos(y), 0, -dmath.sin(y)]
 }
 /** 由整数推出的 [-0.5, 0.5) 伪随机（表现层用，不动 World 的随机序列） */
 const noise = (n: number) => {

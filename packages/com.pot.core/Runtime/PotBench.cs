@@ -52,6 +52,35 @@ namespace Pot
             return new Puerts.ArrayBuffer(bytes);
         }
 
+        /// <summary>
+        /// PotMath 与 JS Math 的逐位比较用（18.7）：fn 为 sin、cos、exp、hypot（两两一组），逐个算后返回结果数组
+        /// </summary>
+        [Preserve]
+        public static Puerts.ArrayBuffer MathBatch(string fn, Puerts.ArrayBuffer buf)
+        {
+            if (buf == null || buf.Bytes == null) return null;
+            var n = buf.Count / 8;
+            var a = new double[n];
+            Buffer.BlockCopy(buf.Bytes, 0, a, 0, n * 8);
+            var outLen = fn == "hypot" ? n / 2 : n;
+            var r = new double[outLen];
+            for (var i = 0; i < outLen; i++)
+            {
+                switch (fn)
+                {
+                    case "sin": r[i] = PotMath.Sin(a[i]); break;
+                    case "cos": r[i] = PotMath.Cos(a[i]); break;
+                    case "exp": r[i] = PotMath.Exp(a[i]); break;
+                    case "hypot": r[i] = PotMath.Hypot(a[2 * i], a[2 * i + 1]); break;
+                    case "max": r[i] = PotMath.Max(a[i], -a[i]); break;
+                    default: throw new ArgumentException("未知函数 " + fn);
+                }
+            }
+            var bytes = new byte[outLen * 8];
+            Buffer.BlockCopy(r, 0, bytes, 0, outLen * 8);
+            return new Puerts.ArrayBuffer(bytes);
+        }
+
         /// <summary>纯 C# 基准：对 n 个 double 做与 JS 基准相同的运算，返回耗时毫秒</summary>
         [Preserve]
         public static double Compute(int n, int rounds)

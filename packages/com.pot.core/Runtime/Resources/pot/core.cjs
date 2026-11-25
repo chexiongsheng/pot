@@ -111,6 +111,7 @@ var pot = (() => {
     definePlugin: () => definePlugin,
     definePrefab: () => definePrefab,
     deriveLayout: () => deriveLayout,
+    dmath: () => dmath,
     encode: () => encode,
     encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
@@ -2535,8 +2536,8 @@ var pot = (() => {
     }
     /** move：WASD/方向键，look：鼠标增量。返回 { x, y } */
     axis(name = "move") {
-      const [x, y] = this._host.engine.axis(name);
-      return { x, y };
+      const [x, y2] = this._host.engine.axis(name);
+      return { x, y: y2 };
     }
     /** 按住。鼠标按键用 mouse0（左）、mouse1（右）、mouse2（中） */
     key(name) {
@@ -2557,8 +2558,8 @@ var pot = (() => {
     }
     /** 鼠标位置（像素，左上角为原点，与 ctx.ui 坐标一致） */
     mouse() {
-      const [x, y] = this._host.engine.mouse();
-      return { x, y };
+      const [x, y2] = this._host.engine.mouse();
+      return { x, y: y2 };
     }
     /** 屏幕尺寸（像素） */
     screen() {
@@ -2913,20 +2914,20 @@ var pot = (() => {
     transform(a, b, c, d, e, f) {
       this._s.m = mul(this._s.m, [a, b, c, d, e, f]);
     }
-    translate(x, y) {
-      this._s.m = mul(this._s.m, [1, 0, 0, 1, x, y]);
+    translate(x, y2) {
+      this._s.m = mul(this._s.m, [1, 0, 0, 1, x, y2]);
     }
-    scale(x, y) {
-      this._s.m = mul(this._s.m, [x, 0, 0, y, 0, 0]);
+    scale(x, y2) {
+      this._s.m = mul(this._s.m, [x, 0, 0, y2, 0, 0]);
     }
     rotate(r) {
       const c = Math.cos(r), s = Math.sin(r);
       this._s.m = mul(this._s.m, [c, s, -s, c, 0, 0]);
     }
     // ---------------- 路径（存设备坐标） ----------------
-    _tx(x, y) {
+    _tx(x, y2) {
       const m = this._s.m;
-      return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+      return [m[0] * x + m[2] * y2 + m[4], m[1] * x + m[3] * y2 + m[5]];
     }
     _scale() {
       const m = this._s.m;
@@ -2937,23 +2938,23 @@ var pot = (() => {
       if (!c || !c.pts.length) return null;
       return [c.pts[c.pts.length - 2], c.pts[c.pts.length - 1]];
     }
-    _addDev(x, y) {
+    _addDev(x, y2) {
       if (!this._cur) {
-        this._cur = { pts: [x, y], closed: false };
+        this._cur = { pts: [x, y2], closed: false };
         this._subs.push(this._cur);
-      } else this._cur.pts.push(x, y);
+      } else this._cur.pts.push(x, y2);
     }
     beginPath() {
       this._subs = [];
       this._cur = null;
     }
-    moveTo(x, y) {
-      const [dx, dy] = this._tx(x, y);
+    moveTo(x, y2) {
+      const [dx, dy] = this._tx(x, y2);
       this._cur = { pts: [dx, dy], closed: false };
       this._subs.push(this._cur);
     }
-    lineTo(x, y) {
-      const [dx, dy] = this._tx(x, y);
+    lineTo(x, y2) {
+      const [dx, dy] = this._tx(x, y2);
       this._addDev(dx, dy);
     }
     closePath() {
@@ -2963,13 +2964,13 @@ var pot = (() => {
       this._cur = { pts: [c.pts[0], c.pts[1]], closed: false };
       this._subs.push(this._cur);
     }
-    quadraticCurveTo(cx, cy, x, y) {
+    quadraticCurveTo(cx, cy, x, y2) {
       let p0 = this._last();
       if (!p0) {
         this.moveTo(cx, cy);
         p0 = this._last();
       }
-      const p1 = this._tx(cx, cy), p2 = this._tx(x, y);
+      const p1 = this._tx(cx, cy), p2 = this._tx(x, y2);
       const d = Math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]);
       const n2 = Math.min(256, Math.max(1, Math.ceil(Math.sqrt(d * 2))));
       for (let i = 1; i <= n2; i++) {
@@ -2977,13 +2978,13 @@ var pot = (() => {
         this._addDev(u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]);
       }
     }
-    bezierCurveTo(c1x, c1y, c2x, c2y, x, y) {
+    bezierCurveTo(c1x, c1y, c2x, c2y, x, y2) {
       let p0 = this._last();
       if (!p0) {
         this.moveTo(c1x, c1y);
         p0 = this._last();
       }
-      const p1 = this._tx(c1x, c1y), p2 = this._tx(c2x, c2y), p3 = this._tx(x, y);
+      const p1 = this._tx(c1x, c1y), p2 = this._tx(c2x, c2y), p3 = this._tx(x, y2);
       const d = Math.max(
         Math.hypot(p0[0] - 2 * p1[0] + p2[0], p0[1] - 2 * p1[1] + p2[1]),
         Math.hypot(p1[0] - 2 * p2[0] + p3[0], p1[1] - 2 * p2[1] + p3[1])
@@ -2995,10 +2996,10 @@ var pot = (() => {
         this._addDev(a * p0[0] + b * p1[0] + c * p2[0] + e * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + e * p3[1]);
       }
     }
-    arc(x, y, r, a0, a1, ccw = false) {
-      this.ellipse(x, y, r, r, 0, a0, a1, ccw);
+    arc(x, y2, r, a0, a1, ccw = false) {
+      this.ellipse(x, y2, r, r, 0, a0, a1, ccw);
     }
-    ellipse(x, y, rx, ry, rot, a0, a1, ccw = false) {
+    ellipse(x, y2, rx, ry, rot, a0, a1, ccw = false) {
       if (rx < 0 || ry < 0) throw new Error("ellipse：半径不能为负");
       let sweep = a1 - a0;
       if (!ccw) {
@@ -3020,7 +3021,7 @@ var pot = (() => {
       for (let i = 0; i <= n2; i++) {
         const a = a0 + sweep * i / n2;
         const ex = Math.cos(a) * rx, ey = Math.sin(a) * ry;
-        const [dx, dy] = this._tx(x + ex * cr - ey * sr, y + ex * sr + ey * cr);
+        const [dx, dy] = this._tx(x + ex * cr - ey * sr, y2 + ex * sr + ey * cr);
         this._addDev(dx, dy);
       }
     }
@@ -3040,8 +3041,8 @@ var pot = (() => {
         this.lineTo(x1, y1);
         return;
       }
-      const cos = (ax * bx + ay * by) / (la * lb);
-      const half2 = Math.acos(Math.max(-1, Math.min(1, cos))) / 2;
+      const cos2 = (ax * bx + ay * by) / (la * lb);
+      const half2 = Math.acos(Math.max(-1, Math.min(1, cos2))) / 2;
       const dist = r / Math.tan(half2);
       const t0x = x1 + ax / la * dist, t0y = y1 + ay / la * dist;
       const t1x = x1 + bx / lb * dist, t1y = y1 + by / lb * dist;
@@ -3051,27 +3052,27 @@ var pot = (() => {
       const s = Math.atan2(t0y - cy, t0x - cx), e = Math.atan2(t1y - cy, t1x - cx);
       this.arc(cx, cy, r, s, e, cross > 0);
     }
-    rect(x, y, w, h) {
-      this.moveTo(x, y);
-      this.lineTo(x + w, y);
-      this.lineTo(x + w, y + h);
-      this.lineTo(x, y + h);
+    rect(x, y2, w, h) {
+      this.moveTo(x, y2);
+      this.lineTo(x + w, y2);
+      this.lineTo(x + w, y2 + h);
+      this.lineTo(x, y2 + h);
       this.closePath();
     }
-    roundRect(x, y, w, h, radii = 0) {
+    roundRect(x, y2, w, h, radii = 0) {
       const r = Array.isArray(radii) ? radii : [radii];
       const [tl, tr, br, bl] = r.length === 1 ? [r[0], r[0], r[0], r[0]] : r.length === 2 ? [r[0], r[1], r[0], r[1]] : r.length === 3 ? [r[0], r[1], r[2], r[1]] : r;
       const k = Math.min(1, Math.abs(w) / Math.max(1e-9, tl + tr, bl + br), Math.abs(h) / Math.max(1e-9, tl + bl, tr + br));
       const a = tl * k, b = tr * k, c = br * k, d = bl * k;
-      this.moveTo(x + a, y);
-      this.lineTo(x + w - b, y);
-      if (b) this.arc(x + w - b, y + b, b, -Math.PI / 2, 0);
-      this.lineTo(x + w, y + h - c);
-      if (c) this.arc(x + w - c, y + h - c, c, 0, Math.PI / 2);
-      this.lineTo(x + d, y + h);
-      if (d) this.arc(x + d, y + h - d, d, Math.PI / 2, Math.PI);
-      this.lineTo(x, y + a);
-      if (a) this.arc(x + a, y + a, a, Math.PI, Math.PI * 1.5);
+      this.moveTo(x + a, y2);
+      this.lineTo(x + w - b, y2);
+      if (b) this.arc(x + w - b, y2 + b, b, -Math.PI / 2, 0);
+      this.lineTo(x + w, y2 + h - c);
+      if (c) this.arc(x + w - c, y2 + h - c, c, 0, Math.PI / 2);
+      this.lineTo(x + d, y2 + h);
+      if (d) this.arc(x + d, y2 + h - d, d, Math.PI / 2, Math.PI);
+      this.lineTo(x, y2 + a);
+      if (a) this.arc(x + a, y2 + a, a, Math.PI, Math.PI * 1.5);
       this.closePath();
     }
     // ---------------- 绘制 ----------------
@@ -3097,21 +3098,21 @@ var pot = (() => {
       this._evenodd = false;
       if (cov) {
         const { x0, y0, w, h, a } = cov;
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) mask[(y0 + y) * c.width + x0 + x] = a[y * w + x];
+        for (let y2 = 0; y2 < h; y2++) for (let x = 0; x < w; x++) mask[(y0 + y2) * c.width + x0 + x] = a[y2 * w + x];
       }
       const old = this._s.clip;
       if (old) for (let i = 0; i < mask.length; i++) mask[i] *= old[i];
       this._s.clip = mask;
     }
-    fillRect(x, y, w, h) {
-      this._paint([this._rectPoly(x, y, w, h)], this._s.fill);
+    fillRect(x, y2, w, h) {
+      this._paint([this._rectPoly(x, y2, w, h)], this._s.fill);
     }
-    strokeRect(x, y, w, h) {
-      const p = this._rectPoly(x, y, w, h);
+    strokeRect(x, y2, w, h) {
+      const p = this._rectPoly(x, y2, w, h);
       this._paint(this._strokePolys([{ pts: p, closed: true }]), this._s.stroke);
     }
-    clearRect(x, y, w, h) {
-      const cov = this._coverage([this._rectPoly(x, y, w, h)]);
+    clearRect(x, y2, w, h) {
+      const cov = this._coverage([this._rectPoly(x, y2, w, h)]);
       if (!cov) return;
       const d = this.canvas.data, W = this.canvas.width, clip = this._s.clip;
       const { x0, y0, w: cw, h: ch, a } = cov;
@@ -3127,14 +3128,14 @@ var pot = (() => {
         d[pi * 4 + 3] *= k;
       }
     }
-    isPointInPath(x, y) {
+    isPointInPath(x, y2) {
       const cov = this._coverage(this._fillPolys());
       if (!cov) return false;
-      const xi = Math.floor(x) - cov.x0, yi = Math.floor(y) - cov.y0;
+      const xi = Math.floor(x) - cov.x0, yi = Math.floor(y2) - cov.y0;
       return xi >= 0 && yi >= 0 && xi < cov.w && yi < cov.h && cov.a[yi * cov.w + xi] > 0.5;
     }
-    _rectPoly(x, y, w, h) {
-      const a = this._tx(x, y), b = this._tx(x + w, y), c = this._tx(x + w, y + h), d = this._tx(x, y + h);
+    _rectPoly(x, y2, w, h) {
+      const a = this._tx(x, y2), b = this._tx(x + w, y2), c = this._tx(x + w, y2 + h), d = this._tx(x, y2 + h);
       return [a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1]];
     }
     createLinearGradient(x0, y0, x1, y1) {
@@ -3152,12 +3153,12 @@ var pot = (() => {
       const W = this.canvas.width, H = this.canvas.height;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const p of polys) for (let i = 0; i < p.length; i += 2) {
-        const x = p[i], y = p[i + 1];
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const x = p[i], y2 = p[i + 1];
+        if (!Number.isFinite(x) || !Number.isFinite(y2)) return null;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
+        if (y2 < minY) minY = y2;
+        if (y2 > maxY) maxY = y2;
       }
       const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(W, Math.ceil(maxX));
       const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H, Math.ceil(maxY));
@@ -3180,9 +3181,9 @@ var pot = (() => {
         let x = ax;
         if (ay < 0) x -= ay * dxdy;
         const ys = Math.max(0, Math.floor(ay)), ye = Math.min(bh, Math.ceil(by));
-        for (let y = ys; y < ye; y++) {
-          const ls = y * stride;
-          const dy = Math.min(y + 1, by) - Math.max(y, ay);
+        for (let y2 = ys; y2 < ye; y2++) {
+          const ls = y2 * stride;
+          const dy = Math.min(y2 + 1, by) - Math.max(y2, ay);
           const xn = x + dxdy * dy;
           const d = dy * dir;
           const xa = x < xn ? x : xn, xb = x < xn ? xn : x;
@@ -3239,9 +3240,9 @@ var pot = (() => {
       }
       const a = new Float32Array(bw * bh);
       const eo = this._evenodd;
-      for (let y = 0; y < bh; y++) {
+      for (let y2 = 0; y2 < bh; y2++) {
         let s = 0;
-        const ls = y * stride;
+        const ls = y2 * stride;
         for (let x = 0; x < bw; x++) {
           s += acc[ls + x];
           let v = Math.abs(s);
@@ -3249,7 +3250,7 @@ var pot = (() => {
             v %= 2;
             if (v > 1) v = 2 - v;
           }
-          a[y * bw + x] = v > 1 ? 1 : v;
+          a[y2 * bw + x] = v > 1 ? 1 : v;
         }
       }
       return { x0, y0, w: bw, h: bh, a };
@@ -3266,10 +3267,10 @@ var pot = (() => {
         for (let i = 0; i < p.length; i += 2) r.push(m[0] * p[i] + m[2] * p[i + 1] + m[4], m[1] * p[i] + m[3] * p[i + 1] + m[5]);
         out.push(orient(r));
       };
-      const circle = (x, y) => {
+      const circle = (x, y2) => {
         const n2 = Math.min(256, Math.max(8, Math.ceil(TAU * Math.sqrt(Math.max(hw * scale, 0.5)) * 1.3)));
         const p = [];
-        for (let i = 0; i < n2; i++) p.push(x + Math.cos(i / n2 * TAU) * hw, y + Math.sin(i / n2 * TAU) * hw);
+        for (let i = 0; i < n2; i++) p.push(x + Math.cos(i / n2 * TAU) * hw, y2 + Math.sin(i / n2 * TAU) * hw);
         push(p);
       };
       const stroke = (pts, closed) => {
@@ -3326,10 +3327,10 @@ var pot = (() => {
         const user = [];
         for (let i = 0; i < sub.pts.length; i += 2) {
           const x = inv[0] * sub.pts[i] + inv[2] * sub.pts[i + 1] + inv[4];
-          const y = inv[1] * sub.pts[i] + inv[3] * sub.pts[i + 1] + inv[5];
+          const y2 = inv[1] * sub.pts[i] + inv[3] * sub.pts[i + 1] + inv[5];
           const k = user.length;
-          if (k && Math.abs(user[k - 2] - x) < 1e-7 && Math.abs(user[k - 1] - y) < 1e-7) continue;
-          user.push(x, y);
+          if (k && Math.abs(user[k - 2] - x) < 1e-7 && Math.abs(user[k - 1] - y2) < 1e-7) continue;
+          user.push(x, y2);
         }
         if (sub.closed && user.length > 4 && Math.abs(user[0] - user[user.length - 2]) < 1e-7 && Math.abs(user[1] - user[user.length - 1]) < 1e-7) user.length -= 2;
         if (user.length < 4) continue;
@@ -3403,20 +3404,20 @@ var pot = (() => {
       if (gr.kind === "linear") {
         const [x0, y0, x1, y1] = A;
         const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
-        return (x, y, o) => {
+        return (x, y2, o) => {
           if (!l2) {
             o.fill(0);
             return;
           }
-          const ux = inv[0] * x + inv[2] * y + inv[4], uy = inv[1] * x + inv[3] * y + inv[5];
+          const ux = inv[0] * x + inv[2] * y2 + inv[4], uy = inv[1] * x + inv[3] * y2 + inv[5];
           look(((ux - x0) * dx + (uy - y0) * dy) / l2, o);
         };
       }
       const [cx0, cy0, r0, cx1, cy1, r1] = A;
       const cdx = cx1 - cx0, cdy = cy1 - cy0, dr = r1 - r0;
       const a = cdx * cdx + cdy * cdy - dr * dr;
-      return (x, y, o) => {
-        const ux = inv[0] * x + inv[2] * y + inv[4], uy = inv[1] * x + inv[3] * y + inv[5];
+      return (x, y2, o) => {
+        const ux = inv[0] * x + inv[2] * y2 + inv[4], uy = inv[1] * x + inv[3] * y2 + inv[5];
         const px = ux - cx0, py = uy - cy0;
         const b = px * cdx + py * cdy + r0 * dr;
         const c = px * px + py * py - r0 * r0;
@@ -3526,12 +3527,12 @@ var pot = (() => {
       const shade = this._shader(paint);
       const S = new Float32Array(4);
       const { x0, y0, w, h, a } = cov;
-      for (let y = 0; y < h; y++) {
-        const py = y0 + y + 0.5;
+      for (let y2 = 0; y2 < h; y2++) {
+        const py = y0 + y2 + 0.5;
         for (let x = 0; x < w; x++) {
-          let c = a[y * w + x];
+          let c = a[y2 * w + x];
           if (c <= 0) continue;
-          const pi = (y0 + y) * W + x0 + x;
+          const pi = (y0 + y2) * W + x0 + x;
           if (clip) {
             c *= clip[pi];
             if (c <= 0) continue;
@@ -3568,18 +3569,18 @@ var pot = (() => {
       const smooth = this.imageSmoothingEnabled;
       const lx = Math.max(0, Math.min(sx, sx + sw)), hx = Math.min(iw, Math.max(sx, sx + sw));
       const ly = Math.max(0, Math.min(sy, sy + sh)), hy = Math.min(ih, Math.max(sy, sy + sh));
-      this._paint([this._rectPoly(dx, dy, dw, dh)], this._s.fill, (x, y, o) => {
-        const ux = inv[0] * x + inv[2] * y + inv[4], uy = inv[1] * x + inv[3] * y + inv[5];
+      this._paint([this._rectPoly(dx, dy, dw, dh)], this._s.fill, (x, y2, o) => {
+        const ux = inv[0] * x + inv[2] * y2 + inv[4], uy = inv[1] * x + inv[3] * y2 + inv[5];
         const u = sx + (ux - dx) / dw * sw, v = sy + (uy - dy) / dh * sh;
         sampleRGBA(src, iw, u, v, lx, ly, hx, hy, smooth, o);
         return -1;
       });
     }
-    getImageData(x, y, w, h) {
+    getImageData(x, y2, w, h) {
       const out = new Uint8ClampedArray(w * h * 4);
       const c = this.canvas, d = c.data;
       for (let j = 0; j < h; j++) {
-        const yy = y + j;
+        const yy = y2 + j;
         if (yy < 0 || yy >= c.height) continue;
         for (let i = 0; i < w; i++) {
           const xx = x + i;
@@ -3600,12 +3601,12 @@ var pot = (() => {
       if (typeof w === "object") return { width: w.width, height: w.height, data: new Uint8ClampedArray(w.width * w.height * 4) };
       return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
     }
-    putImageData(img, x, y) {
+    putImageData(img, x, y2) {
       const c = this.canvas, d = c.data, s = img.data;
       x = Math.round(x);
-      y = Math.round(y);
+      y2 = Math.round(y2);
       for (let j = 0; j < img.height; j++) {
-        const yy = y + j;
+        const yy = y2 + j;
         if (yy < 0 || yy >= c.height) continue;
         for (let i = 0; i < img.width; i++) {
           const xx = x + i;
@@ -3645,7 +3646,7 @@ var pot = (() => {
           return 0;
       }
     }
-    fillText(text, x, y, maxWidth) {
+    fillText(text, x, y2, maxWidth) {
       text = String(text).replace(/[\t\n\r\f]/g, " ");
       if (!text) return;
       const f = this._s.font;
@@ -3656,18 +3657,18 @@ var pot = (() => {
       const adv = g.adv * k;
       const sxk = maxWidth !== void 0 && maxWidth > 0 && adv > maxWidth ? maxWidth / adv : 1;
       const ascent = f.size * 0.8, descent = f.size * 0.2;
-      let base = y;
+      let base = y2;
       switch (this._s.textBaseline) {
         case "top":
         case "hanging":
-          base = y + ascent;
+          base = y2 + ascent;
           break;
         case "middle":
-          base = y + (ascent - descent) / 2;
+          base = y2 + (ascent - descent) / 2;
           break;
         case "bottom":
         case "ideographic":
-          base = y - descent;
+          base = y2 - descent;
           break;
       }
       const left = x + this._alignOffset(adv * sxk);
@@ -3697,8 +3698,8 @@ var pot = (() => {
   }
   function sampleRGBA(src, w, u, v, lx, ly, hx, hy, smooth, o) {
     if (!smooth) {
-      const x = Math.min(hx - 1, Math.max(lx, Math.floor(u))), y = Math.min(hy - 1, Math.max(ly, Math.floor(v)));
-      const i = (y * w + x) * 4;
+      const x = Math.min(hx - 1, Math.max(lx, Math.floor(u))), y2 = Math.min(hy - 1, Math.max(ly, Math.floor(v)));
+      const i = (y2 * w + x) * 4;
       o[0] = src[i];
       o[1] = src[i + 1];
       o[2] = src[i + 2];
@@ -3709,7 +3710,7 @@ var pot = (() => {
     let x0 = Math.floor(fx), y0 = Math.floor(fy);
     const tx = fx - x0, ty = fy - y0;
     const cx = (x) => x < lx ? lx : x > hx - 1 ? hx - 1 : x;
-    const cy = (y) => y < ly ? ly : y > hy - 1 ? hy - 1 : y;
+    const cy = (y2) => y2 < ly ? ly : y2 > hy - 1 ? hy - 1 : y2;
     const xa = cx(x0), xb = cx(x0 + 1), ya = cy(y0), yb = cy(y0 + 1);
     const i00 = (ya * w + xa) * 4, i10 = (ya * w + xb) * 4, i01 = (yb * w + xa) * 4, i11 = (yb * w + xb) * 4;
     for (let k = 0; k < 4; k++) {
@@ -3723,7 +3724,7 @@ var pot = (() => {
     const fx = u - 0.5, fy = v - 0.5;
     const x0 = Math.floor(fx), y0 = Math.floor(fy);
     const tx = fx - x0, ty = fy - y0;
-    const at = (x, y) => x < 0 || y < 0 || x >= w || y >= h ? 0 : A[y * w + x];
+    const at = (x, y2) => x < 0 || y2 < 0 || x >= w || y2 >= h ? 0 : A[y2 * w + x];
     const top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
     const bot = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
     return (top + (bot - top) * ty) / 255;
@@ -3789,10 +3790,10 @@ var pot = (() => {
     pixels(flipY = false) {
       const w = this._w, h = this._h, d = this.data;
       const out = new Uint8Array(w * h * 4);
-      for (let y = 0; y < h; y++) {
-        const ry = flipY ? h - 1 - y : y;
+      for (let y2 = 0; y2 < h; y2++) {
+        const ry = flipY ? h - 1 - y2 : y2;
         for (let x = 0; x < w; x++) {
-          const s = (y * w + x) * 4, o = (ry * w + x) * 4;
+          const s = (y2 * w + x) * 4, o = (ry * w + x) * 4;
           const a = d[s + 3];
           if (a <= 0) continue;
           const ia = 1 / a;
@@ -3947,17 +3948,17 @@ var pot = (() => {
     if (!(t > 0)) return;
     const r = plane.region;
     if (r) {
-      const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t;
+      const x = o[0] + d[0] * t, y2 = o[1] + d[1] * t, z = o[2] + d[2] * t;
       if (r.minX !== void 0 && x < r.minX || r.maxX !== void 0 && x > r.maxX) return;
-      if (r.minY !== void 0 && y < r.minY || r.maxY !== void 0 && y > r.maxY) return;
+      if (r.minY !== void 0 && y2 < r.minY || r.maxY !== void 0 && y2 > r.maxY) return;
       if (r.minZ !== void 0 && z < r.minZ || r.maxZ !== void 0 && z > r.maxZ) return;
     }
     return t;
   }
-  function eulerToQuaternion(x, y, z, out = [0, 0, 0, 1]) {
+  function eulerToQuaternion(x, y2, z, out = [0, 0, 0, 1]) {
     const h = Math.PI / 360;
     const sx = Math.sin(x * h), cx = Math.cos(x * h);
-    const sy = Math.sin(y * h), cy = Math.cos(y * h);
+    const sy = Math.sin(y2 * h), cy = Math.cos(y2 * h);
     const sz = Math.sin(z * h), cz = Math.cos(z * h);
     const ax = sx * cz, ay = -sx * sz, az = cx * sz, aw = cx * cz;
     out[0] = cy * ax + sy * az;
@@ -3968,25 +3969,25 @@ var pot = (() => {
   }
   function slerpQuaternion(a, b, t, out = [0, 0, 0, 1]) {
     let bx = b[0], by = b[1], bz = b[2], bw = b[3];
-    let cos = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw;
-    if (cos < 0) {
-      cos = -cos;
+    let cos2 = a[0] * bx + a[1] * by + a[2] * bz + a[3] * bw;
+    if (cos2 < 0) {
+      cos2 = -cos2;
       bx = -bx;
       by = -by;
       bz = -bz;
       bw = -bw;
     }
     let k0 = 1 - t, k1 = t;
-    if (cos < 0.9995) {
-      const angle = Math.acos(cos);
-      const sin = Math.sin(angle);
-      k0 = Math.sin((1 - t) * angle) / sin;
-      k1 = Math.sin(t * angle) / sin;
+    if (cos2 < 0.9995) {
+      const angle = Math.acos(cos2);
+      const sin2 = Math.sin(angle);
+      k0 = Math.sin((1 - t) * angle) / sin2;
+      k1 = Math.sin(t * angle) / sin2;
     }
-    const x = k0 * a[0] + k1 * bx, y = k0 * a[1] + k1 * by, z = k0 * a[2] + k1 * bz, w = k0 * a[3] + k1 * bw;
-    const len = Math.hypot(x, y, z, w) || 1;
+    const x = k0 * a[0] + k1 * bx, y2 = k0 * a[1] + k1 * by, z = k0 * a[2] + k1 * bz, w = k0 * a[3] + k1 * bw;
+    const len = Math.hypot(x, y2, z, w) || 1;
     out[0] = x / len;
-    out[1] = y / len;
+    out[1] = y2 / len;
     out[2] = z / len;
     out[3] = w / len;
     return out;
@@ -4034,13 +4035,13 @@ var pot = (() => {
       this._engine.setVec(this.id, "scale", v[0], v[1], v[2]);
     }
     move(dx, dy, dz) {
-      const [x, y, z] = this.position;
-      this.position = [x + dx, y + dy, z + dz];
+      const [x, y2, z] = this.position;
+      this.position = [x + dx, y2 + dy, z + dz];
       return this;
     }
     lookAt(target) {
-      const [x, y, z] = target instanceof _Entity ? target.position : target;
-      this._engine.lookAt(this.id, x, y, z);
+      const [x, y2, z] = target instanceof _Entity ? target.position : target;
+      this._engine.lookAt(this.id, x, y2, z);
       return this;
     }
     color(color) {
@@ -4659,17 +4660,17 @@ var pot = (() => {
       const [r, g, b, a] = parseColor(color);
       return [r, g, b, a * Math.max(0, Math.min(1, alpha))].map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
     }
-    rect(x, y, w, h, color, options = {}) {
-      this._list.push(["r", n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(options.radius ?? 0)].join(FS));
+    rect(x, y2, w, h, color, options = {}) {
+      this._list.push(["r", n(x), n(y2), n(w), n(h), this.hex(color, options.alpha), n(options.radius ?? 0)].join(FS));
     }
-    border(x, y, w, h, color, thickness = 1, options = {}) {
-      this._list.push(["b", n(x), n(y), n(w), n(h), this.hex(color, options.alpha), n(thickness), n(options.radius ?? 0)].join(FS));
+    border(x, y2, w, h, color, thickness = 1, options = {}) {
+      this._list.push(["b", n(x), n(y2), n(w), n(h), this.hex(color, options.alpha), n(thickness), n(options.radius ?? 0)].join(FS));
     }
     /**
      * 线性渐变填充矩形（同 CSS linear-gradient，色标间按预乘 alpha 插值）。
      * 例：ui.gradient(0, 0, W, H, [['#06080ad1', 0], ['#06080a80', 0.38], ['#06080a00', 0.72]], { angle: 90 })
      */
-    gradient(x, y, w, h, stops, options = {}) {
+    gradient(x, y2, w, h, stops, options = {}) {
       if (!Array.isArray(stops) || stops.length === 0) throw new Error("ui.gradient：stops 至少要有一个色标");
       const raw = options.angle ?? 180;
       if (!Number.isFinite(raw) || raw % 90 !== 0) throw new Error("ui.gradient：angle 只支持 0/90/180/270");
@@ -4698,7 +4699,7 @@ var pot = (() => {
       const vertical = angle === 0 || angle === 180;
       const flip = angle === 0 || angle === 270;
       const out = (flip ? list.slice().reverse().map((s) => ({ hex: s.hex, pos: 1 - s.pos })) : list).map((s) => `${s.hex}@${Math.round(s.pos * 1e4) / 1e4}`);
-      this._list.push(["g", n(x), n(y), n(w), n(h), n(options.radius ?? 0), vertical ? "1" : "0", out.join(";")].join(FS));
+      this._list.push(["g", n(x), n(y2), n(w), n(h), n(options.radius ?? 0), vertical ? "1" : "0", out.join(";")].join(FS));
     }
     line(x1, y1, x2, y2, color, width = 1, alpha = 1) {
       this._list.push(["l", n(x1), n(y1), n(x2), n(y2), this.hex(color, alpha), n(width)].join(FS));
@@ -4707,16 +4708,16 @@ var pot = (() => {
     arc(cx, cy, radius, color, thickness = 2, start = 0, sweep = 360, alpha = 1) {
       this._list.push(["a", n(cx), n(cy), n(radius), this.hex(color, alpha), n(thickness), n(start), n(sweep)].join(FS));
     }
-    text(text, x, y, options = {}) {
+    text(text, x, y2, options = {}) {
       const size = Math.round(options.size ?? 16);
-      if (options.spacing) return this._spacedText(String(text), x, y, size, options);
+      if (options.spacing) return this._spacedText(String(text), x, y2, size, options);
       const h = options.align === "right" ? 2 : options.align === "center" ? 1 : 0;
       const v = options.valign === "bottom" ? 2 : options.valign === "middle" ? 1 : 0;
       const flags = fontFlags(options) | (options.shadow ? 2 : 0) | (options.wrap ? 4 : 0);
       const w = options.w ?? 0;
       const hh = options.h ?? 0;
       const s = String(text).split(RS).join("").split(FS).join("");
-      this._list.push(["t", n(x), n(y), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(size), String(v * 3 + h), String(flags), s].join(FS));
+      this._list.push(["t", n(x), n(y2), n(w), n(hh), this.hex(options.color ?? "#ffffff", options.alpha), String(size), String(v * 3 + h), String(flags), s].join(FS));
     }
     /**
      * 文字尺寸（像素）。第三个参数为是否粗体，或字体选项 { bold, weight, mono }。
@@ -4757,7 +4758,7 @@ var pot = (() => {
       return w;
     }
     /** 带字距：按字切行（wrap 时在 w 内按字断行，英文优先在空格处断）、按 align/valign 定位后逐字提交 */
-    _spacedText(text, x, y, size, o) {
+    _spacedText(text, x, y2, size, o) {
       const ff = fontFlags(o);
       const sp = (o.spacing ?? 0) * size;
       const maxW = o.w ?? 0;
@@ -4792,9 +4793,9 @@ var pot = (() => {
       const lh = this._lineHeight(size, ff);
       const total = lh * lines.length;
       const boxH = o.h ?? 0;
-      let top = y;
-      if (o.valign === "middle") top = boxH ? y + (boxH - total) / 2 : y - total / 2;
-      else if (o.valign === "bottom") top = boxH ? y + boxH - total : y - total;
+      let top = y2;
+      if (o.valign === "middle") top = boxH ? y2 + (boxH - total) / 2 : y2 - total / 2;
+      else if (o.valign === "bottom") top = boxH ? y2 + boxH - total : y2 - total;
       const color = this.hex(o.color ?? "#ffffff", o.alpha);
       const flags = ff | (o.shadow ? 2 : 0);
       const single = lines.length === 1 && !boxH;
@@ -4807,7 +4808,7 @@ var pot = (() => {
         else if (o.align === "right") cx = maxW ? x + maxW - lw : x - lw;
         if (o.align === "center") cx += sp / 2;
         else if (o.align === "right") cx += sp;
-        const cy = single ? y : top + lh * i + lh / 2;
+        const cy = single ? y2 : top + lh * i + lh / 2;
         for (const ch of line) {
           if (ch !== " ") this._list.push(["t", n(cx), n(cy), "0", "0", color, String(size), String(vcode * 3), String(flags), ch.split(RS).join("").split(FS).join("")].join(FS));
           cx += this._charWidth(ch, size, ff) + sp;
@@ -4815,28 +4816,28 @@ var pot = (() => {
       }
     }
     /** 压入裁剪矩形：之后的绘制只在矩形内可见，可嵌套（取交集），与 unclip 成对使用 */
-    clip(x, y, w, h) {
-      this._list.push(["c", n(x), n(y), n(Math.max(0, w)), n(Math.max(0, h))].join(FS));
+    clip(x, y2, w, h) {
+      this._list.push(["c", n(x), n(y2), n(Math.max(0, w)), n(Math.max(0, h))].join(FS));
     }
     /** 弹出最近一次 clip */
     unclip() {
       this._list.push(["C", ""].join(FS));
     }
     /** 画贴图：tex 为 Texture（或贴图 id）；tint 为染色，uv 为 [u, v, w, h]（缺省整张） */
-    image(tex, x, y, w, h, options = {}) {
+    image(tex, x, y2, w, h, options = {}) {
       const id = typeof tex === "number" ? tex : tex?.id;
       if (!Number.isFinite(id)) throw new Error("ui.image：需要贴图（Texture）");
       const uv = options.uv ? options.uv.map((v) => String(Math.round(v * 1e4) / 1e4)).join(",") : "";
-      this._list.push(["i", n(x), n(y), n(w), n(h), String(id), this.hex(options.tint ?? "#ffffff", options.alpha), n(options.radius ?? 0), uv].join(FS));
+      this._list.push(["i", n(x), n(y2), n(w), n(h), String(id), this.hex(options.tint ?? "#ffffff", options.alpha), n(options.radius ?? 0), uv].join(FS));
     }
     /** 鼠标是否在矩形内 */
-    hit(x, y, w, h) {
+    hit(x, y2, w, h) {
       const [mx, my] = this._host.engine.mouse();
-      return mx >= x && mx <= x + w && my >= y && my <= y + h;
+      return mx >= x && mx <= x + w && my >= y2 && my <= y2 + h;
     }
     /** 增量行/列排布（各项尺寸边画边知道时用）：const f = ui.flow(x, y, { gap: 10 }); const r = f.next(w, h) */
-    flow(x, y, options = {}) {
-      return new Flow(x, y, options);
+    flow(x, y2, options = {}) {
+      return new Flow(x, y2, options);
     }
     /** 已知各项尺寸时在容器内排布：返回每项矩形（justify 主轴分布、align 交叉轴对齐） */
     layout(sizes, box, options = {}) {
@@ -7157,12 +7158,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (x1 <= x0 || y1 <= y0) return null;
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
-  function layout(el, x, y, w, h, clip, env) {
+  function layout(el, x, y2, w, h, clip, env) {
     el.x = x;
-    el.y = y;
+    el.y = y2;
     el.w = w;
     el.h = h;
-    el.clip = intersect(clip, { x, y, w, h });
+    el.clip = intersect(clip, { x, y: y2, w, h });
     const { layouts, m } = env;
     const def = layouts[el.tag] ?? {};
     if (!def.container) {
@@ -7174,7 +7175,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const align = prop(el, layouts, "align") ?? "start";
     const justify = prop(el, layouts, "justify") ?? "start";
     const kids = el.children.filter(visible);
-    const innerX = x + l, innerY = y + t;
+    const innerX = x + l, innerY = y2 + t;
     const innerW = Math.max(0, w - l - r);
     const scroll = el.tag === "scroll";
     const innerH = Math.max(0, h - t - b);
@@ -7228,19 +7229,19 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const w = resolve(el.props.w, screenW) ?? measure(el, env.layouts, env.m).w;
     const h = resolve(el.props.h, screenH) ?? measure(el, env.layouts, env.m, w).h;
     const at = el.props.at ?? "top-left";
-    let x, y;
+    let x, y2;
     if (typeof at === "string") {
       const anchor = ANCHORS[at];
       if (!anchor) throw new Error(`<${el.tag}> 的 at 不认识 "${at}"，可用 ${Object.keys(ANCHORS).join("、")} 或 [x, y]`);
       x = UI_MARGIN + (screenW - UI_MARGIN * 2 - w) * anchor[0];
-      y = UI_MARGIN + (screenH - UI_MARGIN * 2 - h) * anchor[1];
+      y2 = UI_MARGIN + (screenH - UI_MARGIN * 2 - h) * anchor[1];
     } else if (Array.isArray(at) && at.length === 2 && at.every((n2) => typeof n2 === "number" && Number.isFinite(n2))) {
       x = at[0];
-      y = at[1];
+      y2 = at[1];
     } else {
       throw new Error(`<${el.tag}> 的 at 必须是九宫格位置名或 [x, y]`);
     }
-    layout(el, x, y, w, h, { x: 0, y: 0, w: screenW, h: screenH }, env);
+    layout(el, x, y2, w, h, { x: 0, y: 0, w: screenW, h: screenH }, env);
   }
 
   // runtime/src/world/ui-tags.ts
@@ -7303,15 +7304,15 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   var FOCUS = "#ffd54f";
   function drawElement(el, ui, s, m) {
     const p = el.props;
-    const { x, y, w, h } = el;
+    const { x, y: y2, w, h } = el;
     switch (el.tag) {
       case "panel": {
         const radius = prop(el, LAYOUTS, "radius");
         const bg = prop(el, LAYOUTS, "bg");
-        if (bg) ui.rect(x, y, w, h, bg, { radius });
+        if (bg) ui.rect(x, y2, w, h, bg, { radius });
         if (p.border) {
           const border = typeof p.border === "string" ? { color: p.border, width: 1 } : p.border;
-          ui.border(x, y, w, h, border.color, border.width ?? 1, { radius });
+          ui.border(x, y2, w, h, border.color, border.width ?? 1, { radius });
         }
         return;
       }
@@ -7322,7 +7323,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const lines = el.lines ?? [el.text];
         const align = p.align === "center" || p.align === "right" ? p.align : "left";
         lines.forEach((line, i) => {
-          ui.text(line, x + l, y + t + i * lh, { size, bold, color: p.color ?? "#ffffff", w: Math.max(0, w - l - r), h: lh, align, valign: "middle" });
+          ui.text(line, x + l, y2 + t + i * lh, { size, bold, color: p.color ?? "#ffffff", w: Math.max(0, w - l - r), h: lh, align, valign: "middle" });
         });
         return;
       }
@@ -7330,19 +7331,19 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const { size, bold } = fontOf(el);
         const radius = p.radius ?? 6;
         const alpha = p.disabled ? 0.45 : 1;
-        ui.rect(x, y, w, h, p.bg ?? "#3a7bd5", { radius, alpha });
-        if (!p.disabled && s.pressed) ui.rect(x, y, w, h, "#000000", { radius, alpha: 0.2 });
-        else if (!p.disabled && s.hover) ui.rect(x, y, w, h, "#ffffff", { radius, alpha: 0.12 });
-        if (s.focused) ui.border(x - 2, y - 2, w + 4, h + 4, FOCUS, 2, { radius: radius + 2 });
-        ui.text(el.text, x, y, { size, bold, color: p.color ?? "#ffffff", w, h, align: "center", valign: "middle", alpha });
+        ui.rect(x, y2, w, h, p.bg ?? "#3a7bd5", { radius, alpha });
+        if (!p.disabled && s.pressed) ui.rect(x, y2, w, h, "#000000", { radius, alpha: 0.2 });
+        else if (!p.disabled && s.hover) ui.rect(x, y2, w, h, "#ffffff", { radius, alpha: 0.12 });
+        if (s.focused) ui.border(x - 2, y2 - 2, w + 4, h + 4, FOCUS, 2, { radius: radius + 2 });
+        ui.text(el.text, x, y2, { size, bold, color: p.color ?? "#ffffff", w, h, align: "center", valign: "middle", alpha });
         return;
       }
       case "bar": {
         const max = Number(p.max ?? 1) || 1;
         const ratio = Math.max(0, Math.min(1, Number(p.value ?? 0) / max));
         const radius = p.radius ?? h / 2;
-        ui.rect(x, y, w, h, p.bg ?? "#ffffff33", { radius });
-        if (ratio > 0) ui.rect(x, y, w * ratio, h, p.color ?? "#4caf50", { radius });
+        ui.rect(x, y2, w, h, p.bg ?? "#ffffff33", { radius });
+        if (ratio > 0) ui.rect(x, y2, w * ratio, h, p.color ?? "#4caf50", { radius });
         return;
       }
       case "image": {
@@ -7354,28 +7355,28 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (fit === "contain") {
           const k = Math.min(w / sw, h / sh);
           const dw = sw * k, dh = sh * k;
-          ui.image(src, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh, opts);
+          ui.image(src, x + (w - dw) / 2, y2 + (h - dh) / 2, dw, dh, opts);
         } else if (fit === "cover") {
           const k = Math.max(w / sw, h / sh);
           const uw = w / (sw * k), uh = h / (sh * k);
-          ui.image(src, x, y, w, h, { ...opts, uv: [(1 - uw) / 2, (1 - uh) / 2, uw, uh] });
-        } else ui.image(src, x, y, w, h, opts);
+          ui.image(src, x, y2, w, h, { ...opts, uv: [(1 - uw) / 2, (1 - uh) / 2, uw, uh] });
+        } else ui.image(src, x, y2, w, h, opts);
         return;
       }
       case "input": {
         const { size, bold } = fontOf(el);
         const [t, r, b, l] = padding(el, LAYOUTS);
         const radius = p.radius ?? 4;
-        ui.rect(x, y, w, h, p.bg ?? "#0e1016", { radius });
-        ui.border(x, y, w, h, s.focused ? "#4fc3f7" : "#ffffff40", s.focused ? 2 : 1, { radius });
+        ui.rect(x, y2, w, h, p.bg ?? "#0e1016", { radius });
+        ui.border(x, y2, w, h, s.focused ? "#4fc3f7" : "#ffffff40", s.focused ? 2 : 1, { radius });
         const value = String(p.value ?? "");
         const innerW = Math.max(0, w - l - r);
-        ui.clip(x + l, y + t, innerW, Math.max(0, h - t - b));
+        ui.clip(x + l, y2 + t, innerW, Math.max(0, h - t - b));
         const tw = m.width(value, size, bold);
         const shift = s.focused ? Math.max(0, tw + 2 - innerW) : 0;
-        if (value) ui.text(value, x + l - shift, y, { size, bold, color: p.color ?? "#ffffff", w: tw + 4, h, valign: "middle" });
-        else if (p.placeholder) ui.text(String(p.placeholder), x + l, y, { size, bold, color: "#ffffff66", w: innerW, h, valign: "middle" });
-        if (s.focused && Math.floor(s.frame / 30) % 2 === 0) ui.rect(x + l - shift + tw + 1, y + t, 2, Math.max(0, h - t - b), "#ffffff");
+        if (value) ui.text(value, x + l - shift, y2, { size, bold, color: p.color ?? "#ffffff", w: tw + 4, h, valign: "middle" });
+        else if (p.placeholder) ui.text(String(p.placeholder), x + l, y2, { size, bold, color: "#ffffff66", w: innerW, h, valign: "middle" });
+        if (s.focused && Math.floor(s.frame / 30) % 2 === 0) ui.rect(x + l - shift + tw + 1, y2 + t, 2, Math.max(0, h - t - b), "#ffffff");
         ui.unclip();
         return;
       }
@@ -7522,7 +7523,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
   function similar(name, candidates) {
     const limit = name.length <= 4 ? 1 : 2;
-    const list = candidates.map((c) => ({ c, d: distance(name, c) })).filter(({ c, d }) => d <= limit || c.toLowerCase().startsWith(name.toLowerCase()) || name.toLowerCase().startsWith(c.toLowerCase())).sort((x, y) => x.d - y.d).slice(0, 3).map(({ c }) => c);
+    const list = candidates.map((c) => ({ c, d: distance(name, c) })).filter(({ c, d }) => d <= limit || c.toLowerCase().startsWith(name.toLowerCase()) || name.toLowerCase().startsWith(c.toLowerCase())).sort((x, y2) => x.d - y2.d).slice(0, 3).map(({ c }) => c);
     return list.length ? `，是不是 ${list.join("、")}？` : "";
   }
   function isVec3(v) {
@@ -8038,9 +8039,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return `${e.pos}|${e.scale}|${b.shape}|${b.size}|${b.radius}|${b.height}|${b.center}|${b.layer}|${b.solid}`;
   }
   function bodyCollider(entry) {
-    const [x, y, z] = entry.c;
-    if (entry.kind === "sphere") return { id: entry.id, x, y, z, r: entry.r, box: null };
-    return { id: entry.id, x, y, z, r: 0, box: [entry.max[0] - x, entry.max[1] - y, entry.max[2] - z] };
+    const [x, y2, z] = entry.c;
+    if (entry.kind === "sphere") return { id: entry.id, x, y: y2, z, r: entry.r, box: null };
+    return { id: entry.id, x, y: y2, z, r: 0, box: [entry.max[0] - x, entry.max[1] - y2, entry.max[2] - z] };
   }
   var EPS = 1e-3;
   var MAX_STEP = 0.2;
@@ -8052,6 +8053,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_cells", /* @__PURE__ */ new Map());
       __publicField(this, "_big", /* @__PURE__ */ new Set());
       __publicField(this, "_range", /* @__PURE__ */ new Map());
+      /** 内容变化（增、删、改）时加一，原生侧据此决定是否重发（18.6） */
+      __publicField(this, "version", 0);
     }
     get size() {
       return this._entries.size;
@@ -8071,13 +8074,41 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const entry = bodyEntry(e);
         this._entries.set(e.id, entry);
         this._index(entry);
+        this.version++;
       }
       for (const id of [...this._entries.keys()]) {
         if (!seen.has(id)) {
           this._unindex(id);
           this._entries.delete(id);
+          this.version++;
         }
       }
+    }
+    /**
+     * 原生侧的碰撞体缓冲区（18.6）：[数量, 15, 排除的数量, 碰撞体…, 排除的 id…]，碰撞体按 id 升序，
+     * 每个 [id, 形状 0/1/2, solid, 层位, 中心×3, min×3, max×3, 半径, 胶囊半段]
+     */
+    exportNative(layerBit, exclude) {
+      const list = [...this._entries.values()].sort((a, b) => a.id - b.id);
+      const out = new Float64Array(3 + list.length * 15 + exclude.length);
+      out[0] = list.length;
+      out[1] = 15;
+      out[2] = exclude.length;
+      let o = 3;
+      for (const b of list) {
+        out[o] = b.id;
+        out[o + 1] = b.kind === "box" ? 0 : b.kind === "sphere" ? 1 : 2;
+        out[o + 2] = b.solid ? 1 : 0;
+        out[o + 3] = layerBit(b.layer);
+        out.set(b.c, o + 4);
+        out.set(b.min, o + 7);
+        out.set(b.max, o + 10);
+        out[o + 13] = b.r;
+        out[o + 14] = b.seg;
+        o += 15;
+      }
+      out.set(exclude, o);
+      return out;
     }
     _index(entry) {
       const x0 = Math.floor(entry.min[0] / GRID_CELL), x1 = Math.floor(entry.max[0] / GRID_CELL);
@@ -8156,9 +8187,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const wasGrounded = mover.grounded;
       const reach = r + Math.max(Math.abs(v[0]), Math.abs(v[2])) * dt + MARGIN;
       const boxes = this.candidates(p[0] - reach, p[2] - reach, p[0] + reach, p[2] + reach, filter);
-      const hit = (b, x, y, z) => x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && y + h > b.min[1] && y < b.max[1];
-      const blocked = (x, y, z) => {
-        for (const b of boxes) if (hit(b, x, y, z)) return true;
+      const hit = (b, x, y2, z) => x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && y2 + h > b.min[1] && y2 < b.max[1];
+      const blocked = (x, y2, z) => {
+        for (const b of boxes) if (hit(b, x, y2, z)) return true;
         return false;
       };
       const floor = (x) => ground && (ground.maxX == null || x <= ground.maxX) ? ground.y : null;
@@ -8205,13 +8236,13 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       p[1] = ny;
       if (!mover.grounded && wasGrounded && v[1] <= 0) {
-        const x = p[0], y = p[1], z = p[2], up = 0.02;
+        const x = p[0], y2 = p[1], z = p[2], up = 0.02;
         let best = null;
         const g = floor(x);
-        if (g !== null && g <= y + up && g >= y - stepUp) best = g;
+        if (g !== null && g <= y2 + up && g >= y2 - stepUp) best = g;
         for (const b of boxes) {
           const top = b.max[1];
-          if (top > y + up || top < y - stepUp) continue;
+          if (top > y2 + up || top < y2 - stepUp) continue;
           if (x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2]) {
             if (best === null || top > best) best = top;
           }
@@ -8274,8 +8305,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return d2;
   }
   function dist2Segment(p, b) {
-    const y = clamp(p[1], b.c[1] - b.seg, b.c[1] + b.seg);
-    const dx = p[0] - b.c[0], dy = p[1] - y, dz = p[2] - b.c[2];
+    const y2 = clamp(p[1], b.c[1] - b.seg, b.c[1] + b.seg);
+    const dx = p[0] - b.c[0], dy = p[1] - y2, dz = p[2] - b.c[2];
     return dx * dx + dy * dy + dz * dz;
   }
   function sphereHits(at, r, b) {
@@ -8331,8 +8362,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const disc = bb * bb - a * cc;
       if (disc >= 0) {
         const t = (-bb - Math.sqrt(disc)) / a;
-        const y = o[1] + d[1] * t;
-        if (t >= 0 && y >= c[1] - b.seg && y <= c[1] + b.seg) {
+        const y2 = o[1] + d[1] * t;
+        if (t >= 0 && y2 >= c[1] - b.seg && y2 <= c[1] + b.seg) {
           best = { t, n: [(o[0] + d[0] * t - c[0]) / r, 0, (o[2] + d[2] * t - c[2]) / r] };
         }
       }
@@ -8493,7 +8524,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const prev = this._world.prev.get(e.id);
         const p0 = prev?.pos ?? e.pos;
         const x = p0[0] + (e.pos[0] - p0[0]) * alpha;
-        const y = p0[1] + (e.pos[1] - p0[1]) * alpha;
+        const y2 = p0[1] + (e.pos[1] - p0[1]) * alpha;
         const z = p0[2] + (e.pos[2] - p0[2]) * alpha;
         const r1 = e.rot;
         const r0 = prev?.rot ?? r1;
@@ -8505,7 +8536,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             const at = k * 10;
             ids[k] = b.objs[i].id;
             buf[at] = x;
-            buf[at + 1] = y;
+            buf[at + 1] = y2;
             buf[at + 2] = z;
             buf[at + 3] = q[0];
             buf[at + 4] = q[1];
@@ -8613,12 +8644,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     about: "沿世界方向 dir 以 speed（米每秒）匀速飞行",
     props: { speed: 10, dir: [0, 0, 1] },
     step(me, e, w) {
-      const [x, y, z] = me.dir;
-      const len = Math.hypot(x, y, z);
+      const [x, y2, z] = me.dir;
+      const len = Math.hypot(x, y2, z);
       if (!len) return;
       const k = me.speed * w.dt / len;
       e.pos[0] += x * k;
-      e.pos[1] += y * k;
+      e.pos[1] += y2 * k;
       e.pos[2] += z * k;
     }
   });
@@ -9076,6 +9107,7 @@ TS：${r.layout.text}
     const snapshot = clone(original);
     const prevMode = w.native;
     const prevSource = w.commandSource;
+    const capture0 = capture(w, block);
     const native = w.nativeBlocks;
     const passes = [];
     let perStep = true;
@@ -9135,19 +9167,29 @@ TS：${r.layout.text}
           continue;
         }
         for (const field of /* @__PURE__ */ new Set([...Object.keys(ra), ...Object.keys(rb)])) {
-          const x = ra[field], y = rb[field];
-          if (Object.is(x, y)) continue;
-          const d = typeof x === "number" && typeof y === "number" ? Math.abs(x - y) : Infinity;
+          const x = ra[field], y2 = rb[field];
+          if (Object.is(x, y2)) continue;
+          const d = typeof x === "number" && typeof y2 === "number" ? Math.abs(x - y2) : Infinity;
           if (!(d === 0)) {
             const v = Number.isNaN(d) ? Infinity : d;
             maxDiff[field] = Math.max(maxDiff[field] ?? 0, v);
-            firstDiff ?? (firstDiff = { step, entity: id, field, ts: x, native: y });
+            firstDiff ?? (firstDiff = { step, entity: id, field, ts: x, native: y2 });
           }
         }
       }
     };
     if (perStep) for (let i = 0; i < steps; i++) compare(i, ts.frames[i], nat.frames[i]);
     else compare(steps - 1, ts.last, nat.last);
+    let changedSteps = null;
+    if (perStep) {
+      changedSteps = 0;
+      let before = JSON.stringify([...capture0.entries()]);
+      for (const frame of ts.frames) {
+        const now = JSON.stringify([...frame.entries()]);
+        if (now !== before) changedSteps++;
+        before = now;
+      }
+    }
     const identical = firstHashDiff === null;
     const worst = Object.values(maxDiff).reduce((m, v) => Math.max(m, v), 0);
     return {
@@ -9161,6 +9203,7 @@ TS：${r.layout.text}
       maxDiff,
       tolerance,
       perStep,
+      changedSteps,
       tsMs: round(ts.blockMs),
       nativeMs: round(nat.blockMs),
       tsStepMs: round(ts.stepMs),
@@ -9214,8 +9257,9 @@ TS：${r.layout.text}
   }
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var WorldService = class extends Service {
-    constructor(ctx, host) {
+    constructor(ctx, _host) {
       super(ctx, "world");
+      __publicField(this, "_host", _host);
       __publicField(this, "registry", new Registry());
       /** 表现（15.10） */
       __publicField(this, "view");
@@ -9283,6 +9327,7 @@ TS：${r.layout.text}
       __publicField(this, "_native");
       /** 碰撞层名到位号（18.3 的 layers、18.6 的碰撞体缓冲区），最多 32 层 */
       __publicField(this, "_layerBits", /* @__PURE__ */ new Map());
+      __publicField(this, "_nativeBodies", { table: -1, pending: "" });
       this._root = ctx;
       this._native = new NativeBlocks({
         registry: this.registry,
@@ -9292,7 +9337,7 @@ TS：${r.layout.text}
         cmd: (e) => this.cmd(e),
         layerMask: (names) => this.layerMask(names),
         syncBodies: () => this._syncNativeBodies()
-      }, host);
+      }, _host);
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, "system");
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, "system");
       ctx.state.define("world", { init: initData });
@@ -9589,8 +9634,16 @@ TS：${r.layout.text}
     verifyNative(block, options = {}) {
       return verifyNative(this, this._root.state, block, options);
     }
-    /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
+    /** 碰撞表或等待销毁的集合变了就发给原生侧（18.6）；与 TS 的 w.move 用同一时刻的碰撞表 */
     _syncNativeBodies() {
+      const table = this._table();
+      const pending = [...this._pendingSet].sort((a, b) => a - b);
+      const key = pending.join(",");
+      const sent = this._nativeBodies;
+      if (sent.table === table.version && sent.pending === key) return;
+      this._host?.nativeBodies?.(table.exportNative((name) => this.layerBit(name), pending));
+      sent.table = table.version;
+      sent.pending = key;
     }
     /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
     setPatch(mount, path, patch) {
@@ -9937,16 +9990,16 @@ TS：${r.layout.text}
     }
     _dispatch(event) {
       if (event.name === "touch") {
-        const [x, y] = event.args;
-        if (!this._alive(x) || !this._alive(y)) return;
+        const [x, y2] = event.args;
+        if (!this._alive(x) || !this._alive(y2)) return;
         for (const rule of this._allRules("touch")) {
-          if (this.matches(x, rule.a) && this.matches(y, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, x, y));
-          else if (this.matches(y, rule.a) && this.matches(x, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, y, x));
+          if (this.matches(x, rule.a) && this.matches(y2, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, x, y2));
+          else if (this.matches(y2, rule.a) && this.matches(x, rule.b)) this._guard(`<rule on="touch">`, rule.source, () => rule.do(this, y2, x));
         }
         for (const h of [...this._handlers]) {
           if (h.event !== "touch") continue;
-          if (this.matches(x, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, x, y));
-          else if (this.matches(y, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, y, x));
+          if (this.matches(x, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, x, y2));
+          else if (this.matches(y2, h.filter)) this._guard('w.on("touch")', void 0, () => h.fn(this, y2, x));
         }
         return;
       }
@@ -10406,7 +10459,7 @@ TS：${r.layout.text}
         spawn: (shape2, name, parent) => S.Spawn(shape2, name, parent),
         destroy: (id) => S.Destroy(id),
         exists: (id) => S.Exists(id),
-        setVec: (id, prop2, x, y, z) => S.SetVec(id, prop2, x, y, z),
+        setVec: (id, prop2, x, y2, z) => S.SetVec(id, prop2, x, y2, z),
         setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
         visible: (id, visible2) => S.SetVisible(id, visible2),
         skin: (id, bones) => S.Skin(id, bones) ?? "",
@@ -10416,7 +10469,7 @@ TS：${r.layout.text}
         },
         setColor: (id, r, g, b, a) => S.SetColor(id, r, g, b, a),
         setActive: (id, active) => S.SetActive(id, active),
-        lookAt: (id, x, y, z) => S.LookAt(id, x, y, z),
+        lookAt: (id, x, y2, z) => S.LookAt(id, x, y2, z),
         light: (id, type, intensity, r, g, b, range) => S.Light(id, type, intensity, r, g, b, range),
         cameraId: () => S.CameraId(),
         setBackground: (r, g, b) => S.SetBackground(r, g, b),
@@ -10467,9 +10520,9 @@ TS：${r.layout.text}
         },
         audioClip: (name, rate, channels, data) => A.Clip(name, rate, channels, data),
         audioHas: (name) => A.HasClip(name),
-        audioPlay: (name, volume, pitch, x, y, z, spatial) => A.Play(name, volume, pitch, x, y, z, spatial),
+        audioPlay: (name, volume, pitch, x, y2, z, spatial) => A.Play(name, volume, pitch, x, y2, z, spatial),
         audioLoop: (name, volume, pitch) => A.Loop(name, volume, pitch),
-        audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => A.SetLoop(handle, volume, pitch, x, y, z, spatial),
+        audioSetLoop: (handle, volume, pitch, x, y2, z, spatial) => A.SetLoop(handle, volume, pitch, x, y2, z, spatial),
         audioStop: (handle) => A.StopLoop(handle),
         audioVolume: (volume) => A.Volume(volume),
         audioPause: (paused) => A.Pause(paused),
@@ -10485,7 +10538,7 @@ TS：${r.layout.text}
         meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
         matFloat: (id, prop2, value) => S.MatFloat(id, prop2, value),
-        matVector: (id, prop2, x, y, z, w) => S.MatVector(id, prop2, x, y, z, w),
+        matVector: (id, prop2, x, y2, z, w) => S.MatVector(id, prop2, x, y2, z, w),
         ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
         render: (kind, json2) => R.Configure(kind, json2) ?? "",
         burst: (json2) => R.Burst(json2),
@@ -10494,7 +10547,7 @@ TS：${r.layout.text}
         gfxProgram: (name, vs, fs) => G.Program(name, vs, fs) ?? "",
         gfxDestroyProgram: (name) => G.DestroyProgram(name),
         gfxBind: (id, program, flags, queue, shadows) => G.Bind(id, program, flags, queue, shadows),
-        gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
+        gfxUniform: (id, name, n2, x, y2, z, w) => G.Uniform(id, name, n2, x, y2, z, w),
         gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
         gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
         gfxInstances: (id, count, layout2, data) => G.Instances(id, count, layout2, data) ?? "",
@@ -10561,6 +10614,203 @@ TS：${r.layout.text}
     bindEntry("unity.info", () => unity.info());
   }
   bindUnity();
+
+  // runtime/src/world/dmath.ts
+  var f64 = new Float64Array(1);
+  var u32 = new Uint32Array(f64.buffer);
+  var high = (x) => {
+    f64[0] = x;
+    return u32[1] | 0;
+  };
+  var words = (hi, lo) => {
+    u32[1] = hi >>> 0;
+    u32[0] = lo >>> 0;
+    return f64[0];
+  };
+  var invpio2 = 0.6366197723675814;
+  var pio2_1 = 1.5707963267341256;
+  var pio2_1t = 6077100506506192e-26;
+  var pio2_2 = 6077100506303966e-26;
+  var pio2_2t = 20222662487959506e-37;
+  var pio2_3 = 20222662487111665e-37;
+  var pio2_3t = 84784276603689e-45;
+  var npio2_hw = [
+    1073291771,
+    1074340347,
+    1074977148,
+    1075388923,
+    1075800698,
+    1076025724,
+    1076231611,
+    1076437499,
+    1076643386,
+    1076849274,
+    1076971356,
+    1077074300,
+    1077177244,
+    1077280187,
+    1077383131,
+    1077486075,
+    1077589019,
+    1077691962,
+    1077794906,
+    1077897850,
+    1077968460,
+    1078019932,
+    1078071404,
+    1078122876,
+    1078174348,
+    1078225820,
+    1078277292,
+    1078328763,
+    1078380235,
+    1078431707,
+    1078483179,
+    1078534651
+  ];
+  var y = [0, 0];
+  function remPio2(x) {
+    let z, w, t, r;
+    const hx = high(x);
+    const ix = hx & 2147483647;
+    if (ix <= 1072243195) {
+      y[0] = x;
+      y[1] = 0;
+      return 0;
+    }
+    if (ix < 1073928572) {
+      if (hx > 0) {
+        z = x - pio2_1;
+        if (ix !== 1073291771) {
+          y[0] = z - pio2_1t;
+          y[1] = z - y[0] - pio2_1t;
+        } else {
+          z -= pio2_2;
+          y[0] = z - pio2_2t;
+          y[1] = z - y[0] - pio2_2t;
+        }
+        return 1;
+      }
+      z = x + pio2_1;
+      if (ix !== 1073291771) {
+        y[0] = z + pio2_1t;
+        y[1] = z - y[0] + pio2_1t;
+      } else {
+        z += pio2_2;
+        y[0] = z + pio2_2t;
+        y[1] = z - y[0] + pio2_2t;
+      }
+      return -1;
+    }
+    if (ix <= 1094263291) {
+      t = Math.abs(x);
+      const n2 = t * invpio2 + 0.5 | 0;
+      const fn = n2;
+      r = t - fn * pio2_1;
+      w = fn * pio2_1t;
+      if (n2 < 32 && ix !== npio2_hw[n2 - 1]) {
+        y[0] = r - w;
+      } else {
+        const j = ix >> 20;
+        y[0] = r - w;
+        let i = j - (high(y[0]) >> 20 & 2047);
+        if (i > 16) {
+          t = r;
+          w = fn * pio2_2;
+          r = t - w;
+          w = fn * pio2_2t - (t - r - w);
+          y[0] = r - w;
+          i = j - (high(y[0]) >> 20 & 2047);
+          if (i > 49) {
+            t = r;
+            w = fn * pio2_3;
+            r = t - w;
+            w = fn * pio2_3t - (t - r - w);
+            y[0] = r - w;
+          }
+        }
+      }
+      y[1] = r - y[0] - w;
+      if (hx < 0) {
+        y[0] = -y[0];
+        y[1] = -y[1];
+        return -n2;
+      }
+      return n2;
+    }
+    return NaN;
+  }
+  var S1 = -0.16666666666666632;
+  var S2 = 0.00833333333332249;
+  var S3 = -1984126982985795e-19;
+  var S4 = 27557313707070068e-22;
+  var S5 = -25050760253406863e-24;
+  var S6 = 158969099521155e-24;
+  function kernelSin(x, yy, iy) {
+    const ix = high(x) & 2147483647;
+    if (ix < 1044381696) {
+      if ((x | 0) === 0) return x;
+    }
+    const z = x * x;
+    const v = z * x;
+    const r = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)));
+    if (iy === 0) return x + v * (S1 + z * r);
+    return x - (z * (0.5 * yy - v * r) - yy - v * S1);
+  }
+  var C1 = 0.0416666666666666;
+  var C2 = -0.001388888888887411;
+  var C3 = 2480158728947673e-20;
+  var C4 = -27557314351390663e-23;
+  var C5 = 2087572321298175e-24;
+  var C6 = -11359647557788195e-27;
+  function kernelCos(x, yy) {
+    const ix = high(x) & 2147483647;
+    if (ix < 1044381696) {
+      if ((x | 0) === 0) return 1;
+    }
+    const z = x * x;
+    const r = z * (C1 + z * (C2 + z * (C3 + z * (C4 + z * (C5 + z * C6)))));
+    if (ix < 1070805811) return 1 - (0.5 * z - (z * r - x * yy));
+    const qx = ix > 1072234496 ? 0.28125 : words(ix - 2097152, 0);
+    const iz = 0.5 * z - qx;
+    const a = 1 - qx;
+    return a - (iz - (z * r - x * yy));
+  }
+  function sin(x) {
+    const ix = high(x) & 2147483647;
+    if (ix <= 1072243195) return kernelSin(x, 0, 0);
+    if (ix >= 2146435072) return x - x;
+    const n2 = remPio2(x);
+    if (Number.isNaN(n2)) return Math.sin(x);
+    switch (n2 & 3) {
+      case 0:
+        return kernelSin(y[0], y[1], 1);
+      case 1:
+        return kernelCos(y[0], y[1]);
+      case 2:
+        return -kernelSin(y[0], y[1], 1);
+      default:
+        return -kernelCos(y[0], y[1]);
+    }
+  }
+  function cos(x) {
+    const ix = high(x) & 2147483647;
+    if (ix <= 1072243195) return kernelCos(x, 0);
+    if (ix >= 2146435072) return x - x;
+    const n2 = remPio2(x);
+    if (Number.isNaN(n2)) return Math.cos(x);
+    switch (n2 & 3) {
+      case 0:
+        return kernelCos(y[0], y[1]);
+      case 1:
+        return -kernelSin(y[0], y[1], 1);
+      case 2:
+        return -kernelCos(y[0], y[1]);
+      default:
+        return kernelSin(y[0], y[1], 1);
+    }
+  }
+  var dmath = Object.freeze({ sin, cos });
 
   // runtime/src/world/ui-eval.ts
   var WORLD_TAGS = /* @__PURE__ */ new Set(["entity", "rule", "stage"]);
@@ -10722,7 +10972,7 @@ TS：${r.layout.text}
       placed.forEach(walk);
       const byPath = new Map(order.map((el) => [el.path, el]));
       const focusables = order.filter((el) => el.tag === "button" && !el.props.disabled || el.tag === "input");
-      const contains = (el, x, y) => !!el.clip && x >= el.clip.x && x <= el.clip.x + el.clip.w && y >= el.clip.y && y <= el.clip.y + el.clip.h;
+      const contains = (el, x, y2) => !!el.clip && x >= el.clip.x && x <= el.clip.x + el.clip.w && y2 >= el.clip.y && y2 <= el.clip.y + el.clip.h;
       const activate = (el) => {
         if (el.props.disabled) return;
         try {

@@ -217,6 +217,8 @@ export class BodyTable {
   private _cells = new Map<string, number[]>()
   private _big = new Set<number>()
   private _range = new Map<number, [number, number, number, number]>()
+  /** 内容变化（增、删、改）时加一，原生侧据此决定是否重发（18.6） */
+  version = 0
 
   get size() {
     return this._entries.size
@@ -238,13 +240,42 @@ export class BodyTable {
       const entry = bodyEntry(e)!
       this._entries.set(e.id, entry)
       this._index(entry)
+      this.version++
     }
     for (const id of [...this._entries.keys()]) {
       if (!seen.has(id)) {
         this._unindex(id)
         this._entries.delete(id)
+        this.version++
       }
     }
+  }
+
+  /**
+   * 原生侧的碰撞体缓冲区（18.6）：[数量, 15, 排除的数量, 碰撞体…, 排除的 id…]，碰撞体按 id 升序，
+   * 每个 [id, 形状 0/1/2, solid, 层位, 中心×3, min×3, max×3, 半径, 胶囊半段]
+   */
+  exportNative(layerBit: (name: string) => number, exclude: number[]): Float64Array {
+    const list = [...this._entries.values()].sort((a, b) => a.id - b.id)
+    const out = new Float64Array(3 + list.length * 15 + exclude.length)
+    out[0] = list.length
+    out[1] = 15
+    out[2] = exclude.length
+    let o = 3
+    for (const b of list) {
+      out[o] = b.id
+      out[o + 1] = b.kind === 'box' ? 0 : b.kind === 'sphere' ? 1 : 2
+      out[o + 2] = b.solid ? 1 : 0
+      out[o + 3] = layerBit(b.layer)
+      out.set(b.c, o + 4)
+      out.set(b.min, o + 7)
+      out.set(b.max, o + 10)
+      out[o + 13] = b.r
+      out[o + 14] = b.seg
+      o += 15
+    }
+    out.set(exclude, o)
+    return out
   }
 
   private _index(entry: BodyEntry) {

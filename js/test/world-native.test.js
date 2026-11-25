@@ -135,3 +135,48 @@ test('原生积木：宿主没有原生实现时说明原因', async () => {
   assert.deepEqual(r.w.inspect().native, [])
   assert.equal(r.w.nativeBlocks.reason('moveTopdown'), '当前宿主没有原生实现')
 })
+
+test('原生积木：用到碰撞的实现在碰撞表变化时才收到碰撞体（按 id 升序，带层位与等待销毁的 id）', async () => {
+  const sent = []
+  const native = {
+    calls: [],
+    setup(host) {
+      host.nativeBlocks = () => JSON.stringify([{ name: 'moveTopdown', kit: 'topdown', layout: LAYOUT, collision: true }])
+      host.nativeStep = (name, buf) => fakeTopdown(buf)
+      host.nativeBodies = (buf) => sent.push(Array.from(buf))
+    },
+  }
+  const src = `import { defineGame } from '@pot/core'
+import topdown from '@pot/kit/topdown'
+export default defineGame({
+  kits: [topdown],
+  scene: () => <>
+    <entity key="p" at={[0, 0, 0]} moveTopdown />
+    <entity key="w2" at={[3, 1, 0]} body={{ shape: 'box', size: [1, 2, 4], layer: 'wall' }} />
+    <entity key="w1" at={[-3, 1, 0]} body={{ shape: 'sphere', radius: 0.5 }} />
+  </>,
+})
+`
+  const g = await play(native, src, 30)
+  assert.equal(sent.length, 1, '静态关卡只发一次')
+  const [buf] = sent
+  assert.deepEqual(buf.slice(0, 3), [2, 15, 0])
+  const ids = [buf[3], buf[18]]
+  assert.ok(ids[0] < ids[1], 'id 升序')
+  const wall = g.w.query().find((e) => e.b.body?.layer === 'wall')
+  const wallAt = buf[3] === wall.id ? 3 : 18
+  assert.deepEqual(buf.slice(wallAt, wallAt + 13), [wall.id, 0, 1, g.w.layerBit('wall'), 3, 1, 0, 2.5, 0, -2, 3.5, 2, 2])
+  const sphereAt = wallAt === 3 ? 18 : 3
+  assert.deepEqual([buf[sphereAt + 1], buf[sphereAt + 3], buf[sphereAt + 13]], [1, g.w.layerBit('default'), 0.5])
+  // 移动一个碰撞体：下一步重发
+  wall.pos[0] = 4
+  g.g.runtime.tick(1 / 60)
+  assert.equal(sent.length, 2)
+  // 销毁：当步碰撞体还在，id 进排除表；下一步碰撞体少一个、排除表清空
+  g.w.destroy(wall)
+  g.g.runtime.tick(1 / 60)
+  const during = sent[sent.length - 1]
+  assert.deepEqual([during[0], during[2], during[during.length - 1]], [2, 1, wall.id])
+  g.g.runtime.tick(1 / 60)
+  assert.deepEqual(sent[sent.length - 1].slice(0, 3), [1, 15, 0])
+})

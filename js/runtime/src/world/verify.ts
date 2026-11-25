@@ -46,6 +46,11 @@ export interface VerifyResult {
   tolerance: number
   /** 逐步比较了字段；为 false 时只比了最后一步（实体多、步数多时） */
   perStep: boolean
+  /**
+   * TS 那一遍里，这个积木的字段（含 pos、rot）有变化的步数。为 0 说明积木在这段输入下什么都没做
+   * （例如 active 为 false、角色已死），比较没有意义；逐步比较时才统计，否则为 null
+   */
+  changedSteps: number | null
   /** 这个积木 step 阶段的累计耗时（毫秒） */
   tsMs: number
   nativeMs: number
@@ -98,6 +103,7 @@ export function verifyNative(w: WorldService, state: { set(key: string, value: a
   const snapshot = clone(original)
   const prevMode = w.native
   const prevSource = w.commandSource
+  const capture0 = capture(w, block)
   const native = w.nativeBlocks
   const passes: Pass[] = []
   let perStep = true
@@ -168,6 +174,16 @@ export function verifyNative(w: WorldService, state: { set(key: string, value: a
   }
   if (perStep) for (let i = 0; i < steps; i++) compare(i, ts.frames[i], nat.frames[i])
   else compare(steps - 1, ts.last, nat.last)
+  let changedSteps: number | null = null
+  if (perStep) {
+    changedSteps = 0
+    let before = JSON.stringify([...capture0.entries()])
+    for (const frame of ts.frames) {
+      const now = JSON.stringify([...frame.entries()])
+      if (now !== before) changedSteps++
+      before = now
+    }
+  }
   const identical = firstHashDiff === null
   const worst = Object.values(maxDiff).reduce((m, v) => Math.max(m, v), 0)
   return {
@@ -181,6 +197,7 @@ export function verifyNative(w: WorldService, state: { set(key: string, value: a
     maxDiff,
     tolerance,
     perStep,
+    changedSteps,
     tsMs: round(ts.blockMs),
     nativeMs: round(nat.blockMs),
     tsStepMs: round(ts.stepMs),
