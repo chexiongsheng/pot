@@ -2,7 +2,7 @@
 import type { Context, Vec3 } from '@pot/core'
 import type { EnemyType } from './types'
 
-/** 子弹命中信息：weapon 发出，enemies 同步填写结果 */
+/** 子弹命中信息：weapon 发出，enemies.tsx 同步填写结果 */
 export interface BulletHit {
   id: number
   point: Vec3

@@ -4,7 +4,7 @@ import { emit, on } from '../lib/bus'
 import { levelPoints, type LevelData } from '../lib/level'
 import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '../lib/math'
 import { sfx } from '../lib/sfx'
-import { ENEMIES, GAME, player, type EnemyType, type GameState, type Phase } from '../lib/types'
+import { foes, GAME, player, type EnemyType, type GameState, type Phase } from '../lib/types'
 
 export const name = 'game'
 
@@ -34,7 +34,7 @@ export async function apply(ctx: Context) {
   }
 
   const cutCount = () => g.relays.filter((r) => r === 'cut').length
-  const aliveCount = () => (ctx.state.get<{ list: { mode: string }[] }>(ENEMIES)?.list ?? []).filter((e) => e.mode !== 'dying').length + g.pending.length
+  const aliveCount = () => foes(ctx).filter((e) => e.mode !== 'dying').length + g.pending.length
 
   function setPhase(phase: Phase) {
     g.phase = phase

@@ -5,7 +5,7 @@ import { levelPoints, type LevelData } from '../lib/level'
 import { angleDelta, clamp, formatTime, sub, yawOf } from '../lib/math'
 import { C } from '../lib/palette'
 import { sfx } from '../lib/sfx'
-import { ENEMIES, game, player, weapon } from '../lib/types'
+import { foes, game, player, weapon } from '../lib/types'
 
 export const name = 'hud'
 
@@ -111,8 +111,7 @@ export function apply(ctx: Context) {
     }
     points.relays.forEach((r, i) => { if (g.relays[i] !== 'cut') mark(r.pos, C.signal, NAMES[i] ?? r.short) })
     if (extract) mark(points.extraction.pos, C.ok, '撤')
-    const list = ctx.state.get<{ list: { mode: string; pos: [number, number, number] }[] }>(ENEMIES)?.list ?? []
-    for (const e of list) {
+    for (const e of foes(ctx)) {
       if (e.mode !== 'combat') continue
       const d = angleDelta(yaw, yawOf(sub(e.pos, p.pos)))
       if (Math.abs(d) > span) continue

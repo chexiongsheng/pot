@@ -7,7 +7,7 @@ export const name = 'collision'
 
 export function apply(ctx: Context) {
   const { boxes } = levelBoxes(ctx.data.load<LevelData>('level.json'))
-  // 顺序与 levelCollision 相同：w.move 按实体 id 升序处理候选，顺序不同结果就可能差一点
+  // 顺序与迁移前的 Collision 相同：w.move 按实体 id 升序处理候选，顺序不同结果就可能差一点
   ctx.world.mount(<>
     {boxes.map(({ box: b, layer }, i) => <entity key={i} tags={['level']}
       at={[(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2]}

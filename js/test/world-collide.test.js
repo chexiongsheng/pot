@@ -30,10 +30,9 @@ function boxEntity(id, min, max, body = {}) {
   }
 }
 
-/** saltline 的 physics.ts 原样转译（去掉关卡相关的 import，只用 Collision） */
+/** saltline 迁移前的 Collision（fixtures/saltline-collision.ts，physics.ts 的原样副本）转译 */
 function saltlineCollision() {
-  const file = path.resolve(__dirname, '../../games/saltline/src/lib/physics.ts')
-  const source = fs.readFileSync(file, 'utf8').replace(/^import .*from '\.\/(level|origlevel)'\s*$/gm, '')
+  const source = fs.readFileSync(path.join(__dirname, 'fixtures/saltline-collision.ts'), 'utf8')
   const { code } = esbuild.transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' })
   const mod = { exports: {} }
   new Function('module', 'exports', 'require', code)(mod, mod.exports, require)

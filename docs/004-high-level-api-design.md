@@ -1473,10 +1473,14 @@ World 的配套改动：
 
 ### 17.7 saltline 敌人迁移
 
-- 鸥、犬写成游戏积木（`gull`、`hound`），AI 状态进实体的积木状态；弹道池、爆炸池改为实体加 `projectile`、`lifetime`；攻击令牌放 `w.vars`。
-- 模型、动画保留为表现：积木只写状态（位置、朝向、动画参数），渲染单元按状态驱动模型。
-- 视线与避障从 `scene.raycast`（引擎物理）改为 `w.raycast`（模拟侧静态体）。关卡的碰撞盒与渲染网格并不完全重合，所以行为只能做到“近似一致”：验收看实机可玩、敌人能追击和攻击，不做逐步比对。随机改用 `w.rand`。
-- 这一步规模最大（enemies.ts 678 行），允许分几个提交：先犬后鸥，每次保持游戏可玩。
+- 敌人是 `w.spawn` 生成的实体（预制件 `gull`、`hound`，标签 `enemy`）。三个游戏积木：`slFoe`（共用的感知、警戒状态、攻击循环与开火，属性 `kind`、`pursuit`）、`slGull`（飞行、避障、坠毁）、`slHound`（地面移动、扑击、倒地）。生命用 fps 套件的 `health`（`regen` 为 0），子弹命中调用套件的 `damage`。
+- 弹道是实体（预制件 `bolt`）加游戏积木 `slBolt`（飞行、寿命、打中玩家、撞墙），不用系统的 `projectile`、`lifetime`：它们不知道 saltline 自己的暂停阶段，暂停时弹道会继续飞。爆炸的火球只是表现，实体（预制件 `boom`）加系统 `lifetime`（0.6 秒）即可。攻击令牌的间隔放 `w.vars.tokenGap`，持有令牌的数量每步重新统计。
+- 模型、动画保留为表现：积木只写状态，enemies 单元在 `update` 里按实体建、拆模型并驱动动画，位置按固定步插值。表现对状态变化的反应（死亡时掉旋翼、熄灯，猎犬开火的炮管后坐）由表现比对状态得出（`mode` 变为 `dying`、`fired` 步号变化），模拟不调用表现。开火口改为按朝向旋转的固定偏移（旧版猎犬取炮管骨骼的世界位置，那是表现层的数据）。
+- 子弹命中仍由 weapon 对渲染模型的部件做射线（部件到实体的映射在 enemies 单元），命中后在事件处理里改实体状态。
+- 视线、避障、弹道撞墙从 `scene.raycast`（引擎物理）改为 `w.raycast`（层 `default`、`bullet`）；猎犬移动用 `w.move`（层 `default`，地面与码头边同玩家）。关卡的碰撞盒与渲染网格并不完全重合，所以行为只能做到“近似一致”：验收看实机可玩、敌人能追击和攻击，不做逐步比对。随机改用 `w.rand`；AI 从 `update` 的可变 `dt` 改为固定步。
+- 敌人列表不再放 `ctx.state`（`saltline/enemies` 去掉），hud 与 game 用 `foes(ctx)` 从实体读。
+- saltline 不再用 `Collision`：`physics.ts` 只留 `levelBoxes`，`world-collide.test.js` 比对用的 `Collision` 移到 `js/test/fixtures/saltline-collision.ts`（迁移前的原样副本）。
+- 最初计划分几个提交（先犬后鸥），实际一次完成：攻击令牌是两种敌人共用的，拆开就要在旧单元与新积木之间同步令牌，比一次迁移更麻烦。
 
 ### 17.8 写实套件
 
@@ -1593,3 +1597,18 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - 相机位置改为插值（旧版取当前位置），刷新率高于 60Hz 时更平滑；视角角度仍取状态。
 - 实机验证：intro 与 playing 可动，走 3.8 m/s、冲刺 6.4 m/s、跳高约 0.93 米；受伤、回血到 100、死亡后停用、重试回到出生点、暂停不能动都正常。World 开销实测每个固定步约 0.52 毫秒、每帧 `view.frame` 约 0.41 毫秒，帧率不受迁移影响。
 - 源码字节数：迁移前 `player.ts` 8481、`physics.ts` 5906、`types.ts` 2654，合计 17041；迁移后 `player.tsx` 4675、`collision.tsx` 846、`physics.ts` 6574、`types.ts` 4363，合计 16458。玩家单元本身减少约 45%，增加的部分是适配函数与 `levelBoxes`，敌人迁移完成后适配函数可以删去。
+
+第 6 步（saltline 敌人迁移）：
+
+17.7 在动手前按实际做法重写过一遍：弹道不用系统的 `projectile`、`lifetime`（不知道 saltline 的暂停），表现比对状态而不由模拟调用，开火口改为固定偏移，行为只要求近似一致，`Collision` 移到测试夹具，一次提交完成。
+
+实施时的细节：
+
+- 单元在 `games/saltline/src/plugins/enemies.tsx`（替换 `enemies.ts`），`defineGame` 引入 `fps` 套件，`vars: { tokenGap: 0 }`。积木 `slFoe`（order 0）、`slGull`、`slHound`（order 1）、`slBolt`（order 2）；预制件 `gull`、`hound`（标签 `enemy`，带 `health`）、`bolt`、`boom`（`lifetime` 0.6 秒）。
+- 暂停：积木在 `step` 开头检查阶段，`paused`、`title` 时直接返回，与旧版只在这两个阶段冻结一致（`dead` 时敌人照常活动）。
+- 存活数与持有令牌数每步只统计一次（按 `w.tick` 缓存），`tokenGap` 在同一处减 `dt`。
+- 生成仍走 `saltline/spawn` 事件，在事件里 `w.spawn(type, { at, slFoe: { pursuit }, health: { max } })`；`saltline/clear-enemies` 销毁敌人、弹道与爆炸并把 `tokenGap` 清零。
+- 命中部件到实体的映射 `partOwner` 由表现层建模型时登记，子弹事件里查到实体后调用 `damage`，血量归零时转入 `dying`。鸥坠地时生成 `boom` 并销毁自身；犬倒地 9.7 秒后销毁，模型随实体消失回收。
+- 弹道、爆炸的画面用对象池（32 个胶囊、4 个火球），按实体位置与 `lifetime.age` 绘制。
+- 实机验证：开局 8 个敌人由 `pending` 生成，鸥发现玩家后进入 `combat` 并开火，玩家掉血，罗盘出现敌人标记；子弹事件击杀鸥、犬各一，鸥坠毁后消失，犬约 10 秒后回收，击杀数加 2；暂停 2 秒内敌人位置、模式与 `tokenGap` 不变；重试后敌人与弹道清空。运行日志无新错误。
+- 源码字节数：迁移前 `enemies.ts` 28570、`physics.ts` 6574、`types.ts` 4363、`hud.ts` 12159、`game.ts` 10877，合计 62543；迁移后 `enemies.tsx` 29998、`physics.ts` 1610、`types.ts` 4634、`hud.ts` 12048、`game.ts` 10817，合计 59107（另有测试夹具 `saltline-collision.ts` 5100，不计入游戏）。敌人单元本身略增（行为照搬，多了积木声明、状态初值与对象池），减少主要来自 `Collision` 移出游戏。
