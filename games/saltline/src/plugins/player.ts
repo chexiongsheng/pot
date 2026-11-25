@@ -28,6 +28,33 @@ export function apply(ctx: Context) {
   const p = ctx.state.define<PlayerState>(PLAYER, { version: 1, init: fresh, validate: valid })
   const cam = ctx.scene.camera
   let lastStep = 0
+  // 按固定步采样的输入：down 为本步按住，pressed 为本步按下且上一步没按（与 World 的指令相同）
+  const KEYS = { jump: ['space'], sprint: ['leftshift'], crouch: ['c', 'leftcontrol'] }
+  let down: Record<string, boolean> = {}, prevDown: Record<string, boolean> = {}
+  let lookAcc = { x: 0, y: 0 }, lookFrame = -1
+  const key = (a: keyof typeof KEYS) => !!down[a]
+  const pressed = (a: keyof typeof KEYS) => !!down[a] && !prevDown[a]
+  /** 本帧第一步取“累积 + 本帧”的 look，同一帧后续的步取 0 */
+  function takeLook() {
+    const frame = ctx.clock.frame
+    if (lookFrame === frame) return { x: 0, y: 0 }
+    lookFrame = frame
+    const a = ctx.input.axis('look')
+    const v = { x: a.x + lookAcc.x, y: a.y + lookAcc.y }
+    lookAcc = { x: 0, y: 0 }
+    return v
+  }
+
+  ctx.on('fixed-update', (dt) => {
+    prevDown = down
+    down = {}
+    for (const a of Object.keys(KEYS) as (keyof typeof KEYS)[]) down[a] = KEYS[a].some((k) => ctx.input.key(k))
+    const look = takeLook()
+    const g = game(ctx)
+    if (!g || g.phase === 'title' || g.phase === 'complete') return
+    const active = g.phase === 'playing' || g.phase === 'intro'
+    if (active && p.health > 0) control(dt, ctx.clock.time, g.settings, weapon(ctx)?.ads ?? 0, look)
+  })
 
   on(ctx, 'saltline/reset', () => {
     Object.assign(p, fresh())
@@ -46,13 +73,17 @@ export function apply(ctx: Context) {
 
   ctx.on('update', (dt, clock) => {
     const g = game(ctx)
+    // look 是增量：本帧没有跑固定步时累积到下一步（与 World 的采样相同）
+    if (lookFrame !== ctx.clock.frame) {
+      const a = ctx.input.axis('look')
+      lookAcc.x += a.x
+      lookAcc.y += a.y
+    }
     if (!g) return
     const w = weapon(ctx)
     p.hurt = Math.max(0, p.hurt - dt * 1.2)
     p.shake = Math.max(0, p.shake - dt * 3)
     if (g.phase === 'title' || g.phase === 'complete') return
-    const active = g.phase === 'playing' || g.phase === 'intro'
-    if (active && p.health > 0) control(dt, clock, g.settings, w?.ads ?? 0)
     // 相机
     const ads = w?.ads ?? 0
     const fov = (g.settings.fov ?? T.fov) + (T.fovAds - T.fov) * ads + (p.sprinting ? T.fovSprint : 0)
@@ -66,17 +97,16 @@ export function apply(ctx: Context) {
     cam.rotation = [p.pitch + (w?.recoilP ?? 0) + sy * 20, p.yaw + (w?.recoilY ?? 0) + sx * 20, p.shake * Math.sin(clock * 40) * 1.5]
   })
 
-  function control(dt: number, clock: number, settings: { sensitivity: number; invertY: boolean }, ads: number) {
+  function control(dt: number, clock: number, settings: { sensitivity: number; invertY: boolean }, ads: number, look: { x: number; y: number }) {
     const input = ctx.input
     // 视角
     if (input.cursor()) {
-      const look = input.axis('look')
       const k = 2 * settings.sensitivity * (ads > 0.5 ? T.adsLook : 1)
       p.yaw = (p.yaw + look.x * k) % 360
       p.pitch = clamp(p.pitch - look.y * k * (settings.invertY ? -1 : 1), -T.pitchLimit, T.pitchLimit)
     }
     // 蹲伏
-    if (input.pressed('c') || input.pressed('leftcontrol')) p.crouching = !p.crouching
+    if (pressed('crouch')) p.crouching = !p.crouching
     const wantCrouch = p.crouching
     const targetH = wantCrouch ? T.crouchHeight : T.height
     if (!wantCrouch && p.height < T.height - 0.01 && world.blocked(p.pos[0], p.pos[1] + 0.05, p.pos[2], T.radius - 0.02, T.height - 0.05)) {
@@ -91,7 +121,7 @@ export function apply(ctx: Context) {
     let mx = move.x, mz = move.y
     const ml = Math.hypot(mx, mz)
     if (ml > 1) { mx /= ml; mz /= ml }
-    const wantsSprint = input.key('leftshift') && mz > 0.3 && !p.crouching && ads < 0.3
+    const wantsSprint = key('sprint') && mz > 0.3 && !p.crouching && ads < 0.3
     p.sprinting = wantsSprint && p.grounded
     const speed = p.crouching ? T.crouch : ads > 0.5 ? T.ads : wantsSprint ? T.sprint : T.walk
     const f = forward(p.yaw), r = right(p.yaw)
@@ -105,7 +135,7 @@ export function apply(ctx: Context) {
 
     // 跳跃（土狼时间 + 输入缓冲）
     p.coyote = p.grounded ? T.coyote : Math.max(0, p.coyote - dt)
-    p.jumpBuffer = input.pressed('space') ? T.jumpBuffer : Math.max(0, p.jumpBuffer - dt)
+    p.jumpBuffer = pressed('jump') ? T.jumpBuffer : Math.max(0, p.jumpBuffer - dt)
     if (p.jumpBuffer > 0 && p.coyote > 0 && !p.crouching) {
       p.vel[1] = Math.sqrt(2 * T.gravity * T.jumpApex)
       p.jumpBuffer = 0
