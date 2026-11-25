@@ -71,7 +71,9 @@ var pot = (() => {
     Texture: () => Texture,
     TimerService: () => TimerService,
     UIService: () => UIService,
+    UI_COMMON_PROPS: () => UI_COMMON_PROPS,
     UI_MARGIN: () => UI_MARGIN,
+    UI_TAG_DOCS: () => UI_TAG_DOCS,
     VERSION: () => VERSION,
     ValidationError: () => ValidationError,
     WorldService: () => WorldService,
@@ -411,10 +413,10 @@ var pot = (() => {
     return value && (typeof value === "object" || typeof value === "function");
   }
   __name(isObject, "isObject");
-  function getPropertyDescriptor(target, prop) {
+  function getPropertyDescriptor(target, prop2) {
     let proto = target;
     while (proto) {
-      const desc = Reflect.getOwnPropertyDescriptor(proto, prop);
+      const desc = Reflect.getOwnPropertyDescriptor(proto, prop2);
       if (desc) return desc;
       proto = Object.getPrototypeOf(proto);
     }
@@ -433,19 +435,19 @@ var pot = (() => {
   function withProps(target, props) {
     if (!props) return target;
     return new Proxy(target, {
-      get: /* @__PURE__ */ __name((target2, prop, receiver) => {
-        if (prop in props && prop !== "constructor") return Reflect.get(props, prop, receiver);
-        return Reflect.get(target2, prop, receiver);
+      get: /* @__PURE__ */ __name((target2, prop2, receiver) => {
+        if (prop2 in props && prop2 !== "constructor") return Reflect.get(props, prop2, receiver);
+        return Reflect.get(target2, prop2, receiver);
       }, "get"),
-      set: /* @__PURE__ */ __name((target2, prop, value, receiver) => {
-        if (prop in props && prop !== "constructor") return Reflect.set(props, prop, value, receiver);
-        return Reflect.set(target2, prop, value, receiver);
+      set: /* @__PURE__ */ __name((target2, prop2, value, receiver) => {
+        if (prop2 in props && prop2 !== "constructor") return Reflect.set(props, prop2, value, receiver);
+        return Reflect.set(target2, prop2, value, receiver);
       }, "set")
     });
   }
   __name(withProps, "withProps");
-  function withProp(target, prop, value) {
-    return withProps(target, Object.defineProperty(/* @__PURE__ */ Object.create(null), prop, {
+  function withProp(target, prop2, value) {
+    return withProps(target, Object.defineProperty(/* @__PURE__ */ Object.create(null), prop2, {
       value,
       writable: false
     }));
@@ -473,23 +475,23 @@ var pot = (() => {
       ctx = Object.getPrototypeOf(ctx);
     }
     const proxy = new Proxy(value, {
-      get: /* @__PURE__ */ __name((target, prop, receiver) => {
-        if (prop === symbols.original) return target;
-        if (prop === symbols.caller) return caller;
-        if (prop === tracker.property) return ctx;
-        if (typeof prop === "symbol") {
-          return Reflect.get(target, prop, receiver);
+      get: /* @__PURE__ */ __name((target, prop2, receiver) => {
+        if (prop2 === symbols.original) return target;
+        if (prop2 === symbols.caller) return caller;
+        if (prop2 === tracker.property) return ctx;
+        if (typeof prop2 === "symbol") {
+          return Reflect.get(target, prop2, receiver);
         }
-        if (tracker.associate && ctx.reflect.props[`${tracker.associate}.${prop}`]) {
-          return Reflect.get(ctx, `${tracker.associate}.${prop}`, withProp(ctx, symbols.receiver, receiver));
+        if (tracker.associate && ctx.reflect.props[`${tracker.associate}.${prop2}`]) {
+          return Reflect.get(ctx, `${tracker.associate}.${prop2}`, withProp(ctx, symbols.receiver, receiver));
         }
         let shadow, innerValue;
-        const desc = getPropertyDescriptor(target, prop);
+        const desc = getPropertyDescriptor(target, prop2);
         if (desc && "value" in desc) {
           innerValue = desc.value;
         } else {
           shadow = createShadow(ctx, target, tracker.property, receiver);
-          innerValue = Reflect.get(target, prop, shadow);
+          innerValue = Reflect.get(target, prop2, shadow);
         }
         const innerTracker = innerValue?.[symbols.tracker];
         if (innerTracker) {
@@ -501,18 +503,18 @@ var pot = (() => {
           return innerValue;
         }
       }, "get"),
-      set: /* @__PURE__ */ __name((target, prop, value2, receiver) => {
-        if (prop === symbols.original) return false;
-        if (prop === symbols.caller) return false;
-        if (prop === tracker.property) return false;
-        if (typeof prop === "symbol") {
-          return Reflect.set(target, prop, value2, receiver);
+      set: /* @__PURE__ */ __name((target, prop2, value2, receiver) => {
+        if (prop2 === symbols.original) return false;
+        if (prop2 === symbols.caller) return false;
+        if (prop2 === tracker.property) return false;
+        if (typeof prop2 === "symbol") {
+          return Reflect.set(target, prop2, value2, receiver);
         }
-        if (tracker.associate && ctx.reflect.props[`${tracker.associate}.${prop}`]) {
-          return Reflect.set(ctx, `${tracker.associate}.${prop}`, value2, withProp(ctx, symbols.receiver, receiver));
+        if (tracker.associate && ctx.reflect.props[`${tracker.associate}.${prop2}`]) {
+          return Reflect.set(ctx, `${tracker.associate}.${prop2}`, value2, withProp(ctx, symbols.receiver, receiver));
         }
         const shadow = createShadow(ctx, target, tracker.property, receiver);
-        return Reflect.set(target, prop, value2, shadow);
+        return Reflect.set(target, prop2, value2, shadow);
       }, "set"),
       apply: /* @__PURE__ */ __name((target, thisArg, args) => {
         const receiver = tracker.noShadow ? proxy : createShadow(ctx, target, tracker.property, proxy);
@@ -1348,8 +1350,8 @@ var pot = (() => {
   }
   __name(enhanceError, "enhanceError");
   var RESERVED_WORDS = ["prototype", "then"];
-  function isSpecialProperty(prop) {
-    return typeof prop === "symbol" || RESERVED_WORDS.includes(prop) || parseInt(prop).toString() === prop || prop.startsWith("_");
+  function isSpecialProperty(prop2) {
+    return typeof prop2 === "symbol" || RESERVED_WORDS.includes(prop2) || parseInt(prop2).toString() === prop2 || prop2.startsWith("_");
   }
   __name(isSpecialProperty, "isSpecialProperty");
   var _a8;
@@ -1490,32 +1492,32 @@ var pot = (() => {
       });
     }
   }, __name(_a8, "ReflectService"), __publicField(_a8, "handler", {
-    get: /* @__PURE__ */ __name((target, prop, ctx) => {
-      if (isSpecialProperty(prop)) {
-        return Reflect.get(target, prop, ctx);
+    get: /* @__PURE__ */ __name((target, prop2, ctx) => {
+      if (isSpecialProperty(prop2)) {
+        return Reflect.get(target, prop2, ctx);
       }
-      if (Reflect.has(target, prop)) {
-        return getTraceable(ctx, Reflect.get(target, prop, ctx));
+      if (Reflect.has(target, prop2)) {
+        return getTraceable(ctx, Reflect.get(target, prop2, ctx));
       }
-      const error = new Error(`cannot get property "${prop}" without inject`);
+      const error = new Error(`cannot get property "${prop2}" without inject`);
       try {
-        const def = target.reflect.props[prop];
+        const def = target.reflect.props[prop2];
         if (def?.type === "accessor") {
           return def.get.call(ctx, ctx[symbols.receiver], error);
         }
-        if (!ctx.fiber.runtime) return ctx.reflect.get(prop, false);
-        return ctx.events.waterfall("internal/get", ctx, prop, error, () => {
-          const key = target[symbols.isolate][prop];
+        if (!ctx.fiber.runtime) return ctx.reflect.get(prop2, false);
+        return ctx.events.waterfall("internal/get", ctx, prop2, error, () => {
+          const key = target[symbols.isolate][prop2];
           let fiber = (ctx[symbols.shadow] ?? ctx).fiber;
           while (true) {
-            const impl = fiber.store?.[prop];
+            const impl = fiber.store?.[prop2];
             if (impl) return getTraceable(ctx, impl.value);
-            if (prop in fiber.inject) {
-              error.message = `cannot get required service "${prop}" in inactive context`;
+            if (prop2 in fiber.inject) {
+              error.message = `cannot get required service "${prop2}" in inactive context`;
               throw error;
             }
             if (!fiber.runtime) throw error;
-            if (fiber.parent[symbols.isolate][prop] !== key) throw error;
+            if (fiber.parent[symbols.isolate][prop2] !== key) throw error;
             fiber = fiber.parent.fiber;
           }
         });
@@ -1523,14 +1525,14 @@ var pot = (() => {
         throw e === error ? enhanceError(e) : e;
       }
     }, "get"),
-    set: /* @__PURE__ */ __name((target, prop, value, ctx) => {
-      if (isSpecialProperty(prop)) {
-        return Reflect.set(target, prop, value, ctx);
+    set: /* @__PURE__ */ __name((target, prop2, value, ctx) => {
+      if (isSpecialProperty(prop2)) {
+        return Reflect.set(target, prop2, value, ctx);
       }
-      const error = new Error(`cannot set property "${prop}" without provide`);
-      const def = target.reflect.props[prop];
+      const error = new Error(`cannot set property "${prop2}" without provide`);
+      const def = target.reflect.props[prop2];
       if (!def) {
-        if (!ctx.fiber.runtime) return Reflect.set(target, prop, value, ctx);
+        if (!ctx.fiber.runtime) return Reflect.set(target, prop2, value, ctx);
         throw enhanceError(error);
       }
       try {
@@ -1538,19 +1540,19 @@ var pot = (() => {
           if (!def.set) return false;
           return def.set.call(ctx, value, ctx[symbols.receiver], error);
         }
-        return ctx.events.waterfall("internal/set", ctx, prop, value, error, () => {
-          return ctx.reflect.set(prop, value, error);
+        return ctx.events.waterfall("internal/set", ctx, prop2, value, error, () => {
+          return ctx.reflect.set(prop2, value, error);
         });
       } catch (e) {
         throw e === error ? enhanceError(e) : e;
       }
     }, "set"),
-    has: /* @__PURE__ */ __name((target, prop) => {
-      if (isSpecialProperty(prop)) {
-        return Reflect.has(target, prop);
+    has: /* @__PURE__ */ __name((target, prop2) => {
+      if (isSpecialProperty(prop2)) {
+        return Reflect.has(target, prop2);
       }
-      if (Reflect.has(target, prop)) return true;
-      return !!target.reflect.props[prop];
+      if (Reflect.has(target, prop2)) return true;
+      return !!target.reflect.props[prop2];
     }, "has")
   }), _a8);
   function isApplicable(object) {
@@ -1585,14 +1587,14 @@ var pot = (() => {
   }
   __name(Inject, "Inject");
   ((Inject2) => {
-    function resolve(inject, result = /* @__PURE__ */ Object.create(null)) {
+    function resolve2(inject, result = /* @__PURE__ */ Object.create(null)) {
       if (!inject) return result;
       if (Array.isArray(inject)) {
         for (const name of inject) {
           result[name] = null;
         }
       } else if (Reflect.has(inject, symbols.checkProto)) {
-        Object.assign(result, resolve(Object.getPrototypeOf(inject)));
+        Object.assign(result, resolve2(Object.getPrototypeOf(inject)));
         for (const name of Object.keys(inject)) {
           result[name] = inject[name] ?? null;
         }
@@ -1603,8 +1605,8 @@ var pot = (() => {
       }
       return result;
     }
-    Inject2.resolve = resolve;
-    __name(resolve, "resolve");
+    Inject2.resolve = resolve2;
+    __name(resolve2, "resolve");
   })(Inject || (Inject = {}));
   var _a9;
   var RegistryService = (_a9 = class {
@@ -1708,8 +1710,8 @@ var pot = (() => {
     extend(meta = {}) {
       const shadow = Reflect.getOwnPropertyDescriptor(this, symbols.shadow)?.value;
       const self = Object.create(getTraceable(this, this));
-      for (const prop of Reflect.ownKeys(meta)) {
-        Object.defineProperty(self, prop, Reflect.getOwnPropertyDescriptor(meta, prop));
+      for (const prop2 of Reflect.ownKeys(meta)) {
+        Object.defineProperty(self, prop2, Reflect.getOwnPropertyDescriptor(meta, prop2));
       }
       if (!shadow) return self;
       return Object.assign(Object.create(self), { [symbols.shadow]: shadow });
@@ -2066,8 +2068,8 @@ var pot = (() => {
     }
     /** 宿主帧计数等待（冻结/暂停时也会推进） */
     waitFrames(frames = 1) {
-      return new Promise((resolve) => {
-        this._frameWaiters.push({ frame: this.hostFrame + Math.max(1, frames | 0), resolve });
+      return new Promise((resolve2) => {
+        this._frameWaiters.push({ frame: this.hostFrame + Math.max(1, frames | 0), resolve: resolve2 });
       });
     }
     /** 按游戏时间调度回调，返回取消函数。一般用 ctx.timeout，它会随插件自动清理 */
@@ -2139,16 +2141,16 @@ var pot = (() => {
         }, "ctx.timeout()");
         return dispose2;
       }
-      let resolve, reject;
+      let resolve2, reject;
       const promise = new Promise((res, rej) => {
-        resolve = res;
+        resolve2 = res;
         reject = rej;
       });
       let settled = false;
       const dispose = this.ctx.effect(() => {
         const cancel = clock.schedule(delay, () => {
           settled = true;
-          resolve();
+          resolve2();
         });
         return () => {
           cancel();
@@ -3123,7 +3125,7 @@ var pot = (() => {
     }
     /** @internal */
     _coverage(polys) {
-      const W = this.canvas.width, H2 = this.canvas.height;
+      const W = this.canvas.width, H = this.canvas.height;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const p of polys) for (let i = 0; i < p.length; i += 2) {
         const x = p[i], y = p[i + 1];
@@ -3134,7 +3136,7 @@ var pot = (() => {
         if (y > maxY) maxY = y;
       }
       const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(W, Math.ceil(maxX));
-      const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H2, Math.ceil(maxY));
+      const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H, Math.ceil(maxY));
       if (x1 <= x0 || y1 <= y0) return null;
       const bw = x1 - x0, bh = y1 - y0, stride = bw + 2;
       const acc = new Float32Array(stride * bh);
@@ -3893,14 +3895,14 @@ var pot = (() => {
     }
   }
   var INSTANCE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  function instanceLayout(layout) {
-    const names = Object.keys(layout ?? {});
+  function instanceLayout(layout2) {
+    const names = Object.keys(layout2 ?? {});
     if (names.length === 0 || names.length > 11) throw new Error(`instances：layout 应有 1 到 11 项，给了 ${names.length} 项`);
     let stride = 0;
     const parts = [];
     for (const name of names) {
       if (!INSTANCE_NAME.test(name) || name.startsWith("pot_") || name.startsWith("gl_")) throw new Error(`instances：属性名无效 ${name}`);
-      const size = layout[name];
+      const size = layout2[name];
       if (!Number.isInteger(size) || size < 1 || size > 4) throw new Error(`instances：${name} 的分量数应为 1 到 4，收到 ${size}`);
       parts.push(`${name}:${size}`);
       stride += size;
@@ -4128,14 +4130,14 @@ var pot = (() => {
      * layout 如 { aOffset: 3, aColor: 4 }，data 按此顺序交错；data 可以是预分配的大数组，只上传前 count 个实例。
      * 实例化时不做视锥剔除、不投射网格阴影。传 null 或 count 0 恢复单次绘制
      */
-    instances(layout, data, count) {
+    instances(layout2, data, count) {
       const engine = this._engine;
       if (!engine.gfxInstances) throw new Error("当前 Runner 不支持实例化（宿主缺少 gfxInstances），请更新 Runner");
-      if (!layout || count === 0) {
+      if (!layout2 || count === 0) {
         engine.gfxInstances(this.id, 0, "", new ArrayBuffer(0));
         return this;
       }
-      const { text, stride } = instanceLayout(layout);
+      const { text, stride } = instanceLayout(layout2);
       if (!data) throw new Error("instances：缺少 data");
       const n2 = count ?? Math.floor(data.length / stride);
       if (!Number.isInteger(n2) || n2 < 0) throw new Error(`instances：count 无效 ${count}`);
@@ -6696,7 +6698,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     frame() {
       if (!this._host.frames) return Promise.resolve();
       this.yields++;
-      return new Promise((resolve) => this._waiters.push(resolve));
+      return new Promise((resolve2) => this._waiters.push(resolve2));
     }
     /** 回报进度；本帧连续执行超过 budget 时让出一帧 */
     step(text, progress) {
@@ -6710,7 +6712,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       if (!this._waiters.length) return;
       const waiters = this._waiters;
       this._waiters = [];
-      for (const resolve of waiters) resolve();
+      for (const resolve2 of waiters) resolve2();
     }
     /** 运行时启动开始 */
     begin(text = "启动") {
@@ -6872,9 +6874,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "props", props);
     }
   };
-  function makeNode(type, props, key, source) {
+  function makeNode(type, props, key, source, isStatic) {
     const node = new Node(type, key === void 0 || key === null ? null : String(key), props ?? {});
     if (source) node.source = source;
+    if (isStatic) node.static = true;
     return node;
   }
   function isNode(value) {
@@ -7013,6 +7016,353 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return clone(over);
   }
 
+  // runtime/src/world/ui-layout.ts
+  var UI_MARGIN = 16;
+  var ANCHORS = {
+    "top-left": [0, 0],
+    top: [0.5, 0],
+    "top-right": [1, 0],
+    left: [0, 0.5],
+    center: [0.5, 0.5],
+    right: [1, 0.5],
+    "bottom-left": [0, 1],
+    bottom: [0.5, 1],
+    "bottom-right": [1, 1]
+  };
+  function prop(el, layouts, name) {
+    const v = el.props[name];
+    return v === void 0 ? layouts[el.tag]?.defaults?.[name] : v;
+  }
+  function padding(el, layouts) {
+    const p = prop(el, layouts, "pad") ?? 0;
+    if (typeof p === "number") return [p, p, p, p];
+    if (Array.isArray(p) && p.length === 2) return [p[0], p[1], p[0], p[1]];
+    if (Array.isArray(p) && p.length === 4) return [p[0], p[1], p[2], p[3]];
+    throw new Error(`<${el.tag}> 的 pad 必须是数、[上下, 左右] 或 [上, 右, 下, 左]`);
+  }
+  function resolve(value, base) {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+    if (typeof value === "string" && /^\d+(\.\d+)?%$/.test(value)) return base === void 0 ? void 0 : base * parseFloat(value) / 100;
+    if (value !== void 0) throw new Error(`尺寸必须是像素数或 'NN%'，收到 ${JSON.stringify(value)}`);
+    return void 0;
+  }
+  var fixedPx = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : void 0;
+  var visible = (el) => !el.props.hidden;
+  function wrapText(text, maxW, size, bold, m) {
+    const out = [];
+    for (const para of text.split("\n")) {
+      const tokens = para.match(/[\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]|[^\s\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]+|\s+/g) ?? [""];
+      let line = "";
+      for (const token of tokens) {
+        const next = line + token;
+        if (!line || m.width(next, size, bold) <= maxW) {
+          line = next;
+          continue;
+        }
+        out.push(line.replace(/\s+$/, ""));
+        line = /^\s+$/.test(token) ? "" : token;
+        while (line && m.width(line, size, bold) > maxW && line.length > 1) {
+          let i = line.length - 1;
+          while (i > 1 && m.width(line.slice(0, i), size, bold) > maxW) i--;
+          out.push(line.slice(0, i));
+          line = line.slice(i);
+        }
+      }
+      out.push(line.replace(/\s+$/, ""));
+    }
+    return out;
+  }
+  function measure(el, layouts, m, width) {
+    const def = layouts[el.tag] ?? {};
+    const fw = fixedPx(el.props.w);
+    const fh = fixedPx(el.props.h);
+    const useW = fw ?? width;
+    let size;
+    if (def.container) {
+      const [t, r, b, l] = padding(el, layouts);
+      const gap = prop(el, layouts, "gap") ?? 0;
+      const align = prop(el, layouts, "align") ?? "start";
+      const kids = el.children.filter(visible);
+      const innerW = useW === void 0 ? void 0 : Math.max(0, useW - l - r);
+      let main = 0;
+      let cross = 0;
+      for (const child of kids) {
+        const hint = def.container === "column" ? fixedPx(child.props.w) ?? (align === "stretch" ? innerW : void 0) : fixedPx(child.props.w);
+        const s = measure(child, layouts, m, hint);
+        if (def.container === "column") {
+          main += s.h;
+          cross = Math.max(cross, s.w);
+        } else {
+          main += s.w;
+          cross = Math.max(cross, s.h);
+        }
+      }
+      main += Math.max(0, kids.length - 1) * gap;
+      size = def.container === "column" ? { w: cross + l + r, h: main + t + b } : { w: main + l + r, h: cross + t + b };
+    } else {
+      size = def.intrinsic ? def.intrinsic(el, m, useW) : { w: 0, h: 0 };
+    }
+    return { w: fw ?? (width !== void 0 && def.container ? Math.max(width, size.w) : size.w), h: fh ?? size.h };
+  }
+  function intersect(a, b) {
+    if (!a) return null;
+    const x0 = Math.max(a.x, b.x), y0 = Math.max(a.y, b.y);
+    const x1 = Math.min(a.x + a.w, b.x + b.w), y1 = Math.min(a.y + a.h, b.y + b.h);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  function layout(el, x, y, w, h, clip, env) {
+    el.x = x;
+    el.y = y;
+    el.w = w;
+    el.h = h;
+    el.clip = intersect(clip, { x, y, w, h });
+    const { layouts, m } = env;
+    const def = layouts[el.tag] ?? {};
+    if (!def.container) {
+      if (def.intrinsic) def.intrinsic(el, m, w);
+      return;
+    }
+    const [t, r, b, l] = padding(el, layouts);
+    const gap = prop(el, layouts, "gap") ?? 0;
+    const align = prop(el, layouts, "align") ?? "start";
+    const justify = prop(el, layouts, "justify") ?? "start";
+    const kids = el.children.filter(visible);
+    const innerX = x + l, innerY = y + t;
+    const innerW = Math.max(0, w - l - r);
+    const scroll = el.tag === "scroll";
+    const innerH = Math.max(0, h - t - b);
+    const column = def.container === "column";
+    const mainSpace = column ? innerH : innerW;
+    const crossSpace = column ? innerW : innerH;
+    const sizes = kids.map((child) => {
+      let cw, ch;
+      if (column) {
+        const natural = () => measure(child, layouts, m);
+        cw = resolve(child.props.w, innerW) ?? (align === "stretch" ? innerW : Math.min(natural().w, child.props.wrap ? innerW : Infinity));
+        ch = resolve(child.props.h, scroll ? void 0 : innerH) ?? measure(child, layouts, m, cw).h;
+        return { main: ch, cross: cw };
+      }
+      cw = resolve(child.props.w, innerW) ?? measure(child, layouts, m).w;
+      ch = resolve(child.props.h, innerH) ?? (align === "stretch" ? innerH : measure(child, layouts, m, cw).h);
+      return { main: cw, cross: ch };
+    });
+    const used = sizes.reduce((s, v) => s + v.main, 0) + Math.max(0, kids.length - 1) * gap;
+    let remaining = scroll ? 0 : mainSpace - used;
+    const totalGrow = kids.reduce((s, c) => s + (Number(c.props.grow) > 0 ? Number(c.props.grow) : 0), 0);
+    if (remaining > 0 && totalGrow > 0) {
+      kids.forEach((c, i) => {
+        const g = Number(c.props.grow) > 0 ? Number(c.props.grow) : 0;
+        sizes[i].main += remaining * g / totalGrow;
+      });
+      remaining = 0;
+    }
+    let offset = 0;
+    let spacing = gap;
+    if (remaining > 0) {
+      if (justify === "center") offset = remaining / 2;
+      else if (justify === "end") offset = remaining;
+      else if (justify === "between" && kids.length > 1) spacing = gap + remaining / (kids.length - 1);
+    }
+    const scrollY = scroll ? env.scrollOf(el.path) : 0;
+    const childClip = scroll ? intersect(el.clip, { x: innerX, y: innerY, w: innerW, h: innerH }) : el.clip;
+    let pos = offset;
+    kids.forEach((child, i) => {
+      const s = sizes[i];
+      let crossPos = 0;
+      if (align === "center") crossPos = (crossSpace - s.cross) / 2;
+      else if (align === "end") crossPos = crossSpace - s.cross;
+      if (column) layout(child, innerX + crossPos, innerY + pos - scrollY, s.cross, s.main, childClip, env);
+      else layout(child, innerX + pos, innerY + crossPos, s.main, s.cross, childClip, env);
+      pos += s.main + spacing;
+    });
+    if (scroll) el.contentH = Math.max(0, pos - spacing);
+  }
+  function layoutRoot(el, screenW, screenH, env) {
+    const w = resolve(el.props.w, screenW) ?? measure(el, env.layouts, env.m).w;
+    const h = resolve(el.props.h, screenH) ?? measure(el, env.layouts, env.m, w).h;
+    const at = el.props.at ?? "top-left";
+    let x, y;
+    if (typeof at === "string") {
+      const anchor = ANCHORS[at];
+      if (!anchor) throw new Error(`<${el.tag}> 的 at 不认识 "${at}"，可用 ${Object.keys(ANCHORS).join("、")} 或 [x, y]`);
+      x = UI_MARGIN + (screenW - UI_MARGIN * 2 - w) * anchor[0];
+      y = UI_MARGIN + (screenH - UI_MARGIN * 2 - h) * anchor[1];
+    } else if (Array.isArray(at) && at.length === 2 && at.every((n2) => typeof n2 === "number" && Number.isFinite(n2))) {
+      x = at[0];
+      y = at[1];
+    } else {
+      throw new Error(`<${el.tag}> 的 at 必须是九宫格位置名或 [x, y]`);
+    }
+    layout(el, x, y, w, h, { x: 0, y: 0, w: screenW, h: screenH }, env);
+  }
+
+  // runtime/src/world/ui-tags.ts
+  var LEAF_SIZE = 16;
+  function fontOf(el) {
+    return { size: Number(el.props.size) || LEAF_SIZE, bold: !!el.props.bold };
+  }
+  var LAYOUTS = {
+    column: { container: "column" },
+    row: { container: "row" },
+    panel: { container: "column", defaults: { pad: 12, gap: 8, bg: "#1a1d26e6", radius: 8 } },
+    scroll: { container: "column" },
+    text: {
+      intrinsic(el, m, width) {
+        const { size, bold } = fontOf(el);
+        const [t, r, b, l] = padding(el, LAYOUTS);
+        const lh = m.lineHeight(size, bold);
+        const lines = el.props.wrap && width !== void 0 ? wrapText(el.text, Math.max(1, width - l - r), size, bold, m) : el.text.split("\n");
+        el.lines = lines;
+        const w = Math.max(0, ...lines.map((line) => m.width(line, size, bold)));
+        return { w: w + l + r, h: lines.length * lh + t + b };
+      }
+    },
+    button: {
+      defaults: { pad: [8, 16] },
+      intrinsic(el, m) {
+        const { size, bold } = fontOf(el);
+        const [t, r, b, l] = padding(el, LAYOUTS);
+        return { w: m.width(el.text, size, bold) + l + r, h: m.lineHeight(size, bold) + t + b };
+      }
+    },
+    bar: {
+      intrinsic(el) {
+        return { w: typeof el.props.w === "number" ? el.props.w : 120, h: typeof el.props.h === "number" ? el.props.h : 10 };
+      }
+    },
+    image: {
+      intrinsic(el) {
+        const src = el.props.src;
+        const sw = Number(src?.width) || 64, sh = Number(src?.height) || 64;
+        const w = typeof el.props.w === "number" ? el.props.w : void 0;
+        const h = typeof el.props.h === "number" ? el.props.h : void 0;
+        if (w !== void 0 && h === void 0) return { w, h: w * sh / sw };
+        if (h !== void 0 && w === void 0) return { w: h * sw / sh, h };
+        return { w: w ?? sw, h: h ?? sh };
+      }
+    },
+    input: {
+      defaults: { pad: [6, 10] },
+      intrinsic(el, m) {
+        const { size, bold } = fontOf(el);
+        const [t, , b] = padding(el, LAYOUTS);
+        return { w: typeof el.props.w === "number" ? el.props.w : 200, h: m.lineHeight(size, bold) + t + b };
+      }
+    }
+  };
+  var CONTAINERS = /* @__PURE__ */ new Set(["column", "row", "panel", "scroll"]);
+  var TEXT_TAGS = /* @__PURE__ */ new Set(["text", "button"]);
+  var UI_TAG_NAMES = Object.keys(LAYOUTS);
+  var FOCUS = "#ffd54f";
+  function drawElement(el, ui, s, m) {
+    const p = el.props;
+    const { x, y, w, h } = el;
+    switch (el.tag) {
+      case "panel": {
+        const radius = prop(el, LAYOUTS, "radius");
+        const bg = prop(el, LAYOUTS, "bg");
+        if (bg) ui.rect(x, y, w, h, bg, { radius });
+        if (p.border) {
+          const border = typeof p.border === "string" ? { color: p.border, width: 1 } : p.border;
+          ui.border(x, y, w, h, border.color, border.width ?? 1, { radius });
+        }
+        return;
+      }
+      case "text": {
+        const { size, bold } = fontOf(el);
+        const [t, r, , l] = padding(el, LAYOUTS);
+        const lh = m.lineHeight(size, bold);
+        const lines = el.lines ?? [el.text];
+        const align = p.align === "center" || p.align === "right" ? p.align : "left";
+        lines.forEach((line, i) => {
+          ui.text(line, x + l, y + t + i * lh, { size, bold, color: p.color ?? "#ffffff", w: Math.max(0, w - l - r), h: lh, align, valign: "middle" });
+        });
+        return;
+      }
+      case "button": {
+        const { size, bold } = fontOf(el);
+        const radius = p.radius ?? 6;
+        const alpha = p.disabled ? 0.45 : 1;
+        ui.rect(x, y, w, h, p.bg ?? "#3a7bd5", { radius, alpha });
+        if (!p.disabled && s.pressed) ui.rect(x, y, w, h, "#000000", { radius, alpha: 0.2 });
+        else if (!p.disabled && s.hover) ui.rect(x, y, w, h, "#ffffff", { radius, alpha: 0.12 });
+        if (s.focused) ui.border(x - 2, y - 2, w + 4, h + 4, FOCUS, 2, { radius: radius + 2 });
+        ui.text(el.text, x, y, { size, bold, color: p.color ?? "#ffffff", w, h, align: "center", valign: "middle", alpha });
+        return;
+      }
+      case "bar": {
+        const max = Number(p.max ?? 1) || 1;
+        const ratio = Math.max(0, Math.min(1, Number(p.value ?? 0) / max));
+        const radius = p.radius ?? h / 2;
+        ui.rect(x, y, w, h, p.bg ?? "#ffffff33", { radius });
+        if (ratio > 0) ui.rect(x, y, w * ratio, h, p.color ?? "#4caf50", { radius });
+        return;
+      }
+      case "image": {
+        const src = p.src;
+        if (!src) return;
+        const sw = Number(src.width) || 1, sh = Number(src.height) || 1;
+        const fit = p.fit ?? "fill";
+        const opts = { tint: p.tint, radius: p.radius };
+        if (fit === "contain") {
+          const k = Math.min(w / sw, h / sh);
+          const dw = sw * k, dh = sh * k;
+          ui.image(src, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh, opts);
+        } else if (fit === "cover") {
+          const k = Math.max(w / sw, h / sh);
+          const uw = w / (sw * k), uh = h / (sh * k);
+          ui.image(src, x, y, w, h, { ...opts, uv: [(1 - uw) / 2, (1 - uh) / 2, uw, uh] });
+        } else ui.image(src, x, y, w, h, opts);
+        return;
+      }
+      case "input": {
+        const { size, bold } = fontOf(el);
+        const [t, r, b, l] = padding(el, LAYOUTS);
+        const radius = p.radius ?? 4;
+        ui.rect(x, y, w, h, p.bg ?? "#0e1016", { radius });
+        ui.border(x, y, w, h, s.focused ? "#4fc3f7" : "#ffffff40", s.focused ? 2 : 1, { radius });
+        const value = String(p.value ?? "");
+        const innerW = Math.max(0, w - l - r);
+        ui.clip(x + l, y + t, innerW, Math.max(0, h - t - b));
+        const tw = m.width(value, size, bold);
+        const shift = s.focused ? Math.max(0, tw + 2 - innerW) : 0;
+        if (value) ui.text(value, x + l - shift, y, { size, bold, color: p.color ?? "#ffffff", w: tw + 4, h, valign: "middle" });
+        else if (p.placeholder) ui.text(String(p.placeholder), x + l, y, { size, bold, color: "#ffffff66", w: innerW, h, valign: "middle" });
+        if (s.focused && Math.floor(s.frame / 30) % 2 === 0) ui.rect(x + l - shift + tw + 1, y + t, 2, Math.max(0, h - t - b), "#ffffff");
+        ui.unclip();
+        return;
+      }
+    }
+  }
+  function drawScrollbar(el, ui, scrollY) {
+    const content = el.contentH ?? 0;
+    if (content <= el.h) return;
+    const track = el.h;
+    const thumb = Math.max(20, track * el.h / content);
+    const top = el.y + (track - thumb) * scrollY / (content - el.h);
+    ui.rect(el.x + el.w - 4, top, 3, thumb, "#ffffff55", { radius: 1.5 });
+  }
+  var UI_TAG_DOCS = {
+    column: { about: "纵向排列子元素，本身不画东西", props: { gap: "间距", align: "start|center|end|stretch", justify: "start|center|end|between", pad: "内边距" } },
+    row: { about: "横向排列子元素，本身不画东西", props: { gap: "间距", align: "start|center|end|stretch", justify: "start|center|end|between", pad: "内边距" } },
+    panel: { about: "带底色的纵向容器（缺省 pad 12、gap 8）", props: { bg: "底色", border: "描边颜色或 { color, width }", radius: "圆角" } },
+    text: { about: "文字；子节点里的字符串和数字拼起来", props: { size: "字号（16）", color: "颜色", bold: "粗体", wrap: "按宽度换行（需要确定宽度）", align: "left|center|right" } },
+    button: { about: "按钮：点击或焦点上按 Enter/空格时 ui.emit(emit, payload) 并调 onPress", props: { emit: "事件名", payload: "事件参数", onPress: "回调（只改 ui.local 或 ui.emit）", disabled: "禁用", bg: "底色", color: "文字颜色", size: "字号" } },
+    bar: { about: "进度条", props: { value: "当前值", max: "最大值（1）", color: "前景色", bg: "底色", w: "宽（120）", h: "高（10）" } },
+    image: { about: "贴图（低层 Texture）", props: { src: "Texture", fit: "fill|contain|cover", tint: "染色", radius: "圆角" } },
+    scroll: { about: "纵向滚动容器，内容超出时裁剪；滚轮、拖动滚动", props: { h: "高（必填）", gap: "间距" } },
+    input: { about: "单行输入框（受控）：显示 value，键入时 onChange(新值)，Enter 时 onSubmit(值)", props: { value: "当前值", onChange: "回调", onSubmit: "回调", placeholder: "占位文字", max: "最大长度", w: "宽（200）", size: "字号" } }
+  };
+  var UI_COMMON_PROPS = {
+    at: "只对顶层节点：九宫格位置名或 [x, y]（top-left）",
+    w: '宽：像素或 "50%"',
+    h: '高：像素或 "50%"',
+    grow: "主轴上分剩余空间的权重",
+    pad: "内边距：数、[上下, 左右] 或 [上, 右, 下, 左]",
+    hidden: "为真时不占位、不绘制"
+  };
+
   // runtime/src/world/tree.ts
   var BUILTIN_TAGS = ["rule", "stage"];
   var EVENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -7121,7 +7471,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       } else if (typeof type === "string") {
         prefab = registry.prefab(type);
         if (!prefab) {
-          errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`);
+          if (UI_TAG_NAMES.includes(type)) errors.push(`${sourcePrefix(node.source)}<${type}> 是界面标签，放错了树：界面写在 ui 里，scene 里只能用实体标签、rule、stage`);
+          else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`);
           return;
         }
       } else {
@@ -7717,6 +8068,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_goto", null);
       /** 进入流程状态后调用的钩子（defineGame 用它重建场景） */
       __publicField(this, "_enterHooks", []);
+      /** 界面事件：等下一步采样时进入指令 */
+      __publicField(this, "_uiEvents", []);
+      /** 本步指令里的事件（第 6 步分发） */
+      __publicField(this, "_cmdEvents", []);
+      /** 有焦点控件的单元：非空时不采样键盘与轴 */
+      __publicField(this, "_captures", /* @__PURE__ */ new Set());
       this._root = ctx;
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
@@ -8128,6 +8485,22 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     emit(name, payload) {
       this._queue.push({ name, args: [payload] });
     }
+    /** 界面事件（ui.emit）：进入下一步的指令，在那一步的第 6 步按自定义事件分发 */
+    emitUI(name, payload) {
+      if (typeof name !== "string" || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) throw new Error(`ui.emit：事件名必须是标识符，收到 ${JSON.stringify(name)}`);
+      let value;
+      try {
+        value = payload === void 0 ? void 0 : JSON.parse(JSON.stringify(payload));
+      } catch {
+        throw new Error("ui.emit 的 payload 必须可序列化（要进指令和录像）");
+      }
+      this._uiEvents.push({ name, args: [value] });
+    }
+    /** 界面有焦点控件时屏蔽指令里的键盘与轴（按单元记） */
+    setUICapture(unit, captured) {
+      if (captured) this._captures.add(unit);
+      else this._captures.delete(unit);
+    }
     cmd(_e) {
       return {
         axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
@@ -8207,13 +8580,17 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         this._down = {};
         this._axes = {};
         const input = this._root.input;
-        for (const name of Object.keys(this._controls.axes)) this._axes[name] = input.axis(this._controls.axes[name]);
+        const captured = this._captures.size > 0;
+        for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name]);
         for (const action of Object.keys(this._controls.actions)) {
           const keys = this._controls.actions[action];
-          this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
+          this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
         }
+        this._cmdEvents = this._uiEvents.splice(0);
         if (this._overlay()) {
           this.prev.clear();
+          this._queue.unshift(...this._cmdEvents);
+          this._cmdEvents = [];
           this._drain(data);
           this._applyGoto();
           return;
@@ -8237,7 +8614,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           const n2 = Math.max(1, Math.round(rule.seconds / this.dt));
           if ((data.tick + 1) % n2 === 0) this._guard('<rule on="every">', rule.source, () => rule.do(this));
         }
-        this._queue.unshift(...touches);
+        this._queue.unshift(...this._cmdEvents, ...touches);
+        this._cmdEvents = [];
         this._drain(data);
         data.tick++;
         this._applyGoto();
@@ -8318,7 +8696,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   function jsx(type, props, key) {
     return makeNode(type, props, key);
   }
-  var jsxs = jsx;
+  function jsxs(type, props, key) {
+    return makeNode(type, props, key, void 0, true);
+  }
   function createElement(type, config, ...children) {
     const props = {};
     let key;
@@ -8328,7 +8708,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
     if (children.length === 1) props.children = children[0];
     else if (children.length > 1) props.children = children;
-    return makeNode(type, props, key);
+    return makeNode(type, props, key, void 0, children.length > 1);
   }
 
   // runtime/src/jsx-dev-runtime.ts
@@ -8337,9 +8717,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     Fragment: () => Fragment,
     jsxDEV: () => jsxDEV
   });
-  function jsxDEV(type, props, key, _isStatic, source, _self) {
+  function jsxDEV(type, props, key, isStatic, source, _self) {
     const pos = source && source.fileName ? { file: source.fileName, line: source.lineNumber ?? 0, col: source.columnNumber ?? 0 } : void 0;
-    return makeNode(type, props, key, pos);
+    return makeNode(type, props, key, pos, isStatic);
   }
 
   // runtime/src/runtime.ts
@@ -8519,7 +8899,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   // runtime/src/unity.ts
   function createUnityHost() {
     const Pot = CS.Pot;
-    const H2 = Pot.PotHost;
+    const H = Pot.PotHost;
     const FS2 = Pot.GameFS;
     const S = Pot.PotScene;
     const I = Pot.PotInput;
@@ -8529,7 +8909,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const G = Pot.PotGfx;
     return {
       platform: "unity",
-      log: (level, text) => H2.Log(level, text),
+      log: (level, text) => H.Log(level, text),
       readText: (path) => {
         const text = FS2.ReadText(path);
         return text === null || text === void 0 ? null : text;
@@ -8539,20 +8919,20 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return text === null || text === void 0 ? null : text;
       },
       cacheWrite: (bucket, key, text) => FS2.CacheWrite(bucket, key, text),
-      gc: () => H2.RequestGC(),
-      send: (message) => H2.Send(message),
+      gc: () => H.RequestGC(),
+      send: (message) => H.Send(message),
       frames: true,
-      loading: (progress, text) => H2.OnLoading(progress, text),
+      loading: (progress, text) => H.OnLoading(progress, text),
       engine: {
         spawn: (shape2, name, parent) => S.Spawn(shape2, name, parent),
         destroy: (id) => S.Destroy(id),
         exists: (id) => S.Exists(id),
-        setVec: (id, prop, x, y, z) => S.SetVec(id, prop, x, y, z),
+        setVec: (id, prop2, x, y, z) => S.SetVec(id, prop2, x, y, z),
         setTransforms: (ids, data, count, flags) => S.SetTransforms(ids, data, count, flags),
-        visible: (id, visible) => S.SetVisible(id, visible),
+        visible: (id, visible2) => S.SetVisible(id, visible2),
         skin: (id, bones) => S.Skin(id, bones) ?? "",
-        getVec: (id, prop) => {
-          S.GetVec(id, prop);
+        getVec: (id, prop2) => {
+          S.GetVec(id, prop2);
           return [S.vx, S.vy, S.vz];
         },
         setColor: (id, r, g, b, a) => S.SetColor(id, r, g, b, a),
@@ -8625,8 +9005,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         meshColors: (name, colors, linear) => S.MeshColors(name, colors, linear) ?? "",
         meshAttribute: (name, channel, attr, size, data) => S.MeshAttribute(name, channel, attr, size, data) ?? "",
         matTexture: (id, slot, tex) => S.MatTexture(id, slot, tex),
-        matFloat: (id, prop, value) => S.MatFloat(id, prop, value),
-        matVector: (id, prop, x, y, z, w) => S.MatVector(id, prop, x, y, z, w),
+        matFloat: (id, prop2, value) => S.MatFloat(id, prop2, value),
+        matVector: (id, prop2, x, y, z, w) => S.MatVector(id, prop2, x, y, z, w),
         ambientTrilight: (sr, sg, sb, er, eg, eb, gr, gg, gb, reflection) => S.SetAmbientTrilight(sr, sg, sb, er, eg, eb, gr, gg, gb, reflection),
         render: (kind, json2) => R.Configure(kind, json2) ?? "",
         burst: (json2) => R.Burst(json2),
@@ -8638,7 +9018,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         gfxUniform: (id, name, n2, x, y, z, w) => G.Uniform(id, name, n2, x, y, z, w),
         gfxUniformArray: (id, name, data) => G.UniformArray(id, name, data),
         gfxTexture: (id, name, tex) => G.Texture(id, name, tex),
-        gfxInstances: (id, count, layout, data) => G.Instances(id, count, layout, data) ?? "",
+        gfxInstances: (id, count, layout2, data) => G.Instances(id, count, layout2, data) ?? "",
         gfxBakeBegin: () => G.BakeBegin(),
         gfxBake: (bind2, program, width, height, targets, blend) => G.Bake(bind2, program, width, height, targets, blend) ?? "!",
         gfxPost: (json2) => G.Post(json2) ?? "",
@@ -8704,101 +9084,284 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   bindUnity();
 
   // runtime/src/world/ui-eval.ts
-  var UI_MARGIN = 16;
-  var ANCHORS = {
-    "top-left": [0, 0],
-    top: [0.5, 0],
-    "top-right": [1, 0],
-    left: [0, 0.5],
-    center: [0.5, 0.5],
-    right: [1, 0.5],
-    "bottom-left": [0, 1],
-    bottom: [0.5, 1],
-    "bottom-right": [1, 1]
-  };
-  var H = ["left", "center", "right"];
-  var V = ["top", "middle", "bottom"];
+  var WORLD_TAGS = /* @__PURE__ */ new Set(["entity", "rule", "stage"]);
   var MAX_DEPTH = 64;
-  function textOf(children, out) {
+  var SCROLL_STEP = 40;
+  function textOf(children, out, tag) {
     if (children === null || children === void 0 || typeof children === "boolean") return;
     if (typeof children === "string" || typeof children === "number") {
       out.push(String(children));
       return;
     }
     if (Array.isArray(children)) {
-      for (const c of children) textOf(c, out);
+      for (const c of children) textOf(c, out, tag);
       return;
     }
-    throw new Error("<text> 的子节点只能是字符串和数字");
+    throw new Error(`<${tag}> 的子节点只能是字符串和数字`);
   }
-  function createUIRenderer(onError) {
+  var keyEdges = ["tab", "return", "keypadenter", "space", "escape", "uparrow", "downarrow", "leftarrow", "rightarrow"];
+  function createUIRenderer(onError, onWarn) {
     const reported = /* @__PURE__ */ new Set();
-    const report = (message) => {
+    const report = (message, warn = false) => {
       if (reported.has(message)) return;
       if (reported.size > 256) reported.clear();
       reported.add(message);
-      onError(message);
+      if (warn) onWarn?.(message);
+      else onError(message);
     };
-    const text = (node, ui) => {
-      const p = node.props;
-      const parts = [];
-      textOf(p.children, parts);
-      const content = parts.join("").replace(/[\r\n]+/g, " ");
-      const at = p.at ?? "top-left";
-      let x, y, h = 0, v = 0;
-      if (typeof at === "string") {
-        const anchor = ANCHORS[at];
-        if (!anchor) throw new Error(`<text> 的 at 不认识 "${at}"，可用 ${Object.keys(ANCHORS).join("、")} 或 [x, y]`);
-        x = UI_MARGIN + (ui.width - UI_MARGIN * 2) * anchor[0];
-        y = UI_MARGIN + (ui.height - UI_MARGIN * 2) * anchor[1];
-        h = anchor[0] * 2;
-        v = anchor[1] * 2;
-      } else if (Array.isArray(at) && at.length === 2 && at.every((n2) => typeof n2 === "number" && Number.isFinite(n2))) {
-        x = at[0];
-        y = at[1];
-      } else {
-        throw new Error("<text> 的 at 必须是九宫格位置名或 [x, y]");
+    const widths = /* @__PURE__ */ new Map();
+    const heights = /* @__PURE__ */ new Map();
+    let current2;
+    const m = {
+      width(text, size, bold) {
+        if (!text) return 0;
+        const k = `${size}|${bold ? 1 : 0}|${text}`;
+        let w = widths.get(k);
+        if (w === void 0) {
+          w = current2.measure(text, size, bold).width;
+          if (widths.size > 4096) widths.clear();
+          widths.set(k, w);
+        }
+        return w;
+      },
+      lineHeight(size, bold) {
+        const k = `${size}|${bold ? 1 : 0}`;
+        let h = heights.get(k);
+        if (h === void 0) heights.set(k, h = current2.measure("国Mg", size, bold).height);
+        return h;
       }
-      ui.text(content, x, y, { size: p.size, color: p.color, bold: p.bold, align: H[h], valign: V[v] });
     };
-    const visit = (child, ui, depth, source) => {
-      if (child === null || child === void 0 || typeof child === "boolean") return;
+    let prevDown = false;
+    let pressTarget = null;
+    let drag = null;
+    const prevKeys = {};
+    let frame = 0;
+    const buildChildren = (children, layer, depth, out, isStatic) => {
+      if (Array.isArray(children)) for (const c of children) build(c, layer, depth + 1, out, !isStatic);
+      else build(children, layer, depth + 1, out, false);
+    };
+    const build = (child, layer, depth, out, dynamic) => {
+      if (child === null || child === void 0 || typeof child === "boolean" || child === "") return;
       if (depth > MAX_DEPTH) {
-        report(`${sourcePrefix(source)}界面树嵌套超过 ${MAX_DEPTH} 层`);
+        report(`${sourcePrefix(layer.source)}界面树嵌套超过 ${MAX_DEPTH} 层`);
         return;
       }
       if (Array.isArray(child)) {
-        for (const c of child) visit(c, ui, depth + 1, source);
+        for (const c of child) build(c, layer, depth + 1, out, true);
         return;
       }
       if (!isNode(child)) {
-        report(`${sourcePrefix(source)}界面树里的文字要放在 <text> 里`);
+        report(`${sourcePrefix(layer.source)}界面树里的文字要放在 <text> 里`);
         return;
       }
       const node = child;
       const type = node.type;
-      if (type === Fragment) return visit(node.props.children, ui, depth + 1, node.source ?? source);
-      if (typeof type === "function" && !isPrefab(type)) {
-        let out;
-        try {
-          out = type(node.props);
-        } catch (error) {
-          report(`${sourcePrefix(node.source)}界面组件 ${nodeName(node)} 出错：${error?.message ?? error}`);
-          return;
-        }
-        return visit(out, ui, depth + 1, node.source ?? source);
-      }
-      if (type === "text") {
-        try {
-          text(node, ui);
-        } catch (error) {
-          report(`${sourcePrefix(node.source)}${error?.message ?? error}`);
-        }
+      if (dynamic && node.key === null) report(`${sourcePrefix(node.source)}列表里的 <${nodeName(node)}> 缺少 key：焦点和滚动位置按 key 路径记，增删元素后会错位`, true);
+      const join = (seg) => layer.prefix ? `${layer.prefix}/${seg}` : seg;
+      const segment = (name) => {
+        if (node.key !== null) return `${name}:${node.key}`;
+        const n2 = layer.counts.get(name) ?? 0;
+        layer.counts.set(name, n2 + 1);
+        return `${name}#${n2}`;
+      };
+      if (type === Fragment) {
+        if (node.key === null) buildChildren(node.props.children, { ...layer, source: node.source ?? layer.source }, depth, out, !!node.static);
+        else buildChildren(node.props.children, { prefix: join(`#${node.key}`), counts: /* @__PURE__ */ new Map(), source: node.source }, depth, out, !!node.static);
         return;
       }
-      report(`${sourcePrefix(node.source)}界面树里不认识 <${nodeName(node)}>，只能用 <text>、片段和函数组件`);
+      if (isPrefab(type)) {
+        report(`${sourcePrefix(node.source)}<${type.prefab}> 是实体标签，放错了树：实体写在 scene 里，ui 里只能用界面标签`);
+        return;
+      }
+      if (typeof type === "function") {
+        const name = nodeName(node);
+        let result;
+        try {
+          result = type(node.props);
+        } catch (error) {
+          report(`${sourcePrefix(node.source)}界面组件 ${name} 出错：${error?.message ?? error}`);
+          return;
+        }
+        buildChildren(result, { prefix: join(segment(name)), counts: /* @__PURE__ */ new Map(), source: node.source ?? layer.source }, depth, out, true);
+        return;
+      }
+      if (typeof type !== "string") {
+        report(`${sourcePrefix(node.source)}无法识别的界面标签`);
+        return;
+      }
+      if (!(type in LAYOUTS)) {
+        if (WORLD_TAGS.has(type)) report(`${sourcePrefix(node.source)}<${type}> 是场景标签，放错了树：它写在 scene 里，ui 里只能用界面标签`);
+        else report(`${sourcePrefix(node.source)}界面树里不认识 <${type}>${similar(type, Object.keys(LAYOUTS))}`);
+        return;
+      }
+      const el = { tag: type, path: join(segment(type)), props: node.props, children: [], text: "", source: node.source, x: 0, y: 0, w: 0, h: 0, clip: null };
+      try {
+        if (TEXT_TAGS.has(type)) {
+          const parts = [];
+          textOf(node.props.children, parts, type);
+          el.text = parts.join("");
+          if (type === "button") el.text = el.text.replace(/[\r\n]+/g, " ");
+        } else if (CONTAINERS.has(type)) {
+          buildChildren(node.props.children, { prefix: el.path, counts: /* @__PURE__ */ new Map(), source: node.source ?? layer.source }, depth, el.children, !!node.static);
+        } else if (node.props.children !== void 0 && node.props.children !== null && node.props.children !== false) {
+          throw new Error(`<${type}> 不能有子节点`);
+        }
+        if (type === "scroll" && el.props.h === void 0) throw new Error("<scroll> 需要 h");
+      } catch (error) {
+        report(`${sourcePrefix(node.source)}${error?.message ?? error}`);
+        return;
+      }
+      out.push(el);
     };
-    return (tree, ui) => visit(tree, ui, 0);
+    return (tree, arg) => {
+      const env = typeof arg?.rect === "function" ? { ui: arg } : arg;
+      const ui = env.ui;
+      current2 = ui;
+      frame++;
+      const local = env.local ?? {};
+      const scrolls = local.$scroll ?? (local.$scroll = {});
+      const roots = [];
+      buildChildren(tree, { prefix: "", counts: /* @__PURE__ */ new Map() }, 0, roots, true);
+      const layoutEnv = { layouts: LAYOUTS, m, scrollOf: (path) => scrolls[path] ?? 0 };
+      const placed = [];
+      for (const root of roots) {
+        if (!visible(root)) continue;
+        try {
+          layoutRoot(root, ui.width, ui.height, layoutEnv);
+          placed.push(root);
+        } catch (error) {
+          report(`${sourcePrefix(root.source)}${error?.message ?? error}`);
+        }
+      }
+      const order = [];
+      const walk = (el) => {
+        if (!visible(el)) return;
+        order.push(el);
+        for (const c of el.children) walk(c);
+      };
+      placed.forEach(walk);
+      const byPath = new Map(order.map((el) => [el.path, el]));
+      const focusables = order.filter((el) => el.tag === "button" && !el.props.disabled || el.tag === "input");
+      const contains = (el, x, y) => !!el.clip && x >= el.clip.x && x <= el.clip.x + el.clip.w && y >= el.clip.y && y <= el.clip.y + el.clip.h;
+      const activate = (el) => {
+        if (el.props.disabled) return;
+        try {
+          if (el.props.emit !== void 0) env.emit?.(String(el.props.emit), el.props.payload);
+          el.props.onPress?.();
+        } catch (error) {
+          report(`${sourcePrefix(el.source)}<button> 的回调出错：${error?.message ?? error}`);
+        }
+      };
+      let hover = null;
+      let pressedNow = false;
+      const input = env.input;
+      if (input) {
+        const mouse = input.mouse();
+        const down = input.key("mouse0");
+        for (let i = order.length - 1; i >= 0; i--) {
+          const el = order[i];
+          if ((el.tag === "button" || el.tag === "input" || el.tag === "scroll") && contains(el, mouse.x, mouse.y)) {
+            hover = el;
+            break;
+          }
+        }
+        if (down && !prevDown) {
+          pressTarget = hover?.path ?? null;
+          if (hover && (hover.tag === "input" || hover.tag === "button" && !hover.props.disabled)) local.$focus = hover.path;
+          else local.$focus = null;
+          drag = hover?.tag === "scroll" ? { path: hover.path, y: mouse.y, scroll: scrolls[hover.path] ?? 0 } : null;
+        }
+        if (down && drag) scrolls[drag.path] = drag.scroll - (mouse.y - drag.y);
+        if (!down && prevDown) {
+          const target = pressTarget ? byPath.get(pressTarget) : void 0;
+          if (target && hover === target && target.tag === "button") activate(target);
+          pressTarget = null;
+          drag = null;
+        }
+        pressedNow = down;
+        prevDown = down;
+        const wheel = input.wheel();
+        if (wheel) {
+          for (let i = order.length - 1; i >= 0; i--) {
+            const el = order[i];
+            if (el.tag === "scroll" && contains(el, mouse.x, mouse.y)) {
+              scrolls[el.path] = (scrolls[el.path] ?? 0) - wheel * SCROLL_STEP;
+              break;
+            }
+          }
+        }
+        const edge = {};
+        for (const k of keyEdges) {
+          const now = input.key(k);
+          edge[k] = now && !prevKeys[k];
+          prevKeys[k] = now;
+        }
+        let focus = local.$focus ? byPath.get(local.$focus) : void 0;
+        if (local.$focus && (!focus || !focusables.includes(focus))) {
+          local.$focus = null;
+          focus = void 0;
+        }
+        const move = (delta) => {
+          if (!focusables.length) return;
+          const i = focus ? focusables.indexOf(focus) : -1;
+          const next = i < 0 ? delta > 0 ? 0 : focusables.length - 1 : (i + delta + focusables.length) % focusables.length;
+          focus = focusables[next];
+          local.$focus = focus.path;
+        };
+        if (edge.tab) move(input.key("leftshift") || input.key("rightshift") ? -1 : 1);
+        else if (focus) {
+          const isInput = focus.tag === "input";
+          if (edge.escape) {
+            local.$focus = null;
+            focus = void 0;
+          } else if (edge.downarrow || !isInput && edge.rightarrow) move(1);
+          else if (edge.uparrow || !isInput && edge.leftarrow) move(-1);
+          else if (!isInput && (edge.return || edge.keypadenter || edge.space)) activate(focus);
+        }
+        if (focus && focus.tag === "input") {
+          const typed = input.text();
+          if (typed) {
+            const p = focus.props;
+            let value = String(p.value ?? "");
+            let submit = false;
+            for (const ch of typed) {
+              if (ch === "\b") value = value.slice(0, -1);
+              else if (ch === "\n" || ch === "\r") submit = true;
+              else if (ch >= " " && (p.max === void 0 || value.length < p.max)) value += ch;
+            }
+            try {
+              if (value !== String(p.value ?? "")) p.onChange?.(value);
+              if (submit) p.onSubmit?.(value);
+            } catch (error) {
+              report(`${sourcePrefix(focus.source)}<input> 的回调出错：${error?.message ?? error}`);
+            }
+          }
+        }
+        env.capture?.(!!local.$focus);
+      }
+      for (const el of order) {
+        if (el.tag !== "scroll") continue;
+        const max = Math.max(0, (el.contentH ?? 0) - el.h);
+        const v = scrolls[el.path] ?? 0;
+        if (v < 0 || v > max) scrolls[el.path] = Math.max(0, Math.min(max, v));
+      }
+      const draw = (el) => {
+        if (!visible(el) || !el.clip) return;
+        const state = { hover: hover === el, pressed: hover === el && pressedNow && pressTarget === el.path, focused: local.$focus === el.path, frame };
+        try {
+          drawElement(el, ui, state, m);
+        } catch (error) {
+          report(`${sourcePrefix(el.source)}${error?.message ?? error}`);
+        }
+        if (el.tag === "scroll") {
+          ui.clip(el.x, el.y, el.w, el.h);
+          el.children.forEach(draw);
+          ui.unclip();
+          drawScrollbar(el, ui, scrolls[el.path] ?? 0);
+        } else el.children.forEach(draw);
+      };
+      placed.forEach(draw);
+    };
   }
 
   // runtime/src/world/game.ts
@@ -8839,12 +9402,32 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const ui = def.ui;
         if (ui) {
           const logger = ctx.logger("world");
-          const render = createUIRenderer((message) => logger.error(message));
+          const render = createUIRenderer((message) => logger.error(message), (message) => logger.warn(message));
+          const key = `ui:${unit}`;
+          ctx.state.define(key, { version: 1, init: () => ({}) });
+          const emit = (name, payload) => w.emitUI(name, payload);
+          const capture = (on) => w.setUICapture(unit, on);
+          ctx.effect(() => () => w.setUICapture(unit, false), "world.uiCapture");
           let lastError = "";
           ctx.on("update", () => {
+            const local = ctx.state.get(key) ?? {};
+            const gui = {
+              get width() {
+                return ctx.ui.width;
+              },
+              get height() {
+                return ctx.ui.height;
+              },
+              local,
+              emit,
+              get focused() {
+                return local.$focus ?? null;
+              },
+              draw: ctx.ui
+            };
             let tree;
             try {
-              tree = ui(w, ctx.ui);
+              tree = ui(w, gui);
             } catch (error) {
               const message = `ui 出错：${error?.stack ?? error?.message ?? error}`;
               if (message !== lastError) logger.error(message);
@@ -8852,7 +9435,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
               return;
             }
             lastError = "";
-            render(tree, ctx.ui);
+            render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture });
           });
         }
       }

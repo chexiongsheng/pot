@@ -72,7 +72,7 @@ class MockEngine {
   cursorLocked() { return !!this.locked }
   mouse() { return this.mousePos ?? [0, 0] }
   screen() { return [1280, 720] }
-  wheel() { return 0 }
+  wheel() { const v = this.wheelDelta ?? 0; this.wheelDelta = 0; return v }
   focused() { return true }
   textInput() { const t = this.typed ?? ''; this.typed = ''; return t }
   uiSubmit(list) { this.ui = list; this.uiSubmits = (this.uiSubmits ?? 0) + 1 }

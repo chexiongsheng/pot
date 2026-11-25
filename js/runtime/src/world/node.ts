@@ -40,9 +40,11 @@ class Node implements PotNode {
   constructor(public type: PotNode['type'], public key: string | null, public props: Record<string, any>) {}
 }
 
-export function makeNode(type: PotNode['type'], props: Record<string, any> | null | undefined, key: unknown, source?: SourcePos): PotNode {
+/** isStatic：子节点数组是标签里静态写出的（jsxs），不是 map 等运行时生成的列表 */
+export function makeNode(type: PotNode['type'], props: Record<string, any> | null | undefined, key: unknown, source?: SourcePos, isStatic?: boolean): PotNode {
   const node = new Node(type, key === undefined || key === null ? null : String(key), props ?? {})
   if (source) node.source = source
+  if (isStatic) (node as any).static = true
   return node
 }
 

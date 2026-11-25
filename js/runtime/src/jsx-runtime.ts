@@ -12,7 +12,10 @@ export function jsx(type: PotNode['type'], props: Record<string, any> | null, ke
   return makeNode(type, props, key)
 }
 
-export const jsxs = jsx
+/** 子节点是静态写出的多个（编译器保证），与 map 生成的列表区分（列表要写 key） */
+export function jsxs(type: PotNode['type'], props: Record<string, any> | null, key?: unknown): PotNode {
+  return makeNode(type, props, key, undefined, true)
+}
 
 /** key 写在展开属性之后时，编译器退回经典写法 createElement(type, config, ...children) */
 export function createElement(type: PotNode['type'], config: Record<string, any> | null, ...children: PotChild[]): PotNode {
@@ -24,7 +27,7 @@ export function createElement(type: PotNode['type'], config: Record<string, any>
   }
   if (children.length === 1) props.children = children[0]
   else if (children.length > 1) props.children = children
-  return makeNode(type, props, key)
+  return makeNode(type, props, key, undefined, children.length > 1)
 }
 
 export namespace JSX {

@@ -126,7 +126,7 @@ test('stage：只在变化时调用 scene；sun 变了先销毁旧的平行光',
   assert.equal(suns()[0].intensity, 2)
 })
 
-test('界面求值器：九宫格离边缘 16 像素、对齐由位置推出、文字拼成一行；不认识的标签只报一次', async () => {
+test('界面求值器：顶层节点按九宫格放进离边缘 16 像素的区域、文字拼成一行；不认识的标签只报一次', async () => {
   const body = `w.mergeVars({ score: 3 })
   const render = createUIRenderer((m) => ctx.logger('ui').error(m))
   const Hud = (p: { n: number }) => <text at="bottom">{'第 '}{p.n}{' 关'}</text>
@@ -140,10 +140,11 @@ test('界面求值器：九宫格离边缘 16 像素、对齐由位置推出、�
   const { runtime, engine, host } = await start(game(body))
   frames(runtime, 3)
   const items = engine.ui.split('\u001e').map((s) => s.split('\u001f'))
-  assert.deepEqual(items.map((t) => [t[0], t[1], t[2], t[6], t[7], t[9]]), [
-    ['t', '1264', '16', '24', '2', '分数：3'],
-    ['t', '10', '20', '16', '0', 'a'],
-    ['t', '640', '704', '16', String(2 * 3 + 1), '第 2 关'],
+  // MockEngine 量字：宽 = 字数 × 字号 × 0.6，行高 = 字号 × 1.3；文字在自己的框里左对齐、垂直居中（对齐码 3）
+  assert.deepEqual(items.map((t) => [t[0], t[1], t[2], t[3], t[4], t[6], t[7], t[9]]), [
+    ['t', '1206.4', '16', '57.6', '31.2', '24', '3', '分数：3'],
+    ['t', '10', '20', '9.6', '20.8', '16', '3', 'a'],
+    ['t', '616', '683.2', '48', '20.8', '16', '3', '第 2 关'],
   ])
   assert.equal(items[0][5], 'ffcc00ff')
   assert.equal(items[0][8], '1', '粗体')

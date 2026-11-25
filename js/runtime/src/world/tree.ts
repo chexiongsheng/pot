@@ -6,6 +6,7 @@ import { Fragment, isNode, isPrefab, nodeName, sourcePrefix } from './node'
 import type { PotChild, PotNode, Prefab, SourcePos } from './node'
 import { PREFAB_RESERVED, RESERVED, Registry, clone, isPlainObject, merge } from './registry'
 import type { Vec3 } from '../host'
+import { UI_TAG_NAMES } from './ui-tags'
 
 export interface EntitySpec {
   path: string
@@ -176,7 +177,8 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
     } else if (typeof type === 'string') {
       prefab = registry.prefab(type)
       if (!prefab) {
-        errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`)
+        if (UI_TAG_NAMES.includes(type)) errors.push(`${sourcePrefix(node.source)}<${type}> 是界面标签，放错了树：界面写在 ui 里，scene 里只能用实体标签、rule、stage`)
+        else errors.push(`${sourcePrefix(node.source)}未知的标签 <${type}>${similar(type, [...registry.prefabNames(), ...BUILTIN_TAGS])}`)
         return
       }
     } else {

@@ -51,12 +51,80 @@ export interface RuleProps {
 
 export type UIAnchor = 'top-left' | 'top' | 'top-right' | 'left' | 'center' | 'right' | 'bottom-left' | 'bottom' | 'bottom-right'
 
-export interface TextProps {
+/** 所有界面标签共有的属性（16.4） */
+export interface UIBoxProps {
+  key?: string | number | null
+  /** 只对顶层节点有效：九宫格位置名或 [x, y] */
   at?: UIAnchor | [number, number]
+  /** 像素或 'NN%' */
+  w?: number | `${number}%`
+  h?: number | `${number}%`
+  grow?: number
+  pad?: number | [number, number] | [number, number, number, number]
+  hidden?: boolean
+}
+
+export interface UIContainerProps extends UIBoxProps {
+  gap?: number
+  align?: 'start' | 'center' | 'end' | 'stretch'
+  justify?: 'start' | 'center' | 'end' | 'between'
+  children?: PotChild
+}
+
+export interface PanelProps extends UIContainerProps {
+  bg?: Color
+  border?: Color | { color: Color; width?: number }
+  radius?: number
+}
+
+export interface TextProps extends UIBoxProps {
   size?: number
   color?: Color
   bold?: boolean
+  wrap?: boolean
+  align?: 'left' | 'center' | 'right'
   children?: PotChild
+}
+
+export interface ButtonProps extends UIBoxProps {
+  emit?: string
+  payload?: any
+  onPress?: () => void
+  disabled?: boolean
+  size?: number
+  bold?: boolean
+  color?: Color
+  bg?: Color
+  radius?: number
+  children?: PotChild
+}
+
+export interface BarProps extends UIBoxProps {
+  value: number
+  max?: number
+  color?: Color
+  bg?: Color
+  radius?: number
+}
+
+export interface ImageProps extends UIBoxProps {
+  src: { id: number; width: number; height: number } | null | undefined
+  fit?: 'fill' | 'contain' | 'cover'
+  tint?: Color
+  radius?: number
+}
+
+export interface InputProps extends UIBoxProps {
+  value: string
+  onChange?: (value: string) => void
+  onSubmit?: (value: string) => void
+  placeholder?: string
+  max?: number
+  size?: number
+  bold?: boolean
+  color?: Color
+  bg?: Color
+  radius?: number
 }
 
 export interface PotIntrinsicElements {
@@ -64,5 +132,13 @@ export interface PotIntrinsicElements {
   stage: StageProps
   rule: RuleProps
   text: TextProps
+  column: UIContainerProps
+  row: UIContainerProps
+  panel: PanelProps
+  scroll: UIContainerProps
+  button: ButtonProps
+  bar: BarProps
+  image: ImageProps
+  input: InputProps
   [tag: string]: any
 }

@@ -13,7 +13,7 @@ interface DevSource {
   columnNumber?: number
 }
 
-export function jsxDEV(type: PotNode['type'], props: Record<string, any> | null, key: unknown, _isStatic?: boolean, source?: DevSource, _self?: unknown): PotNode {
+export function jsxDEV(type: PotNode['type'], props: Record<string, any> | null, key: unknown, isStatic?: boolean, source?: DevSource, _self?: unknown): PotNode {
   const pos = source && source.fileName ? { file: source.fileName, line: source.lineNumber ?? 0, col: source.columnNumber ?? 0 } : undefined
-  return makeNode(type, props, key, pos)
+  return makeNode(type, props, key, pos, isStatic)
 }

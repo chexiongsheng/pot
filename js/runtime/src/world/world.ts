@@ -180,6 +180,12 @@ export class WorldService extends Service {
   private _goto: GotoRequest | null = null
   /** 进入流程状态后调用的钩子（defineGame 用它重建场景） */
   private _enterHooks: (() => void)[] = []
+  /** 界面事件：等下一步采样时进入指令 */
+  private _uiEvents: QueuedEvent[] = []
+  /** 本步指令里的事件（第 6 步分发） */
+  private _cmdEvents: QueuedEvent[] = []
+  /** 有焦点控件的单元：非空时不采样键盘与轴 */
+  private _captures = new Set<string>()
 
   constructor(ctx: Context) {
     super(ctx, 'world')
@@ -634,6 +640,24 @@ export class WorldService extends Service {
     this._queue.push({ name, args: [payload] })
   }
 
+  /** 界面事件（ui.emit）：进入下一步的指令，在那一步的第 6 步按自定义事件分发 */
+  emitUI(name: string, payload?: any) {
+    if (typeof name !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) throw new Error(`ui.emit：事件名必须是标识符，收到 ${JSON.stringify(name)}`)
+    let value: any
+    try {
+      value = payload === undefined ? undefined : JSON.parse(JSON.stringify(payload))
+    } catch {
+      throw new Error('ui.emit 的 payload 必须可序列化（要进指令和录像）')
+    }
+    this._uiEvents.push({ name, args: [value] })
+  }
+
+  /** 界面有焦点控件时屏蔽指令里的键盘与轴（按单元记） */
+  setUICapture(unit: string, captured: boolean) {
+    if (captured) this._captures.add(unit)
+    else this._captures.delete(unit)
+  }
+
   cmd(_e?: EntityData): Cmd {
     return {
       axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
@@ -724,14 +748,18 @@ export class WorldService extends Service {
       this._down = {}
       this._axes = {}
       const input = this._root.input
-      for (const name of Object.keys(this._controls.axes)) this._axes[name] = input.axis(this._controls.axes[name])
+      const captured = this._captures.size > 0
+      for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name])
       for (const action of Object.keys(this._controls.actions)) {
         const keys = this._controls.actions[action]
-        this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
+        this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
       }
+      this._cmdEvents = this._uiEvents.splice(0)
       // 叠加状态：只处理事件与延迟销毁，tick 不走；插值的上一步等于当前
       if (this._overlay()) {
         this.prev.clear()
+        this._queue.unshift(...this._cmdEvents)
+        this._cmdEvents = []
         this._drain(data)
         this._applyGoto()
         return
@@ -760,7 +788,8 @@ export class WorldService extends Service {
         if ((data.tick + 1) % n === 0) this._guard('<rule on="every">', rule.source, () => rule.do(this))
       }
       // 6、7. 事件队列与延迟销毁
-      this._queue.unshift(...touches)
+      this._queue.unshift(...this._cmdEvents, ...touches)
+      this._cmdEvents = []
       this._drain(data)
       // 8.
       data.tick++

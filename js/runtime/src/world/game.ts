@@ -14,6 +14,20 @@ import { unitOf } from '../units'
 import { createUIRenderer } from './ui-eval'
 import type { Controls, World } from './world'
 
+/** ui 的第二个参数（16.3） */
+export interface GameUI {
+  readonly width: number
+  readonly height: number
+  /** 界面本地状态：存在 state 里（热重载保留），不属于 World，不进录像 */
+  local: Record<string, any>
+  /** 发界面事件：进入下一步的指令，按自定义事件分发（可触发流程切换） */
+  emit(name: string, payload?: any): void
+  /** 当前焦点控件的 key 路径 */
+  readonly focused: string | null
+  /** 原始的 ctx.ui：在树之后画任意即时模式内容 */
+  draw: UIService
+}
+
 /** scene 的参数：只有流程状态、流程参数与数据文件，不能读运行状态 */
 export interface SceneArgs {
   state: string
@@ -37,7 +51,7 @@ export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   /** 世界里有什么：返回标签树，挂到 ctx.world 上 */
   scene?: (s: SceneArgs) => PotChild
   /** 屏幕上画什么：每帧求值，画到 ctx.ui */
-  ui?: (w: GameWorld<V>, ui: UIService) => PotChild
+  ui?: (w: GameWorld<V>, ui: GameUI) => PotChild
 }
 
 export interface GameUnit {
@@ -82,12 +96,27 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
       const ui = def.ui
       if (ui) {
         const logger = ctx.logger('world')
-        const render = createUIRenderer((message) => logger.error(message))
+        const render = createUIRenderer((message) => logger.error(message), (message) => logger.warn(message))
+        const key = `ui:${unit}`
+        ctx.state.define<Record<string, any>>(key, { version: 1, init: () => ({}) })
+        const emit = (name: string, payload?: any) => w.emitUI(name, payload)
+        const capture = (on: boolean) => w.setUICapture(unit, on)
+        ctx.effect(() => () => w.setUICapture(unit, false), 'world.uiCapture')
         let lastError = ''
         ctx.on('update', () => {
+          // state.restore 可能换掉对象：每帧重新取
+          const local = ctx.state.get<Record<string, any>>(key) ?? {}
+          const gui: GameUI = {
+            get width() { return ctx.ui.width },
+            get height() { return ctx.ui.height },
+            local,
+            emit,
+            get focused() { return local.$focus ?? null },
+            draw: ctx.ui,
+          }
           let tree: PotChild
           try {
-            tree = ui(w as GameWorld<V>, ctx.ui)
+            tree = ui(w as GameWorld<V>, gui)
           } catch (error: any) {
             const message = `ui 出错：${error?.stack ?? error?.message ?? error}`
             if (message !== lastError) logger.error(message)
@@ -95,7 +124,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
             return
           }
           lastError = ''
-          render(tree, ctx.ui)
+          render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture })
         })
       }
     },
