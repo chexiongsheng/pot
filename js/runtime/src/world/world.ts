@@ -79,10 +79,11 @@ export type Handler = (w: WorldService, ...args: any[]) => any
 
 /** w.move 的选项：dt 缺省为 w.dt */
 export type WorldMoveOptions = MoveOptions
-/** w.raycast、w.overlap 的选项：layers 省略时为全部层；ignore 为要跳过的实体或 id */
+/** w.raycast、w.overlap 的选项：layers 省略时为全部层；ignore 为要跳过的实体或 id；solid 为 true 时只看 solid 的碰撞体 */
 export interface QueryOptions {
   layers?: string[]
   ignore?: EntityData | number | null
+  solid?: boolean
 }
 export interface RayHit {
   point: [number, number, number]
@@ -121,6 +122,8 @@ export const DEFAULT_CONTROLS: Required<Controls> = {
 }
 
 export const DEFAULT_SEED = 0x2f6b9d31
+/** 增量类输入源（本帧的增量，如鼠标移动）：按帧累积，每帧只交给第一个固定步（17.5） */
+export const DELTA_INPUTS = new Set(['look'])
 /** 第 6、7 步（事件、延迟销毁）最多循环的轮数 */
 export const MAX_EVENT_ROUNDS = 8
 
@@ -192,6 +195,10 @@ export class WorldService extends Service {
   private _axes: Record<string, { x: number; y: number }> = {}
   private _down: Record<string, boolean> = {}
   private _prevDown: Record<string, boolean> = {}
+  /** 增量输入源 → 没有固定步的帧里累积的增量 */
+  private _deltaAcc: Record<string, { x: number; y: number }> = {}
+  /** 最近一次采样增量输入的 clock.frame */
+  private _deltaFrame = -1
   private _chains = new Map<string, string[]>()
   private _chainVersion = -1
   private _reported = new Set<string>()
@@ -239,6 +246,7 @@ export class WorldService extends Service {
     ctx.on('fixed-update', () => this._step())
     this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, undefined, fn))
     ctx.on('update', () => {
+      this._accumulateDeltas()
       this._sweep()
       this.view.frame()
     })
@@ -776,7 +784,7 @@ export class WorldService extends Service {
   /** 射线：最近的碰撞体，或 null；起点在碰撞体内部时忽略它 */
   raycast(from: number[], dir: number[], maxDist = Infinity, options: QueryOptions = {}): RayHit | null {
     const skip = options.ignore == null ? null : typeof options.ignore === 'number' ? options.ignore : options.ignore.id
-    const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, false))
+    const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, !!options.solid))
     if (!hit) return null
     return { point: hit.point, normal: hit.normal, dist: hit.dist, entity: this.data.entities[hit.id] }
   }
@@ -784,7 +792,7 @@ export class WorldService extends Service {
   /** 与给定形状重叠的实体，按 id 升序 */
   overlap(shape: OverlapShape, at: number[], options: QueryOptions = {}): EntityData[] {
     const skip = options.ignore == null ? null : typeof options.ignore === 'number' ? options.ignore : options.ignore.id
-    const ids = this._table().overlap(shape, at, this._bodyFilter(options.layers, skip, false))
+    const ids = this._table().overlap(shape, at, this._bodyFilter(options.layers, skip, !!options.solid))
     return ids.map((id) => this.data.entities[id])
   }
 
@@ -923,6 +931,22 @@ export class WorldService extends Service {
 
   // ---------------------------------------------------------------- 每一步（15.8）
 
+  /** 本帧没有跑固定步时，把增量输入累积到下一个固定步（17.5） */
+  private _accumulateDeltas() {
+    if (this._deltaFrame === this._root.clock.frame || this._source || this._captures.size > 0) return
+    const input = this._root.input
+    const seen = new Set<string>()
+    for (const src of Object.values(this._controls.axes)) {
+      if (!DELTA_INPUTS.has(src) || seen.has(src)) continue
+      seen.add(src)
+      const v = input.axis(src)
+      if (!v.x && !v.y) continue
+      const a = this._deltaAcc[src] ?? (this._deltaAcc[src] = { x: 0, y: 0 })
+      a.x += v.x
+      a.y += v.y
+    }
+  }
+
   private _step() {
     if (this._stepping) return
     this._stepping = true
@@ -945,7 +969,27 @@ export class WorldService extends Service {
       } else {
         const input = this._root.input
         const captured = this._captures.size > 0
-        for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name])
+        const frame = this._root.clock.frame
+        const first = this._deltaFrame !== frame
+        this._deltaFrame = frame
+        const acc = this._deltaAcc
+        if (first) this._deltaAcc = {}
+        const deltas: Record<string, { x: number; y: number }> = {}
+        for (const name of Object.keys(this._controls.axes)) {
+          const src = this._controls.axes[name]
+          if (captured) this._axes[name] = { x: 0, y: 0 }
+          else if (!DELTA_INPUTS.has(src)) this._axes[name] = input.axis(src)
+          else if (!first) this._axes[name] = { x: 0, y: 0 }
+          else {
+            // 同一输入源只读一次，多个指令名映射到它时取同一个值
+            if (!deltas[src]) {
+              const v = input.axis(src)
+              const a = acc[src]
+              deltas[src] = a ? { x: v.x + a.x, y: v.y + a.y } : v
+            }
+            this._axes[name] = { ...deltas[src] }
+          }
+        }
         for (const action of Object.keys(this._controls.actions)) {
           const keys = this._controls.actions[action]
           this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))

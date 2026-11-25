@@ -1437,11 +1437,30 @@ export default defineGame({ kits: [topdown], ... })
 
 ### 17.5 fps 套件
 
-- `moveFps`：saltline 玩家移动的通用版。属性为速度（走、跑、蹲、瞄准）、加速度（地面、减速、空中）、跳跃顶点高、土狼时间、跳跃缓冲、上台阶高度、胶囊尺寸、视角灵敏度；动作名可配（缺省 `move`、`look`、`jump`、`sprint`、`crouch`）。状态有 `vel`、`yaw`、`pitch`、`grounded`、`crouched`、`coyote`、`buffer`、`lastSafe`。用 `w.move`，出界拉回 `lastSafe`。
-- `cameraFps`：相机挂在眼高，带 fov 与步伐摆动；震动用 `w.rand`（可复现），不用 `Math.random`。
-- `health`：`{ max, regen, regenDelay }`，状态 `hp`、`lastHit`；`w.damage(e, n)` 扣血并发事件，到 0 发 `died`。
-- `aiChase`、`aiPatrol`：简单的追击与巡逻（视线用 `w.raycast`），作为套件的示例；saltline 的鸥、犬不用它们（见 17.7）。
+套件在 `kits/fps/index.ts`，引入写法 `import fps, { damage } from '@pot/kit/fps'`。
+
+- `moveFps`：saltline 玩家移动的通用版，逐项照搬 `player.ts` 的 `control`（视角、蹲伏、加速、土狼时间与跳跃缓冲、重力、`w.move`、出界拉回、步伐）。
+  - 属性（缺省取 saltline 的 `tuning.json`）：速度 `walk`、`sprint`、`crouch`、`ads`；加速度 `accelGround`、`decelGround`、`accelAir`；`gravity`、`jumpApex`、`coyote`、`jumpBuffer`、`stepUp`；角色盒 `radius`、`height`、`crouchHeight`；眼高 `eye`、`crouchEye`、`eyeRate`；视角 `sensitivity`（每单位鼠标增量转 2×sensitivity 度）、`adsLook`、`invertY`、`pitchLimit`；`stride`（步长，算步伐相位）；碰撞 `layers`（null 为全部层）、`ground`（缺省 `{ y: 0 }`，null 为没有无限地面）；出界 `bounds`（`{ min: [x, z], max: [x, z] }` 或 null）、`fallY`（低于它拉回，null 不检查）；`actions`（指令名，缺省 `move`、`look`、`jump`、`sprint`、`crouch`）。
+  - 状态（与属性不能同名）：`vel`、`yaw`、`pitch`、`grounded`、`crouched`、`coyoteT`（土狼时间余量）、`buffer`、`lastSafe`、`curHeight`、`curEye`、`bob`（步伐相位，整数部分变化即一步，游戏据此放脚步声）、`speed`（水平速度）、`sprinting`、`landed`（本步落地时的下落速度，否则 0）、`aim`（瞄准程度 0 到 1，由武器等别的积木写入，影响速度、视角灵敏度、能否冲刺与相机 fov）。
+  - `init` 时 `yaw` 取 `e.rot[1]`，`lastSafe` 取 `e.pos`；每步把 `e.rot` 写成 `[0, yaw, 0]`。
+  - 蹲伏起身前用 `w.overlap` 检查头顶（只看 `solid` 碰撞体），挡住则保持蹲伏。
+  - 落地音效、脚步声、落水救援、扣血这类游戏专属的反馈不在积木里，游戏读状态自己做。
+- `cameraFps`：读同一实体的 `moveFps` 状态，每帧把相机放在插值后的位置加眼高处，带 fov（`fov`、`fovAds`、`fovSprint`）、步伐摆动（`bobX`、`bobY`）与震动。
+  - 状态 `shake`（0 到 1，别的积木写入，每步按 `shakeDecay` 衰减）与 `kick`（`[pitch, yaw]` 附加角度，武器后坐力写入）。
+  - 震动的抖动由 `w.tick` 推出的伪随机给出：表现层不能调 `w.rand`（会改动 World 的随机序列，表现帧数又因机器而异，结果就不可复现了），也不用 `Math.random`。
+  - `lockCursor`（缺省 true）：进入时锁定鼠标，退出时释放。
+  - 视角角度直接取状态（随固定步更新），位置按插值。刷新率高于固定步频率时视角会有阶梯感，记为后续事项。
+- `health`：属性 `{ max: 100, regen: 0, regenDelay: 4 }`，状态 `hp`（`init` 时为 `max`）、`lastHit`（最近受伤的 `w.time`，初值 -1e9；不用 -Infinity，它存档后会变成 null）。每步在 `hp > 0`、距 `lastHit` 超过 `regenDelay` 时按 `regen` 每秒回血。
+- `damage(w, e, n, from?)`：套件导出的函数，不是 `w.damage`（系统层不依赖套件积木）。实体没有 `health` 或已经 `hp <= 0` 时什么也不做，返回 false；否则扣血、记 `lastHit`，发 `damaged` 事件，`hp` 到 0 时再发 `died` 事件。两个事件的 payload 都是 `{ entity, amount, from }`（`from` 为实体 id 或 null）。自定义事件不经过 `a`/`b` 过滤，处理函数自己看 `payload.entity`。`died` 不销毁实体，销毁与否由游戏决定。
+- `aiChase`：追击 `target`（标签或预制件名）里 `range` 内最近的一个；`sight` 为 true 时从眼高向目标眼高打 `w.raycast`（只看 `solid`），被挡住就不算看见。看见时朝目标水平移动到 `stopAt` 以内并转身；看丢后走到最后看见的位置再停下。移动用 `w.move`（带重力）。状态 `vel`、`grounded`、`seen`、`lastSeen`（`[x, y, z]` 或 null）、`targetId`。
+- `aiPatrol`：按 `points` 顺序巡逻，到点停 `wait` 秒，`loop` 为 false 时到头折返。同一实体有 `aiChase` 且在追（`seen` 或 `lastSeen` 不为空）时让出，不移动。
+- `aiChase`、`aiPatrol` 是套件的示例；saltline 的鸥、犬不用它们（见 17.7）。
 - 套件提供的动作映射：`move` 为 WASD、`look` 为鼠标、`jump` 为空格、`sprint` 为左 Shift、`crouch` 为 C 或左 Ctrl。
+
+World 的配套改动：
+
+- 增量类输入按帧累积：`look` 是“本帧的鼠标增量”，第 1 步按固定步采样时，一帧跑多步会把同一增量重复计入，一帧没有步时又丢掉。改为：每帧的第一个固定步取“上次以来累积的增量 + 本帧增量”，同一帧后续的步取 0；没有跑步的帧在 `update` 里把本帧增量累积起来。界面捕获输入时一律为 0。哪些输入源是增量由 World 的 `DELTA_INPUTS`（目前只有 `look`）决定，它是输入源的属性，与指令名无关。
+- `w.raycast`、`w.overlap` 的选项加 `solid`：为 true 时只看 `solid` 的碰撞体。
 
 ### 17.6 saltline 玩家迁移
 
@@ -1466,7 +1485,7 @@ export default defineGame({ kits: [topdown], ... })
 
 新增：`kits/topdown/`、`kits/fps/`、`kits/realistic/`、`js/runtime/src/world/kit.ts`（`defineKit`、展开与冲突检查、全局目录）、`js/runtime/src/world/collide.ts`（碰撞表、网格、`move`、`raycast`、`overlap`）、`js/runtime/src/world/blocks/body.ts`、`packages/com.pot.core/Runtime/Resources/pot/kits.json`（生成）。
 
-修改：`registry.ts`（来源）、`game.ts`（`kits`）、`tree.ts`（未知积木的提示）、`world.ts`（碰撞表、`move`、`raycast`、`overlap`、`damage`）、`blocks/index.ts`、`blocks/trigger.ts`、`types.ts`、`inspect.ts`、`host.ts`、`unity.ts`、`js/devtools/src/loader.ts`、`js/scripts/build.js`、`js/devserver/builder.js`、`headless.js`、`cli.js`、`mcp.js`、`GameFS.cs`、`GameSession.cs`、`PotRunner.cs`、`games/hello-tsx/`、`games/saltline/`、Skill 与模板。
+修改：`registry.ts`（来源）、`game.ts`（`kits`）、`tree.ts`（未知积木的提示）、`world.ts`（碰撞表、`move`、`raycast`、`overlap`、增量输入的按帧累积）、`blocks/index.ts`、`blocks/trigger.ts`、`types.ts`、`inspect.ts`、`host.ts`、`unity.ts`、`js/devtools/src/loader.ts`、`js/scripts/build.js`、`js/devserver/builder.js`、`headless.js`、`cli.js`、`mcp.js`、`GameFS.cs`、`GameSession.cs`、`PotRunner.cs`、`games/hello-tsx/`、`games/saltline/`、Skill 与模板。
 
 ### 17.10 测试
 
@@ -1536,3 +1555,23 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - 与 saltline 的比对没有用 saltline 的关卡（它依赖 `level`、`origlevel` 与渲染侧数据），而是 3 组随机关卡（各 60 个 0.25 米网格上的盒，含台阶、墙、悬空的顶，地面 `maxX = 20`）各 600 步，随机方向与速度（含 30 m/s 触发多子步）、随机起跳；位置、速度、`grounded` 与三个标志逐位相等，比 17.6 要求的 1e-4 更严。真实关卡的比对在第 5 步做。
 - `js/tsconfig.json` 补了 `@pot/kit/*` 路径并把 `kits/` 纳入检查：第 2 步漏了，`npm run typecheck` 报找不到 `@pot/kit/topdown`。
 - Skill 的 `references/world.md` 加了 `body` 与三个查询的一段说明。
+
+第 4 步（fps 套件）：
+
+17.5 在动手前改过一遍，与最初的写法相比：
+
+- 伤害不是 `w.damage(e, n)`，而是套件导出的 `damage(w, e, n, from)`：`health` 是套件积木，系统层的 World 不该依赖它。17.9 的 `world.ts` 一项相应去掉 `damage`。
+- `cameraFps` 的震动不用 `w.rand`：表现层每帧调用它会推进 World 的随机种子，而表现帧数因机器而异，模拟就不可复现了。改为由 `w.tick` 推出的伪随机。
+- 发现 `look` 这类增量输入按固定步采样会重复或丢失，World 加了按帧累积（17.5 末尾），这是 `moveFps` 视角可复现、手感正确的前提。
+- 补充了属性、状态的完整列表与 `damaged`、`died` 的 payload。
+
+实施时的细节：
+
+- 状态字段不能与属性同名（`defineBlock` 会报错），所以土狼时间的余量叫 `coyoteT`（属性 `coyote` 是时长），瞄准程度叫 `aim`（属性 `ads` 是瞄准时的速度，沿用 saltline `tuning.json` 的名字）。
+- 增量累积只在 `ctx.input` 采样时生效；`pot test` 的注入指令与录像回放本来就是逐步的值，不受影响。界面捕获期间的增量直接丢弃，不留到捕获结束后。
+- `w.raycast`、`w.overlap` 的选项加了 `solid`；`moveFps` 起身检查与 `aiChase` 的视线都只看 `solid` 的碰撞体，与 saltline 只看关卡盒一致。
+- `moveFps` 起身检查等价于 saltline 的 `blocked(x, y + 0.05, z, r - 0.02, h - 0.05)`，用 `w.overlap` 的盒实现（严格小于，与 `blocked` 相同）。
+- `moveFps` 的 `lastSafe` 只在着地、不低于 `ground.y - 0.01`、且在 `bounds` 内时更新；拉回时速度清零（saltline 的落水救援另有 1.5 米偏移和扣血，留给游戏积木）。
+- `aiChase` 与 `aiPatrol` 各自有 `vel`、`grounded`；同一实体两个都有时，追击中由 `aiChase` 移动，闲着时由 `aiPatrol` 移动，任何一步只调用一次 `w.move`。
+- `cameraFps` 的 `lockCursor`：`enter` 时锁定，`exit` 时释放。`moveFps` 不检查鼠标是否锁定（saltline 只在锁定时读 `look`），菜单等场合由流程或界面捕获屏蔽输入。
+- 测试 `kit-fps.test.js` 11 个用例：增量输入（一帧半步、一帧两步、界面捕获）、走跑与瞄准的速度、视角、跳跃顶点（约 0.95，半隐式欧拉比 `jumpApex` 低约 `v0·dt/2`）、土狼时间、跳跃缓冲、低顶蹲伏、`fallY`/`bounds` 拉回、相机与光标、`health`/`damage`、`aiChase` 视线、`aiPatrol` 与让出。

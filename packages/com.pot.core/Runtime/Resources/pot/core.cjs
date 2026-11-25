@@ -8634,6 +8634,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     actions: { jump: ["space"], fire: ["mouse0"] }
   };
   var DEFAULT_SEED = 795581745;
+  var DELTA_INPUTS = /* @__PURE__ */ new Set(["look"]);
   var MAX_EVENT_ROUNDS = 8;
   function initData() {
     return { nextId: 1, tick: 0, seed: DEFAULT_SEED, vars: {}, entities: {}, mounts: {}, contacts: {} };
@@ -8669,6 +8670,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_axes", {});
       __publicField(this, "_down", {});
       __publicField(this, "_prevDown", {});
+      /** 增量输入源 → 没有固定步的帧里累积的增量 */
+      __publicField(this, "_deltaAcc", {});
+      /** 最近一次采样增量输入的 clock.frame */
+      __publicField(this, "_deltaFrame", -1);
       __publicField(this, "_chains", /* @__PURE__ */ new Map());
       __publicField(this, "_chainVersion", -1);
       __publicField(this, "_reported", /* @__PURE__ */ new Set());
@@ -8711,6 +8716,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       ctx.on("fixed-update", () => this._step());
       this.view = new WorldView(this, ctx, (what, fn) => this._guard(what, void 0, fn));
       ctx.on("update", () => {
+        this._accumulateDeltas();
         this._sweep();
         this.view.frame();
       });
@@ -9198,14 +9204,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     /** 射线：最近的碰撞体，或 null；起点在碰撞体内部时忽略它 */
     raycast(from, dir, maxDist = Infinity, options = {}) {
       const skip = options.ignore == null ? null : typeof options.ignore === "number" ? options.ignore : options.ignore.id;
-      const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, false));
+      const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, !!options.solid));
       if (!hit) return null;
       return { point: hit.point, normal: hit.normal, dist: hit.dist, entity: this.data.entities[hit.id] };
     }
     /** 与给定形状重叠的实体，按 id 升序 */
     overlap(shape2, at, options = {}) {
       const skip = options.ignore == null ? null : typeof options.ignore === "number" ? options.ignore : options.ignore.id;
-      const ids = this._table().overlap(shape2, at, this._bodyFilter(options.layers, skip, false));
+      const ids = this._table().overlap(shape2, at, this._bodyFilter(options.layers, skip, !!options.solid));
       return ids.map((id) => this.data.entities[id]);
     }
     on(event, filter, fn) {
@@ -9326,6 +9332,21 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       this._flowEvent(event.name, event.args[0]);
     }
     // ---------------------------------------------------------------- 每一步（15.8）
+    /** 本帧没有跑固定步时，把增量输入累积到下一个固定步（17.5） */
+    _accumulateDeltas() {
+      if (this._deltaFrame === this._root.clock.frame || this._source || this._captures.size > 0) return;
+      const input = this._root.input;
+      const seen = /* @__PURE__ */ new Set();
+      for (const src of Object.values(this._controls.axes)) {
+        if (!DELTA_INPUTS.has(src) || seen.has(src)) continue;
+        seen.add(src);
+        const v = input.axis(src);
+        if (!v.x && !v.y) continue;
+        const a = this._deltaAcc[src] ?? (this._deltaAcc[src] = { x: 0, y: 0 });
+        a.x += v.x;
+        a.y += v.y;
+      }
+    }
     _step() {
       if (this._stepping) return;
       this._stepping = true;
@@ -9346,7 +9367,26 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         } else {
           const input = this._root.input;
           const captured = this._captures.size > 0;
-          for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name]);
+          const frame = this._root.clock.frame;
+          const first = this._deltaFrame !== frame;
+          this._deltaFrame = frame;
+          const acc = this._deltaAcc;
+          if (first) this._deltaAcc = {};
+          const deltas = {};
+          for (const name of Object.keys(this._controls.axes)) {
+            const src = this._controls.axes[name];
+            if (captured) this._axes[name] = { x: 0, y: 0 };
+            else if (!DELTA_INPUTS.has(src)) this._axes[name] = input.axis(src);
+            else if (!first) this._axes[name] = { x: 0, y: 0 };
+            else {
+              if (!deltas[src]) {
+                const v = input.axis(src);
+                const a = acc[src];
+                deltas[src] = a ? { x: v.x + a.x, y: v.y + a.y } : v;
+              }
+              this._axes[name] = { ...deltas[src] };
+            }
+          }
           for (const action of Object.keys(this._controls.actions)) {
             const keys = this._controls.actions[action];
             this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
