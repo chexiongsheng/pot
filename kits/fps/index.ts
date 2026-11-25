@@ -102,6 +102,14 @@ export const moveFps = defineBlock({
   about: '第一人称移动：读 move、look、jump、sprint、crouch 指令，走跑蹲跳、上台阶（w.move），yaw/pitch 在状态里；aim（瞄准程度 0 到 1）由别的积木写入',
   props: MOVE_PROPS,
   state: MOVE_STATE,
+  // 原生实现的布局提示（004 第 18.3 节）：缺省值推不出类型的字段
+  native: {
+    layers: 'layers',
+    ground: { '?': { y: 'f', maxX: 'f?' } },
+    bounds: { '?': { min: 'f2', max: 'f2' } },
+    fallY: 'f?',
+    actions: { move: 'axis', look: 'axis', jump: 'action', sprint: 'action', crouch: 'action' },
+  },
   init(me, e) {
     me.yaw = e.rot?.[1] ?? 0
     me.lastSafe = [e.pos[0], e.pos[1], e.pos[2]]

@@ -10,6 +10,13 @@ const { walk, KITS_DIR } = require('./builder')
 const DIST = path.resolve(__dirname, '../dist')
 const PACKAGES = path.resolve(__dirname, '../../packages')
 
+/** 积木的原生布局（004 第 18.3 节）：没有 step 的积木不需要；推不出时给出原因 */
+function layoutInfo(b) {
+  if (!b.step) return {}
+  const r = loadPot().deriveLayout(b)
+  return r.ok ? { layout: r.layout.text } : { layoutError: r.reason }
+}
+
 function loadPot() {
   if (globalThis.pot?.createRuntime && globalThis.pot?.devtools) return globalThis.pot
   const pick = (name, pkg) => {
@@ -212,7 +219,7 @@ async function listBlocks(dir) {
     }
     for (const name of reg.blockNames()) {
       const b = reg.block(name)
-      items.push({ kind: 'block', name, layer: layerOf(reg.sourceOf('block', name)), about: b.about ?? '', props: plain(b.props), state: plain(b.state) })
+      items.push({ kind: 'block', name, layer: layerOf(reg.sourceOf('block', name)), about: b.about ?? '', props: plain(b.props), state: plain(b.state), ...layoutInfo(b) })
     }
     for (const name of reg.prefabNames()) items.push(prefabItem(name, reg.prefab(name), layerOf(reg.sourceOf('prefab', name)), { chain: reg.chain(name) }))
     // 套件：引入了的列出组成，没引入的连同积木、预制件一起列出并给出引入写法
@@ -227,7 +234,7 @@ async function listBlocks(dir) {
         blocks: kit.blocks.map((b) => b.name), prefabs: kit.prefabs.map((p) => p.prefab), requires: kit.requires.map((k) => k.name),
       })
       if (!available) continue
-      for (const b of kit.blocks) items.push({ kind: 'block', name: b.name, layer: kitName, available: true, usage, about: b.about ?? '', props: plain(b.props), state: plain(b.state) })
+      for (const b of kit.blocks) items.push({ kind: 'block', name: b.name, layer: kitName, available: true, usage, about: b.about ?? '', props: plain(b.props), state: plain(b.state), ...layoutInfo(b) })
       for (const p of kit.prefabs) items.push(prefabItem(p.prefab, p, kitName, { available: true, usage }))
     }
     for (const [name, doc] of Object.entries(pot.UI_TAG_DOCS)) items.push({ kind: 'ui', name, layer: 'system', about: doc.about, props: { ...doc.props, ...pot.UI_COMMON_PROPS } })

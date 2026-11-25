@@ -1887,3 +1887,12 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - 同样的数值运算 C# 比 V8 快约 4 倍。
 - 所以 18.1 的退化方案（每步打包拷贝）够用：拷贝的开销远小于把运算搬到 C# 省下的时间，暂不需要列式存储。逐实体跨语言（例如 TS 积木逐个调 C# 的碰撞）也不算贵，但每次还要封送参数和结果，仍按批量设计。
 - 这些数字只代表有 JIT 的 V8 加 IL2CPP。iOS 上 V8 无 JIT，JS 运算会慢一个数量级，C# 积木的收益更大；需要在设备上实测（列为需要用户确认的项目）。
+
+第 2 步（布局）：
+
+- 可为 null 的对象在规范字符串里展开成扁平条目：先 `ground:?`（有无槽），再 `ground.y:f;ground.maxX:f?`，不写成 `?{...}` 嵌套，两边按 `;` 切开即可解析。18.3 的表里 `?{...}` 一行以此为准。
+- 实现在 `js/runtime/src/world/layout.ts`：`deriveLayout`（按定义对象缓存）、`packBatch`/`unpackBatch`、单个实体的 `packEntity`/`unpackEntity`。解包时数字数组原地写（长度相同时），`f?` 为 0 写回 null，`?` 为 0 时整个对象写回 null。缓冲区长度或实体 id 不符时抛错。
+- 类型为 `f` 但运行时不是数时打包成 NaN，不报错；校验留给 verify。
+- `layers` 位掩码按无符号 32 位存进 double，null 为 `0xFFFFFFFF`。
+- `pot blocks` 的积木项：有 `step` 的积木带 `layout`（规范字符串）或 `layoutError`（原因）。`moveFps` 加了提示（`layers`、`ground`、`bounds`、`fallY`、`actions`），布局共 54 个字段。
+- 测试 `world-layout.test.js` 5 个用例。

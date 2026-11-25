@@ -26,6 +26,7 @@ var pot = (() => {
     ANCHORS: () => ANCHORS,
     API_VERSION: () => API_VERSION,
     AudioService: () => AudioService,
+    BUFFER_HEAD: () => BUFFER_HEAD,
     BUILTIN_BLOCKS: () => BUILTIN_BLOCKS,
     BUILTIN_PREFABS: () => BUILTIN_PREFABS,
     BUILTIN_UNIFORMS: () => BUILTIN_UNIFORMS,
@@ -41,6 +42,7 @@ var pot = (() => {
     DEFAULT_CONTROLS: () => DEFAULT_CONTROLS,
     DataService: () => DataService,
     DisposableList: () => DisposableList,
+    ENTITY_HEAD: () => ENTITY_HEAD,
     Entity: () => Entity,
     EventsService: () => EventsService,
     Fiber: () => Fiber,
@@ -107,6 +109,7 @@ var pot = (() => {
     defineKit: () => defineKit,
     definePlugin: () => definePlugin,
     definePrefab: () => definePrefab,
+    deriveLayout: () => deriveLayout,
     encode: () => encode,
     encodePcm16: () => encodePcm16,
     estimateSize: () => estimateSize,
@@ -141,6 +144,8 @@ var pot = (() => {
     nodeName: () => nodeName,
     overlap: () => overlap,
     overlappingPairs: () => overlappingPairs,
+    packBatch: () => packBatch,
+    packEntity: () => packEntity,
     parseColor: () => parseColor,
     parseCssColor: () => parseCssColor,
     parseFont: () => parseFont,
@@ -157,6 +162,8 @@ var pot = (() => {
     unitOf: () => unitOf,
     unitOfFiber: () => unitOfFiber,
     unity: () => unity,
+    unpackBatch: () => unpackBatch,
+    unpackEntity: () => unpackEntity,
     vertexInputs: () => vertexInputs,
     withProps: () => withProps,
     worldHash: () => worldHash
@@ -6375,7 +6382,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const i = path.lastIndexOf("/");
     return i < 0 ? "" : path.slice(0, i + 1);
   }
-  function preprocess(stage, entry, read, options = {}) {
+  function preprocess(stage, entry, read2, options = {}) {
     const files = ["(预置)"];
     const once = /* @__PURE__ */ new Set();
     const three = options.dialect === "three";
@@ -6425,7 +6432,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         } else {
           target = normalize2(dirname(name.startsWith("<") || name.startsWith("(") ? "" : name) + m[2]);
           if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(" → ")}`);
-          body2 = read(target);
+          body2 = read2(target);
         }
         if (!repeatable && once.has(target) && m[1]) {
           out.push("");
@@ -6439,7 +6446,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (three) expand("(three 前缀)", threePrefix(stage), 0, []);
     if (entry.path !== void 0) {
       const path = normalize2(entry.path);
-      expand(path, read(path), 0, [path]);
+      expand(path, read2(path), 0, [path]);
     } else if (entry.source !== void 0) {
       expand(stage === "vertex" ? "(内联顶点着色器)" : "(内联片元着色器)", entry.source, 0, []);
     } else {
@@ -6486,7 +6493,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     /** 编译着色器程序。失败不抛错（返回的 Shader.error 为错误信息，并输出日志），以便热重载时保留旧画面 */
     shader(options) {
       const ctx = this.ctx;
-      const read = (path) => ctx.data.text(path);
+      const read2 = (path) => ctx.data.text(path);
       const vertexEntry = { path: options.vertex, source: options.vertexSource, library: options.fullscreen ? "pot/fullscreen.vert" : void 0 };
       const fragmentEntry = { path: options.fragment, source: options.fragmentSource };
       if (fragmentEntry.path === void 0 && fragmentEntry.source === void 0) throw new Error("gfx.shader：需要 fragment 或 fragmentSource");
@@ -6506,8 +6513,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       let fs;
       if (!error) try {
         const pre = { dialect: options.dialect, defines: options.defines, inputs };
-        vs = preprocess("vertex", vertexEntry, read, pre);
-        fs = preprocess("fragment", fragmentEntry, read, pre);
+        vs = preprocess("vertex", vertexEntry, read2, pre);
+        fs = preprocess("fragment", fragmentEntry, read2, pre);
       } catch (e) {
         error = String(e?.message ?? e);
       }
@@ -9945,6 +9952,222 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     bindEntry("unity.info", () => unity.info());
   }
   bindUnity();
+
+  // runtime/src/world/layout.ts
+  var ENTITY_HEAD = 7;
+  var BUFFER_HEAD = 4;
+  var SIMPLE = { f: 1, b: 1, "f?": 2, layers: 1, axis: 2, action: 2 };
+  function slotsOf(type) {
+    if (type in SIMPLE) return SIMPLE[type];
+    const m = /^f([1-9][0-9]*)$/.exec(type);
+    return m ? Number(m[1]) : 0;
+  }
+  var isNullableGroup = (h) => isPlainObject2(h) && Object.keys(h).length === 1 && isPlainObject2(h["?"]);
+  var cache = /* @__PURE__ */ new WeakMap();
+  function deriveLayout(def) {
+    const hit = cache.get(def);
+    if (hit) return hit;
+    const result = derive(def);
+    cache.set(def, result);
+    return result;
+  }
+  function derive(def) {
+    const fields = [];
+    const hints = def.native;
+    if (hints !== void 0 && !isPlainObject2(hints)) return { ok: false, reason: "native 提示必须是普通对象" };
+    const known = /* @__PURE__ */ new Set([...Object.keys(def.props ?? {}), ...Object.keys(def.state ?? {})]);
+    for (const key of Object.keys(hints ?? {})) if (!known.has(key)) return { ok: false, reason: `native 提示里的 ${key} 不是 props 或 state 的字段` };
+    const add = (keys, value, hint, writable) => {
+      const path = keys.join(".");
+      if (typeof hint === "string") {
+        const slots = slotsOf(hint);
+        if (!slots || hint === "?") return `${path} 的提示 ${JSON.stringify(hint)} 不是已知类型（f、b、f<n>、f?、layers、axis、action）`;
+        if ((hint === "axis" || hint === "action") && typeof value !== "string") return `${path} 标为 ${hint}，缺省值应是指令名字符串`;
+        if (hint === "layers" && value !== null && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) return `${path} 标为 layers，缺省值应是字符串数组或 null`;
+        if ((hint === "axis" || hint === "action") && writable) return `${path} 是 state，不能标为 ${hint}（输入只读）`;
+        fields.push({ path, keys, type: hint, slots, writable });
+        return null;
+      }
+      if (hint !== void 0 && isNullableGroup(hint)) {
+        if (value !== null && !isPlainObject2(value)) return `${path} 标为可为 null 的对象，缺省值应是对象或 null`;
+        fields.push({ path, keys, type: "?", slots: 1, writable });
+        for (const sub of Object.keys(hint["?"])) {
+          const err = add([...keys, sub], value?.[sub] ?? null, hint["?"][sub], writable);
+          if (err) return err;
+        }
+        return null;
+      }
+      if (typeof value === "number") {
+        fields.push({ path, keys, type: "f", slots: 1, writable });
+        return null;
+      }
+      if (typeof value === "boolean") {
+        fields.push({ path, keys, type: "b", slots: 1, writable });
+        return null;
+      }
+      if (Array.isArray(value)) {
+        if (value.length && value.every((v) => typeof v === "number")) {
+          fields.push({ path, keys, type: `f${value.length}`, slots: value.length, writable });
+          return null;
+        }
+        return `${path} 的缺省值是${value.length ? "非数字" : "空"}数组，需要在 native 里给出类型`;
+      }
+      if (isPlainObject2(value)) {
+        if (hint !== void 0 && !isPlainObject2(hint)) return `${path} 的提示应是对象`;
+        for (const sub of Object.keys(value)) {
+          const err = add([...keys, sub], value[sub], hint?.[sub], writable);
+          if (err) return err;
+        }
+        return null;
+      }
+      return `${path} 的缺省值是 ${value === null ? "null" : typeof value}，需要在 native 里给出类型`;
+    };
+    for (const [group, writable] of [[def.props ?? {}, false], [def.state ?? {}, true]]) {
+      for (const key of Object.keys(group)) {
+        const err = add([key], group[key], hints?.[key], writable);
+        if (err) return { ok: false, reason: err };
+      }
+    }
+    let offset = ENTITY_HEAD;
+    const laid = fields.map((f) => {
+      const out = { ...f, offset };
+      offset += f.slots;
+      return out;
+    });
+    const text = `${def.name}|${laid.map((f) => `${f.path}:${f.type}`).join(";")}`;
+    return { ok: true, layout: { block: def.name, text, fields: laid, stride: offset } };
+  }
+  var ALL_LAYERS = 4294967295;
+  function read(me, keys) {
+    let v = me;
+    for (const k of keys) {
+      if (v === null || v === void 0) return void 0;
+      v = v[k];
+    }
+    return v;
+  }
+  function write(me, keys, value) {
+    let o = me;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!isPlainObject2(o[keys[i]])) o[keys[i]] = {};
+      o = o[keys[i]];
+    }
+    o[keys[keys.length - 1]] = value;
+  }
+  function packEntity(layout2, e, me, env, buf, o) {
+    buf[o] = e.id;
+    buf[o + 1] = e.pos[0];
+    buf[o + 2] = e.pos[1];
+    buf[o + 3] = e.pos[2];
+    buf[o + 4] = e.rot[0];
+    buf[o + 5] = e.rot[1];
+    buf[o + 6] = e.rot[2];
+    let absent = null;
+    for (const f of layout2.fields) {
+      const at = o + f.offset;
+      if (absent !== null && f.path.startsWith(absent)) {
+        for (let i = 0; i < f.slots; i++) buf[at + i] = 0;
+        continue;
+      }
+      absent = null;
+      const v = read(me, f.keys);
+      switch (f.type) {
+        case "f":
+          buf[at] = typeof v === "number" ? v : NaN;
+          break;
+        case "b":
+          buf[at] = v ? 1 : 0;
+          break;
+        case "f?":
+          buf[at] = typeof v === "number" ? 1 : 0;
+          buf[at + 1] = typeof v === "number" ? v : 0;
+          break;
+        case "layers":
+          buf[at] = Array.isArray(v) ? env.layerMask(v) : ALL_LAYERS;
+          break;
+        case "axis": {
+          const a = env.cmd(e).axis(String(v));
+          buf[at] = a.x;
+          buf[at + 1] = a.y;
+          break;
+        }
+        case "action": {
+          const c = env.cmd(e);
+          buf[at] = c.down(String(v)) ? 1 : 0;
+          buf[at + 1] = c.pressed(String(v)) ? 1 : 0;
+          break;
+        }
+        case "?":
+          buf[at] = isPlainObject2(v) ? 1 : 0;
+          if (!isPlainObject2(v)) absent = f.path + ".";
+          break;
+        default:
+          for (let i = 0; i < f.slots; i++) buf[at + i] = Array.isArray(v) && typeof v[i] === "number" ? v[i] : NaN;
+      }
+    }
+  }
+  function unpackEntity(layout2, e, me, buf, o) {
+    e.pos[0] = buf[o + 1];
+    e.pos[1] = buf[o + 2];
+    e.pos[2] = buf[o + 3];
+    e.rot[0] = buf[o + 4];
+    e.rot[1] = buf[o + 5];
+    e.rot[2] = buf[o + 6];
+    let absent = null;
+    for (const f of layout2.fields) {
+      if (!f.writable) continue;
+      if (absent !== null && f.path.startsWith(absent)) continue;
+      absent = null;
+      const at = o + f.offset;
+      switch (f.type) {
+        case "f":
+          write(me, f.keys, buf[at]);
+          break;
+        case "b":
+          write(me, f.keys, buf[at] !== 0);
+          break;
+        case "f?":
+          write(me, f.keys, buf[at] !== 0 ? buf[at + 1] : null);
+          break;
+        case "?":
+          if (buf[at] === 0) {
+            write(me, f.keys, null);
+            absent = f.path + ".";
+          } else if (!isPlainObject2(read(me, f.keys))) write(me, f.keys, {});
+          break;
+        case "layers":
+        case "axis":
+        case "action":
+          break;
+        default: {
+          const cur = read(me, f.keys);
+          const arr = Array.isArray(cur) && cur.length === f.slots ? cur : new Array(f.slots);
+          for (let i = 0; i < f.slots; i++) arr[i] = buf[at + i];
+          if (arr !== cur) write(me, f.keys, arr);
+        }
+      }
+    }
+  }
+  function packBatch(layout2, list, env, dt, tick, buf) {
+    const size = BUFFER_HEAD + list.length * layout2.stride;
+    const out = buf && buf.length === size ? buf : new Float64Array(size);
+    out[0] = list.length;
+    out[1] = layout2.stride;
+    out[2] = dt;
+    out[3] = tick;
+    for (let i = 0; i < list.length; i++) packEntity(layout2, list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout2.stride);
+    return out;
+  }
+  function unpackBatch(layout2, list, buf) {
+    if (buf.length !== BUFFER_HEAD + list.length * layout2.stride || buf[0] !== list.length || buf[1] !== layout2.stride) {
+      throw new Error(`原生实现返回的缓冲区格式不对（长度 ${buf.length}，应为 ${BUFFER_HEAD + list.length * layout2.stride}）`);
+    }
+    for (let i = 0; i < list.length; i++) {
+      const o = BUFFER_HEAD + i * layout2.stride;
+      if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`);
+      unpackEntity(layout2, list[i].e, list[i].me, buf, o);
+    }
+  }
 
   // runtime/src/world/ui-eval.ts
   var WORLD_TAGS = /* @__PURE__ */ new Set(["entity", "rule", "stage"]);

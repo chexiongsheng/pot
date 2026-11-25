@@ -8,6 +8,7 @@
 import type { Context } from 'cordis'
 import { PREFAB, isPrefab, makeNode } from './node'
 import type { Prefab, PotNode } from './node'
+import type { NativeHint } from './layout'
 
 /** 实体标签与 w.spawn 上不是积木名的属性 */
 export const RESERVED = new Set(['key', 'at', 'rot', 'scale', 'name', 'tags', 'children'])
@@ -22,6 +23,8 @@ export interface BlockDef<P extends object = any, S extends object = any> {
   props?: P
   state?: S
   order?: number
+  /** 原生实现的布局提示（18.3）：缺省值推不出类型的字段在这里给出，如 { fallY: 'f?', actions: { jump: 'action' } } */
+  native?: Record<string, NativeHint>
   init?(me: P & S, e: any, w: any): void
   step?(me: P & S, e: any, w: any): void
   view?: {
