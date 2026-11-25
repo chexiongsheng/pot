@@ -40,11 +40,23 @@ class Node implements PotNode {
   constructor(public type: PotNode['type'], public key: string | null, public props: Record<string, any>) {}
 }
 
+/** 静态写出的子节点数组上的标记（不可枚举）：数组被当作 children 传进函数组件再放进别的标签时也认得出 */
+export const STATIC_CHILDREN = Symbol.for('pot.staticChildren')
+
+/** 数组是不是标签里静态写出的子节点（不是 map 等运行时生成的列表） */
+export function isStaticChildren(value: unknown) {
+  return Array.isArray(value) && (value as any)[STATIC_CHILDREN] === true
+}
+
 /** isStatic：子节点数组是标签里静态写出的（jsxs），不是 map 等运行时生成的列表 */
 export function makeNode(type: PotNode['type'], props: Record<string, any> | null | undefined, key: unknown, source?: SourcePos, isStatic?: boolean): PotNode {
   const node = new Node(type, key === undefined || key === null ? null : String(key), props ?? {})
   if (source) node.source = source
-  if (isStatic) (node as any).static = true
+  if (isStatic) {
+    ;(node as any).static = true
+    const children = node.props.children
+    if (Array.isArray(children) && !Object.isFrozen(children)) Object.defineProperty(children, STATIC_CHILDREN, { value: true })
+  }
   return node
 }
 

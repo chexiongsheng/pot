@@ -2,7 +2,7 @@
  * 场景树求值（纯函数，Node 上可单测）：展开片段与函数组件、解析预制件、算 key 路径、校验，
  * 输出扁平的实体描述表、规则表与 stage。见 004 第 15.4 节。
  */
-import { Fragment, isNode, isPrefab, nodeName, sourcePrefix } from './node'
+import { Fragment, isNode, isPrefab, isStaticChildren, nodeName, sourcePrefix } from './node'
 import type { PotChild, PotNode, Prefab, SourcePos } from './node'
 import { PREFAB_RESERVED, RESERVED, Registry, clone, isPlainObject, merge } from './registry'
 import type { Vec3 } from '../host'
@@ -128,7 +128,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
 
   /** 子节点：静态写出的子节点数组（jsxs）里的元素不算列表，其余数组（map 的结果）是列表，列表里的节点要写 key */
   const children = (value: any, layer: Layer, depth: number, isStatic: boolean) => {
-    if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic)
+    if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic && !isStaticChildren(value))
     else visit(value, layer, depth + 1, false)
   }
 
@@ -139,7 +139,8 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
       return
     }
     if (Array.isArray(child)) {
-      for (const c of child) visit(c, layer, depth + 1, true)
+      const list = !isStaticChildren(child)
+      for (const c of child) visit(c, layer, depth + 1, list)
       return
     }
     if (typeof child === 'string' || typeof child === 'number') {

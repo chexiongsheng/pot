@@ -62,6 +62,7 @@ var pot = (() => {
     Registry: () => Registry,
     RegistryService: () => RegistryService,
     Runtime: () => Runtime,
+    STATIC_CHILDREN: () => STATIC_CHILDREN,
     SceneService: () => SceneService,
     Service: () => Service,
     Shader: () => Shader,
@@ -122,6 +123,7 @@ var pot = (() => {
     isNode: () => isNode,
     isObject: () => isObject,
     isPrefab: () => isPrefab,
+    isStaticChildren: () => isStaticChildren,
     joinPrototype: () => joinPrototype,
     jsxDevRuntime: () => jsx_dev_runtime_exports,
     jsxRuntime: () => jsx_runtime_exports,
@@ -6881,10 +6883,19 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "props", props);
     }
   };
+  var STATIC_CHILDREN = /* @__PURE__ */ Symbol.for("pot.staticChildren");
+  function isStaticChildren(value) {
+    return Array.isArray(value) && value[STATIC_CHILDREN] === true;
+  }
   function makeNode(type, props, key, source, isStatic) {
     const node = new Node(type, key === void 0 || key === null ? null : String(key), props ?? {});
     if (source) node.source = source;
-    if (isStatic) node.static = true;
+    if (isStatic) {
+      ;
+      node.static = true;
+      const children = node.props.children;
+      if (Array.isArray(children) && !Object.isFrozen(children)) Object.defineProperty(children, STATIC_CHILDREN, { value: true });
+    }
     return node;
   }
   function isNode(value) {
@@ -7094,7 +7105,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       let main = 0;
       let cross = 0;
       for (const child of kids) {
-        const hint = def.container === "column" ? fixedPx(child.props.w) ?? (align === "stretch" ? innerW : void 0) : fixedPx(child.props.w);
+        const hint = def.container === "column" ? fixedPx(child.props.w) ?? (align === "stretch" || child.props.wrap ? innerW : void 0) : fixedPx(child.props.w);
         const s = measure(child, layouts, m, hint);
         if (def.container === "column") {
           main += s.h;
@@ -7426,7 +7437,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       return true;
     };
     const children = (value, layer, depth, isStatic) => {
-      if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic);
+      if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic && !isStaticChildren(value));
       else visit(value, layer, depth + 1, false);
     };
     const visit = (child, layer, depth, dynamic = false) => {
@@ -7436,7 +7447,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return;
       }
       if (Array.isArray(child)) {
-        for (const c of child) visit(c, layer, depth + 1, true);
+        const list = !isStaticChildren(child);
+        for (const c of child) visit(c, layer, depth + 1, list);
         return;
       }
       if (typeof child === "string" || typeof child === "number") {
@@ -8318,6 +8330,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       if (!this._flowOwner) return { state: "play", params: {} };
       const f = this.data.flow ?? initialFlow(this._flowOwner.def.start);
       return { state: f.base, params: clone(f.baseParams) };
+    }
+    /** flow 里定义的全部状态名（没有 flow 时为空）；pot check 用它逐个求值 */
+    get flowStates() {
+      return this._flowOwner ? Object.keys(this._flowOwner.def.states) : [];
     }
     /** 设置流程定义（defineGame 的 flow），返回撤销函数。一个 World 同时只能有一个 flow */
     setFlow(def, unit) {
@@ -9408,7 +9424,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     const prevKeys = {};
     let frame = 0;
     const buildChildren = (children, layer, depth, out, isStatic) => {
-      if (Array.isArray(children)) for (const c of children) build(c, layer, depth + 1, out, !isStatic);
+      if (Array.isArray(children)) for (const c of children) build(c, layer, depth + 1, out, !isStatic && !isStaticChildren(children));
       else build(children, layer, depth + 1, out, false);
     };
     const build = (child, layer, depth, out, dynamic) => {
@@ -9418,7 +9434,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return;
       }
       if (Array.isArray(child)) {
-        for (const c of child) build(c, layer, depth + 1, out, true);
+        const list = !isStaticChildren(child);
+        for (const c of child) build(c, layer, depth + 1, out, list);
         return;
       }
       if (!isNode(child)) {
@@ -9762,7 +9779,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
               get focused() {
                 return local.$focus ?? null;
               },
-              draw: ctx.ui
+              draw: ctx.ui,
+              data: ctx.data
             };
             let tree;
             try {

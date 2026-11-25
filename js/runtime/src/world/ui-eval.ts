@@ -5,7 +5,7 @@
  * （按钮、焦点、输入框、滚动）→ 按树的顺序绘制。不保留节点；跨帧的东西（焦点、滚动位置）放 local，
  * 按下的目标等只在本求值器里记着（丢了无妨）。同一处同一信息只报一次。
  */
-import { Fragment, isNode, isPrefab, nodeName, sourcePrefix } from './node'
+import { Fragment, isNode, isPrefab, isStaticChildren, nodeName, sourcePrefix } from './node'
 import type { PotChild, PotNode, SourcePos } from './node'
 import type { UIService } from '../ui'
 import type { InputService } from '../input'
@@ -97,7 +97,7 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
 
   /** 标签的子节点：静态写出的子节点数组（jsxs）里的元素不算列表，其余数组（map 的结果）是列表 */
   const buildChildren = (children: PotChild, layer: Layer, depth: number, out: UIElement[], isStatic: boolean) => {
-    if (Array.isArray(children)) for (const c of children) build(c, layer, depth + 1, out, !isStatic)
+    if (Array.isArray(children)) for (const c of children) build(c, layer, depth + 1, out, !isStatic && !isStaticChildren(children))
     else build(children, layer, depth + 1, out, false)
   }
 
@@ -108,7 +108,8 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
       return
     }
     if (Array.isArray(child)) {
-      for (const c of child) build(c, layer, depth + 1, out, true)
+      const list = !isStaticChildren(child)
+      for (const c of child) build(c, layer, depth + 1, out, list)
       return
     }
     if (!isNode(child)) {

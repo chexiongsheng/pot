@@ -300,6 +300,11 @@ export class WorldService extends Service {
     return { state: f.base, params: clone(f.baseParams) }
   }
 
+  /** flow 里定义的全部状态名（没有 flow 时为空）；pot check 用它逐个求值 */
+  get flowStates(): string[] {
+    return this._flowOwner ? Object.keys(this._flowOwner.def.states) : []
+  }
+
   /** 设置流程定义（defineGame 的 flow），返回撤销函数。一个 World 同时只能有一个 flow */
   setFlow(def: FlowDef, unit: string): () => void {
     const owner = this._flowOwner

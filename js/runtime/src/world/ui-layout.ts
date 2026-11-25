@@ -136,7 +136,7 @@ export function measure(el: UIElement, layouts: TagLayouts, m: Measurer, width?:
     let main = 0
     let cross = 0
     for (const child of kids) {
-      const hint = def.container === 'column' ? fixedPx(child.props.w) ?? (align === 'stretch' ? innerW : undefined) : fixedPx(child.props.w)
+      const hint = def.container === 'column' ? fixedPx(child.props.w) ?? (align === 'stretch' || child.props.wrap ? innerW : undefined) : fixedPx(child.props.w)
       const s = measure(child, layouts, m, hint)
       if (def.container === 'column') {
         main += s.h

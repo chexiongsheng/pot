@@ -59,3 +59,15 @@ test('非法的尺寸与 at 报错，带行号', async () => {
   assert.ok(errors.some((e) => /at 不认识 "middle"/.test(e) && /game\.tsx:\d+/.test(e)), errors.join('\n'))
   assert.ok(errors.some((e) => /尺寸必须是像素数或 'NN%'/.test(e)), errors.join('\n'))
 })
+
+test('嵌套：stretch 的列里放 panel，panel 里 wrap 的文字按内容宽折行，panel 的高度算进折出的行', async () => {
+  const { records } = await render(`<column at={[0, 0]} w={100} align="stretch" gap={0}>
+    <panel pad={10} gap={0}><text size={10} wrap>aaaa bbbb cccc dddd</text><text size={10}>x</text></panel>
+    <panel pad={0} h={5} />
+  </column>`)
+  const r = rects(records)
+  // 内容宽 80，每行最多 13 个字：aaaa bbbb / cccc dddd 两行，加 x 一行，行高 13
+  assert.deepEqual(r[0], [0, 0, 100, 59])
+  assert.deepEqual(r[1], [0, 59, 100, 5], '下一个兄弟紧接在后面，不重叠')
+  assert.deepEqual(texts(records).map((t) => [t[2 - 1], t[4]]), [[10, 'aaaa bbbb'], [23, 'cccc dddd'], [36, 'x']])
+})

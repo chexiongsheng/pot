@@ -26,6 +26,8 @@ export interface GameUI {
   readonly focused: string | null
   /** 原始的 ctx.ui：在树之后画任意即时模式内容 */
   draw: UIService
+  /** 数据文件（与 scene 的 s.data 相同；每次 load 都重新解析，界面里频繁用时自己缓存） */
+  data: DataService
 }
 
 /** scene 的参数：只有流程状态、流程参数与数据文件，不能读运行状态 */
@@ -132,6 +134,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
             emit,
             get focused() { return local.$focus ?? null },
             draw: ctx.ui,
+            data: ctx.data,
           }
           let tree: PotChild
           try {
