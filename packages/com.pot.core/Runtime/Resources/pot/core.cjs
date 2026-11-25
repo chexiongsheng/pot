@@ -7614,6 +7614,35 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   var entity = definePrefab("entity", {});
   var BUILTIN_PREFABS = [entity];
 
+  // runtime/src/world/flow.ts
+  var NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  function checkFlow(flow) {
+    const fail = (message) => {
+      throw new Error(`defineGame：flow ${message}`);
+    };
+    if (!flow || typeof flow !== "object") fail("必须是对象 { start, states }");
+    const def = flow;
+    if (!def.states || typeof def.states !== "object") fail("缺少 states");
+    const names = Object.keys(def.states);
+    if (!names.length) fail("的 states 至少要有一个状态");
+    for (const name of names) {
+      if (!NAME.test(name)) fail(`的状态名 ${JSON.stringify(name)} 必须是标识符`);
+      const s = def.states[name];
+      if (!s || typeof s !== "object") fail(`的状态 ${name} 必须是对象`);
+      if (s.enter !== void 0 && typeof s.enter !== "function") fail(`的状态 ${name} 的 enter 必须是函数`);
+      for (const [event, target] of Object.entries(s.on ?? {})) {
+        if (!NAME.test(event)) fail(`的状态 ${name} 的事件名 ${JSON.stringify(event)} 必须是标识符`);
+        if (!(target in def.states)) fail(`的状态 ${name} 在 ${event} 时切到不存在的状态 ${JSON.stringify(target)}`);
+      }
+    }
+    if (typeof def.start !== "string" || !(def.start in def.states)) fail(`的 start ${JSON.stringify(def.start)} 不是已定义的状态`);
+    if (def.states[def.start].pause) fail(`的 start 不能是叠加状态（pause）`);
+    return def;
+  }
+  function initialFlow(state = "play") {
+    return { state, params: {}, base: state, baseParams: {} };
+  }
+
   // runtime/src/world/world.ts
   var DEFAULT_CONTROLS = {
     axes: { move: "move", look: "look" },
@@ -7663,6 +7692,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_stages", /* @__PURE__ */ new Map());
       /** 实体 id → 积木属性被挂载对比改过的次数（表现据此重做 enter；内存表，丢了只会多重建一次） */
       __publicField(this, "_revs", /* @__PURE__ */ new Map());
+      /** 当前流程定义及其所属单元 */
+      __publicField(this, "_flowOwner", null);
+      /** 待应用的流程切换 */
+      __publicField(this, "_goto", null);
+      /** 进入流程状态后调用的钩子（defineGame 用它重建场景） */
+      __publicField(this, "_enterHooks", []);
       this._root = ctx;
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
@@ -7724,6 +7759,112 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         actions: { ...DEFAULT_CONTROLS.actions, ...controls?.actions }
       };
     }
+    // ---------------------------------------------------------------- 流程（16.2）
+    /** 当前流程状态（只读快照）；没有 flow 时为 play */
+    get flow() {
+      const f = this.data.flow ?? initialFlow();
+      return { state: f.state, params: f.params, base: f.base };
+    }
+    /** scene 求值用的状态名与参数 */
+    get flowScene() {
+      if (!this._flowOwner) return { state: "play", params: {} };
+      const f = this.data.flow ?? initialFlow(this._flowOwner.def.start);
+      return { state: f.base, params: clone(f.baseParams) };
+    }
+    /** 设置流程定义（defineGame 的 flow），返回撤销函数。一个 World 同时只能有一个 flow */
+    setFlow(def, unit) {
+      const owner = this._flowOwner;
+      if (owner && owner.unit !== unit) throw new Error(`world.setFlow：流程已由单元 "${owner.unit}" 定义，一个 World 只能有一个 flow`);
+      const token = {};
+      this._flowOwner = { unit, token, def };
+      const data = this.data;
+      if (!data.flow) data.flow = initialFlow(def.start);
+      else if (!(data.flow.state in def.states) || !(data.flow.base in def.states)) {
+        this._root.logger("world").warn("流程状态 %s 已不在 flow 里，进入 %s", data.flow.state, def.start);
+        data.flow = initialFlow(def.start);
+        this._goto = { name: def.start, params: void 0, force: true };
+      }
+      return () => {
+        if (this._flowOwner?.token === token) this._flowOwner = null;
+      };
+    }
+    /** 请求切换流程状态：步内调用时在本步末尾应用，否则在下一步开始时应用；一步里多次调用以最后一次为准 */
+    goto(name, params) {
+      const owner = this._flowOwner;
+      if (!owner) throw new Error("w.goto：游戏没有定义 flow");
+      if (!(name in owner.def.states)) throw new Error(`w.goto：没有状态 "${name}"，可用 ${Object.keys(owner.def.states).join("、")}`);
+      if (params !== void 0 && !isPlainObject2(params)) throw new Error("w.goto 的参数必须是普通对象");
+      this._goto = { name, params: params === void 0 ? void 0 : clone(params) };
+    }
+    /** 注册“进入流程状态后”的钩子（随调用单元回收） */
+    onFlowEnter(fn) {
+      return this.ctx.effect(() => {
+        this._enterHooks.push(fn);
+        return () => {
+          const i = this._enterHooks.indexOf(fn);
+          if (i >= 0) this._enterHooks.splice(i, 1);
+        };
+      }, "world.onFlowEnter");
+    }
+    /** 当前是否处于叠加状态（模拟暂停） */
+    _overlay() {
+      const owner = this._flowOwner;
+      const f = this.data.flow;
+      return !!owner && !!f && !!owner.def.states[f.state]?.pause;
+    }
+    /** 自定义事件触发的流程切换 */
+    _flowEvent(name, payload) {
+      const owner = this._flowOwner;
+      if (!owner) return;
+      const f = this.data.flow;
+      const target = f && owner.def.states[f.state]?.on?.[name];
+      if (target) this._goto = { name: target, params: isPlainObject2(payload) ? clone(payload) : void 0 };
+    }
+    _applyGoto() {
+      const req = this._goto;
+      if (!req) return;
+      this._goto = null;
+      const owner = this._flowOwner;
+      if (!owner) return;
+      const def = owner.def;
+      const target = def.states[req.name];
+      if (!target) return;
+      const data = this.data;
+      const cur = data.flow ?? (data.flow = initialFlow(def.start));
+      if (!req.force) {
+        if (target.pause) {
+          cur.state = req.name;
+          cur.params = req.params ?? {};
+          return;
+        }
+        if (def.states[cur.state]?.pause && req.name === cur.base && req.params === void 0) {
+          cur.state = cur.base;
+          cur.params = clone(cur.baseParams);
+          return;
+        }
+      }
+      const params = req.params ?? {};
+      this._enterCleanup(data, owner.unit);
+      data.flow = { state: req.name, params, base: req.name, baseParams: clone(params) };
+      for (const hook of [...this._enterHooks]) this._guard(`进入流程状态 ${req.name} 时重建场景`, void 0, hook);
+      if (target.enter) this._guard(`flow 状态 ${req.name} 的 enter`, void 0, () => target.enter(this));
+    }
+    /** 进入流程状态前：销毁 w.spawn 的实体与游戏挂载的实体，清空该挂载的 key 记录和接触表 */
+    _enterCleanup(data, mountId) {
+      for (const key of Object.keys(data.entities)) {
+        const e = data.entities[key];
+        if (e && e.mount === null) this._remove(data, e, false);
+      }
+      const mount = data.mounts[mountId];
+      if (mount) {
+        for (const rec of Object.values(mount.keys)) {
+          const e = !rec.dead && data.entities[rec.id];
+          if (e) this._remove(data, e, false);
+        }
+        data.mounts[mountId] = { keys: {} };
+      }
+      data.contacts = {};
+    }
     /** 合并 vars：没有的键补初值，已有的保留 */
     mergeVars(vars) {
       if (!vars) return;
@@ -7749,10 +7890,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       this._rules.set(id, result.rules);
       if (result.stage) this._stages.set(id, result.stage);
       else this._stages.delete(id);
-      const token = {};
-      this._attached.set(id, { unit, token });
       this._detached.delete(id);
       this._mountedThisRun.add(id);
+      const fiber = this.ctx.fiber;
+      if (current2 && current2.fiber === fiber) return;
+      const token = {};
+      this._attached.set(id, { unit, token, fiber });
       this.ctx.effect(() => () => {
         if (this._attached.get(id)?.token !== token) return;
         this._attached.delete(id);
@@ -8031,6 +8174,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       for (const h of [...this._handlers]) {
         if (h.event === event.name) this._guard(`w.on("${event.name}")`, void 0, () => h.fn(this, ...event.args));
       }
+      this._flowEvent(event.name, event.args[0]);
     }
     // ---------------------------------------------------------------- 每一步（15.8）
     _step() {
@@ -8038,6 +8182,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       this._stepping = true;
       try {
         this._sweep();
+        this._applyGoto();
         const data = this.data;
         this._prevDown = this._down;
         this._down = {};
@@ -8047,6 +8192,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         for (const action of Object.keys(this._controls.actions)) {
           const keys = this._controls.actions[action];
           this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
+        }
+        if (this._overlay()) {
+          this.prev.clear();
+          this._drain(data);
+          this._applyGoto();
+          return;
         }
         this.prev.clear();
         for (const key in data.entities) {
@@ -8070,6 +8221,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         this._queue.unshift(...touches);
         this._drain(data);
         data.tick++;
+        this._applyGoto();
       } finally {
         this._stepping = false;
       }
@@ -8639,10 +8791,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
       throw new Error("defineGame：prefabs 必须是 definePrefab 结果的数组");
     }
-    if (def.flow !== void 0) throw new Error("defineGame：flow 在 M1 还不支持");
+    const flow = def.flow === void 0 ? void 0 : checkFlow(def.flow);
     return {
       apply(ctx) {
         const w = ctx.world;
+        const unit = unitOf(ctx) ?? "(host)";
+        if (flow) ctx.effect(() => w.setFlow(flow, unit), "world.flow");
         for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block), `world.block(${block.name})`);
         for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`);
         ctx.effect(() => {
@@ -8653,7 +8807,15 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           };
         }, "world.controls");
         w.mergeVars(def.vars);
-        if (def.scene) w.mount(def.scene({ state: "play", params: {}, data: ctx.data }));
+        const scene = def.scene;
+        if (scene) {
+          const mountScene = () => {
+            const s = w.flowScene;
+            w.mount(scene({ state: s.state, params: s.params, data: ctx.data }));
+          };
+          mountScene();
+          if (flow) w.onFlowEnter(mountScene);
+        }
         const ui = def.ui;
         if (ui) {
           const logger = ctx.logger("world");

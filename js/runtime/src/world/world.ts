@@ -1,6 +1,6 @@
 /**
- * WorldService（ctx.world）：实体数据、挂载与对比、固定步调度、事件与规则、指令、触发检测。
- * 见 004 第 15.5 至 15.9 节。表现（15.10）在 view.ts，由这里的 update 驱动。
+ * WorldService（ctx.world）：实体数据、挂载与对比、固定步调度、事件与规则、指令、触发检测、流程。
+ * 见 004 第 15.5 至 15.9 节、16.2 节。表现（15.10）在 view.ts，由这里的 update 驱动。
  *
  * - 持久数据只放 state 的 'world' 条目，每次进入 fixed-update / update 都重新 get，不跨帧缓存引用。
  * - 内存表（规则、事件队列、上一步变换、指令）丢了可以重建。
@@ -20,6 +20,8 @@ import type { Collider } from './collide'
 import { WorldView } from './view'
 import { BUILTIN_BLOCKS } from './blocks'
 import { BUILTIN_PREFABS } from './prefabs'
+import { initialFlow } from './flow'
+import type { FlowData, FlowDef } from './flow'
 
 declare module 'cordis' {
   interface Context {
@@ -66,6 +68,8 @@ export interface WorldData {
   mounts: Record<string, MountData>
   /** 正在重叠的实体对，键为 '小id:大id' */
   contacts: Record<string, true>
+  /** 流程状态（16.2）；没有设置过 flow 时不存在 */
+  flow?: FlowData
 }
 
 export type SpawnProps = Record<string, any> & { at?: number[]; rot?: number[]; scale?: number | number[]; name?: string; tags?: string[] }
@@ -108,6 +112,21 @@ interface HandlerEntry {
 interface MountInfo {
   unit: string
   token: object
+  /** 挂载时调用方的 fiber：同一 fiber 重复挂载不再注册回收 */
+  fiber: unknown
+}
+
+interface FlowOwner {
+  unit: string
+  token: object
+  def: FlowDef
+}
+
+interface GotoRequest {
+  name: string
+  params: Record<string, any> | undefined
+  /** 不论叠加与恢复，一律按“进入”处理 */
+  force?: boolean
 }
 
 function initData(): WorldData {
@@ -155,6 +174,12 @@ export class WorldService extends Service {
   private _stages = new Map<string, StageSpec>()
   /** 实体 id → 积木属性被挂载对比改过的次数（表现据此重做 enter；内存表，丢了只会多重建一次） */
   private _revs = new Map<number, number>()
+  /** 当前流程定义及其所属单元 */
+  private _flowOwner: FlowOwner | null = null
+  /** 待应用的流程切换 */
+  private _goto: GotoRequest | null = null
+  /** 进入流程状态后调用的钩子（defineGame 用它重建场景） */
+  private _enterHooks: (() => void)[] = []
 
   constructor(ctx: Context) {
     super(ctx, 'world')
@@ -232,6 +257,122 @@ export class WorldService extends Service {
     }
   }
 
+  // ---------------------------------------------------------------- 流程（16.2）
+
+  /** 当前流程状态（只读快照）；没有 flow 时为 play */
+  get flow(): { state: string; params: Record<string, any>; base: string } {
+    const f = this.data.flow ?? initialFlow()
+    return { state: f.state, params: f.params, base: f.base }
+  }
+
+  /** scene 求值用的状态名与参数 */
+  get flowScene(): { state: string; params: Record<string, any> } {
+    if (!this._flowOwner) return { state: 'play', params: {} }
+    const f = this.data.flow ?? initialFlow(this._flowOwner.def.start)
+    return { state: f.base, params: clone(f.baseParams) }
+  }
+
+  /** 设置流程定义（defineGame 的 flow），返回撤销函数。一个 World 同时只能有一个 flow */
+  setFlow(def: FlowDef, unit: string): () => void {
+    const owner = this._flowOwner
+    if (owner && owner.unit !== unit) throw new Error(`world.setFlow：流程已由单元 "${owner.unit}" 定义，一个 World 只能有一个 flow`)
+    const token = {}
+    this._flowOwner = { unit, token, def }
+    const data = this.data
+    if (!data.flow) data.flow = initialFlow(def.start)
+    else if (!(data.flow.state in def.states) || !(data.flow.base in def.states)) {
+      this._root.logger('world').warn('流程状态 %s 已不在 flow 里，进入 %s', data.flow.state, def.start)
+      data.flow = initialFlow(def.start)
+      this._goto = { name: def.start, params: undefined, force: true }
+    }
+    return () => {
+      if (this._flowOwner?.token === token) this._flowOwner = null
+    }
+  }
+
+  /** 请求切换流程状态：步内调用时在本步末尾应用，否则在下一步开始时应用；一步里多次调用以最后一次为准 */
+  goto(name: string, params?: Record<string, any>) {
+    const owner = this._flowOwner
+    if (!owner) throw new Error('w.goto：游戏没有定义 flow')
+    if (!(name in owner.def.states)) throw new Error(`w.goto：没有状态 "${name}"，可用 ${Object.keys(owner.def.states).join('、')}`)
+    if (params !== undefined && !isPlainObject(params)) throw new Error('w.goto 的参数必须是普通对象')
+    this._goto = { name, params: params === undefined ? undefined : clone(params) }
+  }
+
+  /** 注册“进入流程状态后”的钩子（随调用单元回收） */
+  onFlowEnter(fn: () => void): () => void {
+    return this.ctx.effect(() => {
+      this._enterHooks.push(fn)
+      return () => {
+        const i = this._enterHooks.indexOf(fn)
+        if (i >= 0) this._enterHooks.splice(i, 1)
+      }
+    }, 'world.onFlowEnter')
+  }
+
+  /** 当前是否处于叠加状态（模拟暂停） */
+  private _overlay() {
+    const owner = this._flowOwner
+    const f = this.data.flow
+    return !!owner && !!f && !!owner.def.states[f.state]?.pause
+  }
+
+  /** 自定义事件触发的流程切换 */
+  private _flowEvent(name: string, payload: any) {
+    const owner = this._flowOwner
+    if (!owner) return
+    const f = this.data.flow
+    const target = f && owner.def.states[f.state]?.on?.[name]
+    if (target) this._goto = { name: target, params: isPlainObject(payload) ? clone(payload) : undefined }
+  }
+
+  private _applyGoto() {
+    const req = this._goto
+    if (!req) return
+    this._goto = null
+    const owner = this._flowOwner
+    if (!owner) return
+    const def = owner.def
+    const target = def.states[req.name]
+    if (!target) return
+    const data = this.data
+    const cur = data.flow ?? (data.flow = initialFlow(def.start))
+    if (!req.force) {
+      if (target.pause) {
+        cur.state = req.name
+        cur.params = req.params ?? {}
+        return
+      }
+      if (def.states[cur.state]?.pause && req.name === cur.base && req.params === undefined) {
+        cur.state = cur.base
+        cur.params = clone(cur.baseParams)
+        return
+      }
+    }
+    const params = req.params ?? {}
+    this._enterCleanup(data, owner.unit)
+    data.flow = { state: req.name, params, base: req.name, baseParams: clone(params) }
+    for (const hook of [...this._enterHooks]) this._guard(`进入流程状态 ${req.name} 时重建场景`, undefined, hook)
+    if (target.enter) this._guard(`flow 状态 ${req.name} 的 enter`, undefined, () => target.enter!(this))
+  }
+
+  /** 进入流程状态前：销毁 w.spawn 的实体与游戏挂载的实体，清空该挂载的 key 记录和接触表 */
+  private _enterCleanup(data: WorldData, mountId: string) {
+    for (const key of Object.keys(data.entities)) {
+      const e = data.entities[key]
+      if (e && e.mount === null) this._remove(data, e, false)
+    }
+    const mount = data.mounts[mountId]
+    if (mount) {
+      for (const rec of Object.values(mount.keys)) {
+        const e = !rec.dead && data.entities[rec.id]
+        if (e) this._remove(data, e, false)
+      }
+      data.mounts[mountId] = { keys: {} }
+    }
+    data.contacts = {}
+  }
+
   /** 合并 vars：没有的键补初值，已有的保留 */
   mergeVars(vars: Record<string, any> | undefined) {
     if (!vars) return
@@ -259,10 +400,13 @@ export class WorldService extends Service {
     this._rules.set(id, result.rules)
     if (result.stage) this._stages.set(id, result.stage)
     else this._stages.delete(id)
-    const token = {}
-    this._attached.set(id, { unit, token })
     this._detached.delete(id)
     this._mountedThisRun.add(id)
+    const fiber = (this.ctx as any).fiber
+    // 同一单元实例重复挂载（流程切换）：沿用已注册的回收
+    if (current && current.fiber === fiber) return
+    const token = {}
+    this._attached.set(id, { unit, token, fiber })
     this.ctx.effect(() => () => {
       if (this._attached.get(id)?.token !== token) return
       this._attached.delete(id)
@@ -562,6 +706,7 @@ export class WorldService extends Service {
     for (const h of [...this._handlers]) {
       if (h.event === event.name) this._guard(`w.on("${event.name}")`, undefined, () => h.fn(this, ...event.args))
     }
+    this._flowEvent(event.name, event.args[0])
   }
 
   // ---------------------------------------------------------------- 每一步（15.8）
@@ -571,6 +716,8 @@ export class WorldService extends Service {
     this._stepping = true
     try {
       this._sweep()
+      // 步外请求的流程切换在步开始时应用
+      this._applyGoto()
       const data = this.data
       // 1. 采样指令
       this._prevDown = this._down
@@ -581,6 +728,13 @@ export class WorldService extends Service {
       for (const action of Object.keys(this._controls.actions)) {
         const keys = this._controls.actions[action]
         this._down[action] = (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
+      }
+      // 叠加状态：只处理事件与延迟销毁，tick 不走；插值的上一步等于当前
+      if (this._overlay()) {
+        this.prev.clear()
+        this._drain(data)
+        this._applyGoto()
+        return
       }
       // 2. 上一步变换
       this.prev.clear()
@@ -610,6 +764,7 @@ export class WorldService extends Service {
       this._drain(data)
       // 8.
       data.tick++
+      this._applyGoto()
     } finally {
       this._stepping = false
     }

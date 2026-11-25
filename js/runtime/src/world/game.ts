@@ -8,6 +8,9 @@ import type { UIService } from '../ui'
 import type { PotChild, Prefab } from './node'
 import { isPrefab } from './node'
 import type { BlockDef } from './registry'
+import { checkFlow } from './flow'
+import type { FlowDef } from './flow'
+import { unitOf } from '../units'
 import { createUIRenderer } from './ui-eval'
 import type { Controls, World } from './world'
 
@@ -25,8 +28,8 @@ export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   vars?: V
   /** 键位到指令的映射，不写用默认映射 */
   controls?: Controls
-  /** 流程（M2） */
-  flow?: unknown
+  /** 流程：状态、事件到状态的映射、叠加状态（16.2） */
+  flow?: FlowDef
   /** 游戏自写的、只在运行时才按名字用到的积木 */
   blocks?: BlockDef<any, any>[]
   /** 游戏自写的、只在运行时才按名字用到的预制件（w.spawn('名字')） */
@@ -50,10 +53,12 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
   if (def.prefabs !== undefined && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
     throw new Error('defineGame：prefabs 必须是 definePrefab 结果的数组')
   }
-  if (def.flow !== undefined) throw new Error('defineGame：flow 在 M1 还不支持')
+  const flow = def.flow === undefined ? undefined : checkFlow(def.flow)
   return {
     apply(ctx: Context) {
       const w = ctx.world
+      const unit = unitOf(ctx) ?? '(host)'
+      if (flow) ctx.effect(() => w.setFlow(flow, unit), 'world.flow')
       for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block), `world.block(${block.name})`)
       for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`)
       ctx.effect(() => {
@@ -65,7 +70,15 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
         }
       }, 'world.controls')
       w.mergeVars(def.vars)
-      if (def.scene) w.mount(def.scene({ state: 'play', params: {}, data: ctx.data }))
+      const scene = def.scene
+      if (scene) {
+        const mountScene = () => {
+          const s = w.flowScene
+          w.mount(scene({ state: s.state, params: s.params, data: ctx.data }))
+        }
+        mountScene()
+        if (flow) w.onFlowEnter(mountScene)
+      }
       const ui = def.ui
       if (ui) {
         const logger = ctx.logger('world')
