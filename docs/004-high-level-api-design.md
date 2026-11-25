@@ -1331,3 +1331,4 @@ M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，
   - 布局：`column`（含 `panel`、`scroll`）里带 `wrap` 的 `text` 即使父容器不是 `align="stretch"`，也按父容器的内容宽度量（父容器宽度确定时），否则嵌套 `panel` 里的长文字不换行。16.4 里“`wrap` 需要确定的宽度”仍成立，只是来源多了这一种。
   - 模板位于 Skill 目录下：新模板是 `skills/pot-game-dev/templates/game/`（`game.tsx`、`data/coins.json`、`tests/smoke.json`、`AGENTS.md`，`tsconfig.json` 的 `include` 加 `.pot/*.d.ts`），原低层模板改名为 `skills/pot-game-dev/templates/game-lowlevel/`。16.11、16.12 里的 `templates/game-lowlevel/` 指的就是它。
   - hello-tsx 的暂停键用一个游戏积木 `pauseKey`（`w.cmd().pressed('pause')` 时 `w.goto('paused')`）挂在玩家上，`controls` 把动作 `pause` 映射到 Esc；暂停、结算等界面用一个函数组件 `Menu`。`devserver.test.js` 里改写 hello-tsx 源码的用例随之调整替换串。
+  - 后续待办（不在 M2 内做）：界面结构变化后焦点不复位。quiz-tsx 答完一题换下一题时，焦点停在原来的按钮位置，按 Tab 移到下一个选项，而不是落到新题的第一个选项上。要定的行为：流程状态切换、或焦点所在节点的 key 路径消失时，焦点清空还是移到第一个可聚焦节点；是否提供 `autoFocus` 属性让界面声明首个焦点。实机验证时发现，记录于 2026-11-25。
