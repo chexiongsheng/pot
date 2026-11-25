@@ -2,7 +2,7 @@
 
 状态：草案，M1 待实施。方向已定：可序列化的实体数据内核，加 TSX 作为唯一的编写前端。第 14 节是远期的待决事项，M1 用到的部分已在第 15 节给出临时决定
 上级文档：`001-game-runner-design.md` 第 7 节（Game API 设计原则）、`002-hot-reload-design.md`
-修订：第 3 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节）
+修订：第 4 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节），第 4 版加入套件（6.12）：积木与预制件分系统、套件、游戏三层，系统级只留与玩法和风格无关的部分
 
 ## 0. 摘要
 
@@ -79,7 +79,7 @@ TSX 为什么能同时取代两者：
 
 | 需要的性质 | 第 1 版靠什么 | TSX 靠什么 |
 |---|---|---|
-| 简单游戏省 token | JSON 场景 | 标签与 JSON 体量相当（hello 约 0.6 KB），且不需要另一个文件装规则 |
+| 简单游戏省 token | JSON 场景 | 标签与 JSON 体量相当（hello-tsx 约 0.9 KB），且不需要另一个文件装规则 |
 | 校验与提示 | JSON Schema | tsc：属性名拼错、类型不对直接报在行号上，编辑器有补全 |
 | 逻辑不长成新语言 | 字符串动作加按名字注册的 TS 函数 | 规则的 `do` 就是 TS 函数，没有字符串动作 |
 | 程序化生成内容 | 另一套 TS 辅助函数 | `map`、条件表达式、自定义组件 |
@@ -100,22 +100,25 @@ TSX 为什么能同时取代两者：
 hello 用高层重写后只有一个单元 `src/plugins/game.tsx` 和原来的数据文件：
 
 ```tsx
-import { defineGame } from '@pot/core'
+import { defineGame, definePrefab } from '@pot/core'
+
+const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube', color: '#4fc3f7' }, moveTopdown: true, trigger: { radius: 0 } })
+const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5, color: '#ffd54f' }, trigger: { radius: 0.8 }, spin: true })
 
 export default defineGame({
   vars: { score: 0 },
   scene: (s) => <>
     <stage background="#1e2230" sun={{ rot: [50, -30, 0], intensity: 1.1 }} camera={{ at: [0, 12, -10], look: [0, 0, 0] }} />
-    <ground scale={2} shape={{ color: '#3a4a3a' }} />
-    <player at={[0, 0.5, 0]} shape={{ kind: 'cube', color: '#4fc3f7' }} moveTopdown={{ speed: 5 }} />
-    {s.data.load('coins.json').coins.map((at, i) => <coin key={i} at={at} />)}
-    <rule on="touch" a="player" b="coin" do={(w, p, c) => { w.destroy(c); w.vars.score++ }} />
+    <entity name="ground" scale={2} shape={{ kind: 'plane', color: '#3a4a3a' }} />
+    <Player at={[0, 0.5, 0]} />
+    {s.data.load('coins.json').coins.map((at, i) => <Coin key={i} at={at} />)}
+    <rule on="touch" a={Player} b={Coin} do={(w, p, c) => { w.destroy(c); w.vars.score++ }} />
   </>,
   ui: (w) => <text at="top-left" size={28}>得分 {w.vars.score}</text>,
 })
 ```
 
-`manifest.json` 写 `"plugins": ["game"]`。输入采样、位置更新、状态镜像、碰撞判断、已拾取列表、热重载保留状态都由内核和积木承担。`s.data` 就是现有的 `ctx.data`，它会记下这个单元读过 `coins.json`，数据文件一改，场景就重新求值。
+`manifest.json` 写 `"plugins": ["game"]`。玩家和金币是 hello 自己的预制件，用系统积木（`shape`、`trigger`、`spin`）和 `moveTopdown` 拼成；系统级不提供 `player`、`coin` 这类带玩法和外观口味的预制件（6.12）。输入采样、位置更新、状态镜像、碰撞判断、已拾取列表、热重载保留状态都由内核和积木承担。`s.data` 就是现有的 `ctx.data`，它会记下这个单元读过 `coins.json`，数据文件一改，场景就重新求值。
 
 `defineGame` 返回的是一个普通单元（default 导出带 `apply`，现有 `resolvePlugin` 已接受这种形式），所以单元模型不用改，游戏可以同时有别的普通单元：`"plugins": ["game", "weather"]`。
 
@@ -126,6 +129,7 @@ export default defineGame({
 | `vars` | 全局变量及初值 | 对象 |
 | `controls` | 键位到指令的映射（6.6） | 对象 |
 | `flow` | 流程状态及切换（5.6） | 对象 |
+| `kits` | 引入的套件（6.12），按 import 得到的套件对象列出 | 数组 |
 | `blocks`、`prefabs` | 游戏自写的、只在运行时才用到的积木和预制件，用于按名字登记 | 数组 |
 | `scene` | 世界里有什么 | 返回标签树的函数 |
 | `ui` | 屏幕上画什么 | 返回标签树的函数 |
@@ -134,12 +138,12 @@ export default defineGame({
 
 | 写法 | 含义 | 谁实现 |
 |---|---|---|
-| 小写标签 `<player>`、`<coin>`、`<stage>` | 按名字登记的预制件或内置节点 | 官方或游戏，积木可以是 TS、C#、wasm |
-| 大写标签 `<Coin>`、`<Level>` | 游戏自己的预制件（`definePrefab` 的返回值）或普通函数组件 | 游戏的 TS |
+| 小写标签 `<entity>`、`<enemy>`、`<stage>` | 按名字登记的预制件（系统、已引入的套件或游戏自己登记的）或内置节点 | 系统、套件或游戏，积木可以是 TS、C#、wasm |
+| 大写标签 `<Coin>`、`<Level>` | 预制件句柄（`definePrefab` 的返回值，游戏自己的或从套件 import 的）或普通函数组件 | 游戏或套件的 TS |
 | 片段 `<>...</>` | 只分组，不产生实体 | 无 |
 | `<rule>` | 一条规则（5.6） | 内核 |
 
-实体标签的属性分两类。保留属性有六个：`key`、`at`、`rot`、`scale`、`name`、`tags`。其余属性名都是积木名，值是对该积木属性的覆盖。`<player moveTopdown={{ speed: 5 }}>` 的意思是：用 `player` 预制件，把其中 `moveTopdown` 积木的 `speed` 改成 5；预制件里没有这个积木时就加上它。`<entity>` 是不带任何积木的空预制件。
+实体标签的属性分两类。保留属性有六个：`key`、`at`、`rot`、`scale`、`name`、`tags`。其余属性名都是积木名，值是对该积木属性的覆盖。`<Player moveTopdown={{ speed: 8 }}>` 的意思是：用 `player` 预制件，把其中 `moveTopdown` 积木的 `speed` 改成 8；预制件里没有这个积木时就加上它。`<entity>` 是不带任何积木的空预制件，系统级只提供这一个预制件，一次性的物体直接写 `<entity shape={{ kind: 'plane' }} />`。
 
 积木名用驼峰，不用点号和连字符：`<a.b>` 在 JSX 里是成员访问，带连字符的属性名拼错时 tsc 不报错。
 
@@ -157,7 +161,7 @@ export const Coin = definePrefab('coin', {
 export const BigCoin = definePrefab('bigCoin', { is: Coin, shape: { scale: 1 }, trigger: { radius: 1.4 } })
 ```
 
-`definePrefab` 一定要给名字。运行中生成实体时内核记录的是“预制件名加可序列化的属性”，热重载和读档靠它重建：`w.spawn(Bullet, { at, projectile: { speed: 20 } })` 与 `w.spawn('bullet', {...})` 等价。`w.spawn` 只接受预制件，不接受任意函数组件。游戏的预制件与官方同名时游戏的优先。
+`definePrefab` 一定要给名字。运行中生成实体时内核记录的是“预制件名加可序列化的属性”，热重载和读档靠它重建：`w.spawn(Bullet, { at, projectile: { speed: 20 } })` 与 `w.spawn('bullet', {...})` 等价。`w.spawn` 只接受预制件，不接受任意函数组件。同名时游戏的优先于套件的，套件的优先于系统的；两个套件之间同名报错（6.12）。
 
 普通函数组件用来组织和批量生成，它必须是纯函数：
 
@@ -205,7 +209,7 @@ const Row = ({ z, n }: { z: number; n: number }) =>
 
 ### 5.5 五条规矩
 
-1. 属性是初值，不是受控值。写 `<player at={[0, 0.5, 0]}>` 不会每帧把玩家拉回原点。
+1. 属性是初值，不是受控值。写 `<Player at={[0, 0.5, 0]}>` 不会每帧把玩家拉回原点。
 2. 世界不走“每帧渲染再对比”。逐帧逻辑写在积木的 `step` 里，`scene` 不读运行状态。
 3. 没有 `useState`、`useEffect` 之类的 hooks。场景函数和组件必须是纯函数，状态只放 World 的 `vars` 和积木状态里，界面的本地状态放 `ui.local`。这是 pot “持久数据只放 `state`”在 TSX 里的对应规定，也是热重载和联机能成立的前提。
 4. 能换成 C# 实现的只有按名字登记的东西，也就是用 `defineBlock` 定义的积木。大写的函数组件永远是 TS。
@@ -249,7 +253,7 @@ export default defineGame({
 
 ### 5.7 类型
 
-- 官方预制件、积木、界面标签的 `JSX.IntrinsicElements` 随 `@pot/core` 提供，由 `jsx-runtime.ts` 导出 `namespace JSX`。实体标签的属性类型是“六个保留属性，加每个已知积木名对应的可选属性覆盖”。
+- 系统积木、`entity`、`stage`、`rule`、界面标签的 `JSX.IntrinsicElements` 随 `@pot/core` 提供，由 `jsx-runtime.ts` 导出 `namespace JSX`。实体标签的属性类型是“六个保留属性，加每个已知积木名对应的可选属性覆盖”。套件和游戏的预制件推荐用大写句柄，类型直接来自 import，不依赖类型生成；套件积木的属性覆盖类型由套件以声明合并补进 `@pot/core`，引入即生效。
 - 游戏自写的积木要出现在属性名里，`vars` 要出现在 `w.vars` 的类型里。JSX 元素的类型无法从 `defineGame` 的参数反推，所以这两样由 `pot check` 和 `pot dev` 在 Node 宿主上加载游戏后生成到 `.pot/types.d.ts`，以声明合并的方式补进 `@pot/core`。`vars` 的类型是否这样给列为待决。
 - 世界标签与界面标签共用一个 `JSX.IntrinsicElements`，tsc 分不出“把 `<button>` 写进了 `scene`”。这类错误由求值时的运行期校验和 `pot check` 报出。
 - 开发模式用 `jsxDEV`，每个节点带源文件和行号。内核的报错和 `pot query world` 的结果可以指到 `game.tsx:行号`。
@@ -302,10 +306,14 @@ package "游戏包" {
   [src/blocks、src/prefabs\n自写积木与预制件] as Own
   [普通单元 src/plugins/*.ts] as Units
 }
+package "套件（随 Runner 分发的源码，按需引入）" {
+  [玩法套件：topdown、fps ...] as Kits
+  [风格套件：写实、体素 ...] as Styles
+}
 package "高层（@pot/core 的 world 部分）" {
   [TSX 前端：jsx-runtime、树求值、key 对比] as Front
   [World 内核：实体、积木调度、事件、指令] as Kernel
-  [官方积木库（TS，可有 C# 或 wasm 实现）] as Blocks
+  [系统积木（TS，可有 C# 或 wasm 实现）] as Blocks
 }
 package "低层（现有 Game API）" {
   [scene / input / ui / audio / gfx / state / clock] as Low
@@ -316,6 +324,10 @@ package "宿主" {
   [Web 原生（远期）] as Web
 }
 Game --> Front
+Game ..> Kits : import
+Game ..> Styles : import
+Kits --> Kernel
+Styles --> Kernel
 Own --> Kernel
 Front --> Kernel
 Blocks --> Kernel
@@ -338,6 +350,7 @@ World 内核是 `@pot/core` 的一个核心服务 `ctx.world`。`defineGame` 生
 | 实体 | 一个 id 加若干积木的数据 | GameObject |
 | 积木（Block） | 复用的最小单位：一份带模式的数据，加上处理这份数据的模拟逻辑和表现逻辑 | Kaplay 组件、GDevelop 行为 |
 | 预制件 | 起了名字的积木组合和默认属性，可以继承。玩家、NPC、金币、墙都是预制件 | Prefab |
+| 套件（Kit） | 一组配套的积木、预制件、环境预设、键位和界面组件，代表一种玩法或一种风格，游戏按需引入（6.12） | 资源包、模板包 |
 | 场景 | `scene` 函数返回的标签树：实体布置、环境、规则 | 关卡 |
 | 规则 | 事件到 TS 函数的映射 | 事件处理 |
 | 变量（vars） | 全局数据，如得分、关卡号 | 全局状态 |
@@ -349,7 +362,7 @@ World 内核是 `@pot/core` 的一个核心服务 `ctx.world`。`defineGame` 生
 积木把属性（标签里配置的、运行中不变）、状态（运行中变化、要存档和同步）、模拟、表现四样东西放在一起：
 
 ```ts
-// 官方积木与游戏自写积木写法相同。游戏的放在 src/blocks/
+// 系统积木、套件积木与游戏自写积木写法相同。游戏的放在 src/blocks/
 import { defineBlock } from '@pot/core'
 
 export default defineBlock({
@@ -484,7 +497,7 @@ controls: {
 | 2 | 在 `src/blocks/` 里写一个积木，表现部分可以使用全部低层 API | 一个文件 |
 | 3 | 写普通单元，通过 `ctx.world` 读写实体、监听事件、挂子树；也可以完全不经过 World | 与现在相同 |
 
-另外提供“弹出”：`pot eject <积木名>` 把官方积木的 TS 源码复制到游戏的 `src/blocks/`，同名的游戏积木优先于官方积木，改完即热重载。
+另外提供“弹出”：`pot eject <积木名>` 把系统或套件积木的 TS 源码复制到游戏的 `src/blocks/`，同名的游戏积木优先，改完即热重载。`pot eject --kit <套件名>` 把整个套件复制进游戏，之后不再随 Runner 更新。
 
 普通单元里可以这样使用 World：
 
@@ -516,6 +529,51 @@ export function apply(ctx: Context) {
 - `pot test`：在 Node 宿主上加载游戏，喂一段录制的指令跑若干步，出现任何报错即失败，可选对比 World 哈希。AI 不开 Runner 就能验证逻辑没坏。
 - 类型声明由工具生成（`.pot/types.d.ts`），不手写。
 - 游戏模板里放一份简短的 `AGENTS.md`，写明五条规矩和查询命令，指向 Skill。
+
+### 6.12 套件
+
+积木和预制件分三层：
+
+| 层 | 内容 | 怎么用 | 例子 |
+|---|---|---|---|
+| 系统 | 与玩法、风格都无关的机制 | 不用声明，直接可用 | 积木 `shape`、`spin`、`trigger`、`lifetime`、`light`；预制件只有 `entity` |
+| 套件 | 一种玩法或一种风格配套的积木、预制件、`stage` 预设、默认键位、界面组件、数据与贴图 | import 后列进 `defineGame({ kits })` | 玩法套件 `topdown`、`fps`；风格套件“写实”（从 saltline 整理）、“体素”（Minecraft 式） |
+| 游戏 | 只有这个游戏用的 | 写在 `src/blocks`、`src/prefabs`，或直接写在 `game.tsx` 里 | hello 的 `player`、`coin` |
+
+进入系统级的条件：至少两个套件都要用，且语义上不带玩法或外观的口味。满足条件的从套件里提上来，套件改为直接用系统的。名字带玩法含义的（`player`、`enemy`、`coin`）、缺省值带外观倾向的（颜色、尺寸）都不进系统。
+
+玩法和风格分开做套件。“3D 写实 FPS”是两个维度：写实管材质、天空、后处理和 `stage` 预设，FPS 管移动、相机、射击、生命值。拆开后能组合出“写实 + FPS”“体素 + FPS”“写实 + 俯视角”。玩法套件里的外观只给中性缺省，由风格套件或游戏覆盖；风格套件不登记玩法积木。
+
+引入用 import，不在 `manifest.json` 里声明。依赖写在代码里看得见，预制件句柄和预设的类型直接来自 TS，不用等类型生成：
+
+```tsx
+import { defineGame } from '@pot/core'
+import fps, { Enemy } from '@pot/kit/fps'
+import realistic from '@pot/kit/realistic'
+
+export default defineGame({
+  kits: [realistic, fps],
+  scene: () => <>
+    <stage {...realistic.dusk} />
+    <Enemy key="e1" at={[0, 0, 10]} />
+  </>,
+})
+```
+
+规则：
+
+- 套件的入口默认导出 `defineKit({ name, about, blocks, prefabs, controls, requires })` 的结果，另外可以具名导出预制件句柄、函数组件、`stage` 预设（普通对象）和界面组件。
+- 登记顺序：系统在栈底，`kits` 按列出顺序登记在其上，游戏的 `blocks`、`prefabs` 和树里直接引用的句柄在最上。同名时上层覆盖下层，套件可以有意覆盖系统积木（如风格套件换掉 `shape` 的材质）。
+- 两个套件之间同名直接报错，报出两个套件的名字，不按引入顺序静默覆盖；游戏自己也登记了这个名字时不报错，视为游戏明确做了选择。
+- 只 import 了句柄、没把套件列进 `kits`：句柄引用的预制件照常自动登记（15.4），但它用到的套件积木没有登记，求值报“未知的积木 X，它属于套件 fps，请加到 kits”。
+- `requires` 列出依赖的其他套件，引入时先登记依赖；同一个套件被直接和间接引入多次只登记一次。
+- 套件的 `controls` 是默认键位，游戏的 `controls` 按动作名逐项覆盖。
+- 分发：套件是随 Runner 分发的 TS 源码（仓库里的 `kits/<名字>/`），加载器把 `@pot/kit/<名字>` 解析到这里，按 `src/lib` 那样的共享代码对待：改套件源码会热重载所有用到它的单元。`pot build` 把用到的套件源码一起打进 bundle，发布出去的游戏不依赖 Runner 带的套件版本。游戏的 import 白名单从“相对路径和 `@pot/core`”放宽为再加 `@pot/kit/*`。
+- 弹出：`pot eject --kit <名字>` 把整个套件复制进游戏改成相对路径引用，之后与 Runner 的版本脱钩（6.9）。
+- 类型：套件积木的属性覆盖类型由套件以声明合并补进实体标签的属性类型，只有 import 了该套件的游戏能看到。
+- 工具：`pot blocks` 标出每个积木和预制件来自系统、哪个套件或游戏；没引入的套件里的积木也能搜到，并给出引入写法。`pot check` 报套件冲突。
+
+时间安排：套件机制在 M3 随 saltline 迁移实现，`fps` 与写实套件在那时成形，接口按真实需要再定。M1 只把系统级瘦身：预制件只留 `entity`；`moveTopdown`、`cameraFollow` 暂留系统，标为将迁入 `topdown` 套件，迁移时 hello-tsx 改为引入 `topdown`。
 
 ## 7. TS、C#、wasm 多实现
 
@@ -637,21 +695,23 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 
 ## 11. 首批积木与预制件（建议）
 
-按“先让 hello 和一个 2D 小游戏、一个界面游戏能用高层写出来”来定，之后随真实游戏补充。
+按“先让 hello 和一个 2D 小游戏、一个界面游戏能用高层写出来”来定，之后随真实游戏补充。按 6.12 分层：
 
-| 类别 | 名字 |
-|---|---|
-| 基础积木 | `transform`、`shape`、`sprite`、`light`、`sound`、`lifetime`、`spin` |
-| 碰撞积木 | `body`（静态或运动学）、`trigger` |
-| 移动积木 | `moveTopdown`、`movePlatformer`、`moveFps`、`movePath`（沿路径） |
-| 玩法积木 | `health`、`damage`、`pickup`、`spawner`、`projectile`、`timer` |
-| 行为积木 | `aiChase`、`aiPatrol`、`aiFlee` |
-| 相机积木 | `cameraFollow`、`cameraFps`、`cameraFixed` |
-| 预制件标签 | `entity`、`player`、`npc`、`enemy`、`coin`、`wall`、`ground`、`zone`、`bullet` |
-| 内置节点 | `stage`（环境与相机）、`rule` |
-| 界面标签 | `text`、`button`、`bar`、`image`、`row`、`column`、`panel`、`scroll`、`input` |
+| 层 | 类别 | 名字 |
+|---|---|---|
+| 系统 | 基础积木 | `transform`、`shape`、`sprite`、`light`、`sound`、`lifetime`、`spin` |
+| 系统 | 碰撞积木 | `body`（静态或运动学）、`trigger` |
+| 系统 | 通用玩法积木 | `health`、`damage`、`spawner`、`projectile`、`timer`（两个以上套件用到时才提上来，之前放在首个用到的套件里） |
+| 系统 | 预制件 | `entity` |
+| 系统 | 内置节点 | `stage`（环境与相机）、`rule` |
+| 系统 | 界面标签 | `text`、`button`、`bar`、`image`、`row`、`column`、`panel`、`scroll`、`input` |
+| 套件 `topdown` | 积木与预制件 | `moveTopdown`、`cameraFollow`、`pickup`；`player`、`npc`、`zone` |
+| 套件 `platformer` | 积木与预制件 | `movePlatformer`、`cameraFixed`；`player`、`enemy` |
+| 套件 `fps` | 积木与预制件 | `moveFps`、`cameraFps`、`aiChase`、`aiPatrol`、`aiFlee`；`player`、`enemy`、`bullet` |
+| 套件 写实、体素 | 风格 | `stage` 预设、材质与后处理参数、`wall`、`ground` 等外观预制件 |
+| 示例 | hello | `player`、`coin`，写在游戏里 |
 
-规则函数里常用的 World 方法：`w.destroy`、`w.spawn`、`w.emit`、`w.goto`、`w.count`、`w.query`、`w.rand`、`w.vars`、`w.play`（音效）、`w.after`（延时）。
+`movePath`（沿路径）先放进用到它的套件。规则函数里常用的 World 方法：`w.destroy`、`w.spawn`、`w.emit`、`w.goto`、`w.count`、`w.query`、`w.rand`、`w.vars`、`w.play`（音效）、`w.after`（延时）。
 
 ## 12. 里程碑
 
@@ -659,7 +719,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 |---|---|---|
 | M1 内核最小版加 TSX 接入 | jsx 运行时与两遍转译（5.8）；`defineGame`、树求值与 key 对比；World 服务、带模式的积木、固定步调度、帧末变换批量同步、事件与规则、指令层；约 10 个积木；最简的 `ui` 求值（文本） | 用 5.1 的写法重写 hello，对比字节数和 AI 生成所用的 token；热重载后吃掉的金币不回来；存档行为不变 |
 | M2 界面与工具 | 界面标签与布局、流程、`ui.local`；补界面的低层缺口；`pot blocks`、`pot check` 的求值校验、类型生成、`pot query world`、覆盖层、`pot test`；Skill 更新 | AI 只凭 Skill 和 `pot blocks` 写出一个新的小游戏和一个界面为主的小游戏 |
-| M3 混用验证 | 模拟侧碰撞、`moveFps`、AI 积木；把 saltline 的玩家和敌人换成积木，渲染单元保留 | 行为与现版本一致，代码量明显下降 |
+| M3 混用验证与套件 | 模拟侧碰撞、`moveFps`、AI 积木；套件机制（6.12：`defineKit`、`kits`、`@pot/kit/*` 解析与打包、冲突报错）；从 saltline 整理出 `fps` 与写实两个套件，把它的玩家和敌人换成积木，渲染单元保留；`moveTopdown`、`cameraFollow` 迁入 `topdown` 套件 | 行为与现版本一致，代码量明显下降；hello-tsx 改为引入 `topdown` 后行为不变 |
 | M4 C# 积木 | 原生实现注册、列共享与跨语言开销实测、`pot block verify`；移植碰撞和一个移动积木；评估 wasm 物理库 | 同一录像两种实现结果一致，给出性能对比 |
 | M5 联机 | `ctx.net`、房间服务、本地回环驱动与录像回放、权威同步、帧同步、回合制，按此顺序 | 每种驱动各有一个示例游戏和 Node 上的自动化用例 |
 | M6 Web 原生宿主（远期） | `Engine` 子集的 Web 实现、可移植契约的屏蔽层 | hello 的高层版本在不含 Unity 的网页里运行 |
@@ -689,10 +749,10 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 1. 界面运行时：M1 用自己写的极小求值器（6.8）；做界面重的游戏时再评估是否改用 Preact 加仿 DOM。
 2. 类型给法：`vars` 和游戏自写积木的类型由工具生成到 `.pot/types.d.ts`，还是让游戏手写声明合并（推荐生成）。
 3. 存储模型：对象式、列式、列式加游标（推荐第三种）。
-4. 官方积木的 TS 源码放在哪：打进 Runner 的 `core.cjs`（游戏包最小，改积木要重建 Runner），还是作为随 Runner 分发、可被游戏同名覆盖的源码模块（可热重载，可弹出；推荐）。
+4. 系统积木与套件的 TS 源码放在哪：已定方向（6.12）。系统积木打进 Runner 的 `core.cjs`；套件作为随 Runner 分发、可热重载、可弹出的源码模块，发布时打进游戏的 bundle。待定的是套件目录在 Runner 包里的位置和版本号规则，M3 实施时定。
 5. 刚体动力学：只在表现侧用宿主物理（非确定），还是在模拟侧接入 wasm 物理库（倾向后者，取决于 WebAssembly 可用性的实测）。
 6. 实体层级：实体标签是否允许子节点和父子变换，还是保持平的、只用片段和函数组件分组。
-7. 自写积木与预制件的登记方式：在 `defineGame` 里显式列出，还是约定 `src/blocks/`、`src/prefabs/` 目录自动加载。
+7. 登记方式：套件已定为 import 加 `defineGame({ kits })`，两个套件同名报错（6.12）。游戏自写的积木与预制件仍待定：在 `defineGame` 里显式列出，还是约定 `src/blocks/`、`src/prefabs/` 目录自动加载。
 8. 命名：积木在代码里叫 Block 是否合适；服务名 `ctx.world`、入口 `defineGame` / `defineBlock` / `definePrefab` 是否沿用。
 9. 2D 的坐标约定：2D 场景里 `at` 用两个数（x、y）并由内核映射到三维，还是始终写三个数。
 
@@ -707,7 +767,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | 存储模型（6.5） | 对象式：每个实体一个普通对象。积木代码只通过 `me`、`e` 访问数据，不直接摸存储结构 | 换列式加游标时积木代码不改 |
 | 界面运行时（6.8） | 自己写极小求值器，M1 只支持 `<text>` | M2 加布局与其余标签 |
 | 登记方式（待决 7） | 游戏自写的积木和预制件在 `defineGame({ blocks, prefabs })` 里显式列出；用大写标签直接引用的预制件自动登记 | 再评估目录约定 |
-| 官方积木放哪（待决 4） | `js/runtime/src/world/blocks/`、`world/prefabs.ts`，打进 core | 再评估可覆盖的源码模块 |
+| 系统积木放哪（待决 4） | `js/runtime/src/world/blocks/`、`world/prefabs.ts`，打进 core。系统预制件只有 `entity`；`moveTopdown`、`cameraFollow` 暂留系统 | M3 做套件机制（6.12），这两个积木迁入 `topdown` 套件 |
 | 类型（待决 2） | 官方标签有准确类型；实体标签另加索引签名 `[block: string]: any`，游戏自写积木名不报错；`w.vars` 类型为 `Record<string, any>` | M2 生成 `.pot/types.d.ts` 后去掉索引签名 |
 | 实体层级（待决 6） | 平的，实体标签带子节点即报错 | 再议 |
 | 2D 坐标（待决 9） | 一律三个数 | 再议 |
@@ -734,7 +794,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | `js/runtime/src/world/view.ts` | 表现：`view.enter/update/exit`、`stage`、帧末批量变换 |
 | `js/runtime/src/world/ui-eval.ts` | 界面求值器 |
 | `js/runtime/src/world/game.ts` | `defineGame` |
-| `js/runtime/src/world/blocks/index.ts`、`world/prefabs.ts` | 官方积木与预制件（15.11） |
+| `js/runtime/src/world/blocks/index.ts`、`world/prefabs.ts` | 系统积木与预制件（15.11） |
 | `js/test/jsx.test.js`、`world-tree.test.js`、`world-diff.test.js`、`world-sim.test.js`、`world-view.test.js`、`world-hmr.test.js`、`world-builtin.test.js` | 见 15.12 |
 | `games/hello-tsx/`：`manifest.json`、`tsconfig.json`、`src/plugins/game.tsx`、`data/coins.json` | 5.1 的写法；`coins.json` 复制自 hello |
 
@@ -974,11 +1034,11 @@ function defineBlock<P, S>(def: BlockDef<P, S>): BlockDef<P, S>
 function definePrefab(name: string, def: { is?: Prefab | string; tags?: string[]; [block: string]: any }): Prefab
 ```
 
-`definePrefab` 的返回值是一个可调用的函数 `(props) => PotNode`，函数上带 `prefab`（名字）、`def`（定义）和一个标记，`tree.ts` 靠标记识别。做成函数而不是普通对象 `{ name, def }`，是因为 TSX 的大写标签 `<Coin />` 要求标签类型可调用，否则过不了类型检查；`tree.ts` 不会调用它，只读 `prefab` 与 `def`。名字必须是小写开头的驼峰标识符（与小写标签同名，`<coin>` 与 `<Coin>` 指同一个预制件）。`is` 可以写预制件句柄，也可以写已登记的预制件名。登记时游戏的同名积木、预制件覆盖官方的，撤销登记（热重载卸载游戏单元）后露出官方的；同 `order` 的积木按名字第一次登记的先后执行，重新登记不改变先后。
+`definePrefab` 的返回值是一个可调用的函数 `(props) => PotNode`，函数上带 `prefab`（名字）、`def`（定义）和一个标记，`tree.ts` 靠标记识别。做成函数而不是普通对象 `{ name, def }`，是因为 TSX 的大写标签 `<Coin />` 要求标签类型可调用，否则过不了类型检查；`tree.ts` 不会调用它，只读 `prefab` 与 `def`。名字必须是小写开头的驼峰标识符（与小写标签同名，`<coin>` 与 `<Coin>` 指同一个预制件）。`is` 可以写预制件句柄，也可以写已登记的预制件名。登记时游戏的同名积木、预制件覆盖系统的，撤销登记（热重载卸载游戏单元）后露出系统的；同 `order` 的积木按名字第一次登记的先后执行，重新登记不改变先后。
 
-M1 的官方积木：`shape`（`kind` 为 cube、sphere、plane、cylinder 等 `scene.spawn` 支持的形状，`color`，`scale`）、`spin`（`speed`，度每秒，绕 y 轴）、`moveTopdown`（`speed`，读 `move` 轴，写 `pos` 的 x、z）、`trigger`（15.9）、`lifetime`（`seconds`，到时销毁）、`projectile`（`speed`、`dir`）、`cameraFollow`（`offset`，在 `view.update` 里移动相机）、`light`（点光源）。
+M1 的系统积木：`shape`（`kind` 为 cube、sphere、plane、cylinder 等 `scene.spawn` 支持的形状，`color`，`scale`）、`spin`（`speed`，度每秒，绕 y 轴）、`moveTopdown`（`speed`，读 `move` 轴，写 `pos` 的 x、z）、`trigger`（15.9）、`lifetime`（`seconds`，到时销毁）、`projectile`（`speed`、`dir`）、`cameraFollow`（`offset`，在 `view.update` 里移动相机）、`light`（点光源）。其中 `moveTopdown`、`cameraFollow` 带玩法口味，按 6.12 本属 `topdown` 套件，M1 没有套件机制所以暂留系统，M3 迁出。
 
-M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`moveTopdown`、`trigger` 半径 0，标签 `player`；半径 0 即按玩家中心点判定，与 hello 的“玩家中心进入金币 0.8 米内即拾取”一致）、`coin`（`shape` 黄色球、`trigger`、`spin`，标签 `coin`）、`ground`（`shape` 平面）、`wall`（`shape` 方块）、`bullet`（`shape` 小球、`projectile`、`lifetime`、`trigger`）。
+M1 的系统预制件只有 `entity`（空）。第 3 版曾内置 `player`、`coin`、`ground`、`wall`、`bullet`，它们带玩法和外观口味（`player` 绑定俯视角移动，`coin` 是黄色转圈小球），不符合 6.12 的准入条件，已移除：hello-tsx 自己定义 `player` 和 `coin`，地面写成 `<entity shape={{ kind: 'plane' }} />`。
 
 界面求值器：`ui(w, ctx.ui)` 每帧在表现之后调用，返回的树里只认片段、数组、函数组件和 `<text>`。`<text>` 的子节点里的字符串和数字拼成一行；`at` 是九宫格位置名（`top-left`、`top`、`top-right`、`left`、`center`、`right`、`bottom-left`、`bottom`、`bottom-right`）或像素坐标 `[x, y]`，九宫格离屏幕边缘 16 像素；`size`、`color`、`bold` 原样传给 `ctx.ui.text`，对齐方式由 `at` 推出。其他标签报错，同一个标签只报一次。实现为 `createUIRenderer(onError)`（`world/ui-eval.ts`），返回 `(tree, ui) => void`，求值器自带去重表；`defineGame` 每个单元建一个。`<text>` 缺省 `at` 为 `top-left`；九宫格的锚点是去掉 16 像素边距后的矩形的角、边中点和中心，水平对齐依次为 left、center、right，垂直为 top、middle、bottom；`[x, y]` 为左上对齐。数组里的 `null`、`false` 忽略；直接写在树里（不在 `<text>` 里）的字符串报错。
 
@@ -986,13 +1046,13 @@ M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`m
 
 实施时补充的约定（M1）：
 
-- 文件：官方积木都在 `world/blocks/index.ts`（导出 `BUILTIN_BLOCKS`），官方预制件在 `world/prefabs.ts`（`BUILTIN_PREFABS`），`defineGame` 在 `world/game.ts`，标签类型在 `world/types.ts`。`WorldService` 构造时把它们登记在栈底，不随任何单元撤销。
-- 官方积木的缺省值：`shape { kind: 'cube', color: '#ffffff', scale: 1 }`，`enter` 时 `scene.spawn`，名字取实体的 `name`，没有就取预制件名；`spin { speed: 90 }`，写 `rot[1]` 并对 360 取模；`moveTopdown { speed: 5 }`，读 `w.cmd(e).axis('move')`；`trigger { radius: 0.5, box: null }`；`lifetime { seconds: 2 }`，状态 `age` 按 `w.dt` 累加，到时 `w.destroy(e)`；`projectile { speed: 10, dir: [0, 0, 1] }`，`dir` 为世界方向、内部归一化；`cameraFollow { offset: [0, 12, -10] }`，在 `view.update` 里按插值后的位置摆相机并 `lookAt` 实体，晚于 `stage` 的相机，所以两者都写时跟随生效；`light { color: '#ffffff', intensity: 1, range: 10 }`，`enter` 时建点光源。
-- 官方预制件：`bullet` 为白色 0.2 小球、`projectile { speed: 20 }`、`lifetime { seconds: 2 }`、`trigger { radius: 0.1 }`，标签 `bullet`；`ground` 是 Unity 的 plane（10 米见方）。其余见上文。
+- 文件：系统积木都在 `world/blocks/index.ts`（导出 `BUILTIN_BLOCKS`），系统预制件在 `world/prefabs.ts`（`BUILTIN_PREFABS`，只有 `entity`），`defineGame` 在 `world/game.ts`，标签类型在 `world/types.ts`。`WorldService` 构造时把它们登记在栈底，不随任何单元撤销。
+- 系统积木的缺省值：`shape { kind: 'cube', color: '#ffffff', scale: 1 }`，`enter` 时 `scene.spawn`，名字取实体的 `name`，没有就取预制件名；`spin { speed: 90 }`，写 `rot[1]` 并对 360 取模；`moveTopdown { speed: 5 }`，读 `w.cmd(e).axis('move')`；`trigger { radius: 0.5, box: null }`；`lifetime { seconds: 2 }`，状态 `age` 按 `w.dt` 累加，到时 `w.destroy(e)`；`projectile { speed: 10, dir: [0, 0, 1] }`，`dir` 为世界方向、内部归一化；`cameraFollow { offset: [0, 12, -10] }`，在 `view.update` 里按插值后的位置摆相机并 `lookAt` 实体，晚于 `stage` 的相机，所以两者都写时跟随生效；`light { color: '#ffffff', intensity: 1, range: 10 }`，`enter` 时建点光源。
+- 预制件的触发半径：`trigger { radius: 0 }` 表示按实体中心点判定。hello-tsx 的玩家用它，与 hello 的“玩家中心进入金币 0.8 米内即拾取”一致。
 - `defineGame` 也设置 `controls`（`w.setControls`），撤销时只在当前映射仍是自己设的情况下恢复默认（热重载新旧单元先后不定）。`w.controls` 读当前映射。
 - `flow` 在 M1 传了就报错（“M1 还不支持”），不静默忽略；`scene`、`ui` 不是函数、`prefabs` 不是 `definePrefab` 的结果时同样在 `defineGame` 调用处报错。
 - `ui` 函数本身抛错时，报一次（同一信息连续出现不重复），该帧不画；求值器内部的报错走 `createUIRenderer` 的去重。日志都用 `world` 记录器。
-- `JSX.IntrinsicElements` 给出六个官方预制件、`stage`、`rule`、`text` 的属性类型；实体标签的属性是六个保留属性加八个官方积木的可选覆盖（对象、`true`、`false`、`null`），另有索引签名放行游戏自写的积木（M2 由 `.pot/types.d.ts` 收紧）。`rule` 的 `do` 统一为 `(w, ...args: any[]) => unknown`：按 `on` 区分签名的联合类型会让箭头函数参数失去上下文类型，在 `noImplicitAny` 下报错。
+- `JSX.IntrinsicElements` 给出 `entity`、`stage`、`rule`、`text` 的属性类型；实体标签的属性是六个保留属性加八个系统积木的可选覆盖（对象、`true`、`false`、`null`），另有索引签名放行游戏自写的积木和按名字登记的预制件标签（M2 由 `.pot/types.d.ts` 收紧）。游戏的预制件推荐写成大写句柄，类型直接来自 `definePrefab`。`rule` 的 `do` 统一为 `(w, ...args: any[]) => unknown`：按 `on` 区分签名的联合类型会让箭头函数参数失去上下文类型，在 `noImplicitAny` 下报错。
 
 ### 15.12 测试与验收
 
@@ -1006,7 +1066,7 @@ M1 的官方预制件：`entity`（空）、`player`（`shape` 青色方块、`m
 | `world-sim.test.js` | `moveTopdown` 在注入轴后移动；`touch` 规则销毁金币并加分；`death`、`every`、自定义事件；第 7 步的轮数上限；同一输入跑两次 World 完全相同 |
 | `world-view.test.js` | 实体出现与消失时场景对象创建与回收；一帧只调用一次 `setTransforms`；`stage` 不变时不重复调用 |
 | `world-hmr.test.js` | 改 `game.tsx` 后：吃掉的金币不回来、玩家位置保留、`vars` 保留、新规则生效；改金币坐标后金币移动；从 manifest 去掉单元后实体全部销毁；`exportJSON` 后冷重启 World 一致；另：改预制件属性后表现重建。manifest 变化在 Runner 里由 C# 冷重启，测试以“导出状态、换 manifest 冷启动”模拟 |
-| `world-builtin.test.js` | 官方积木与预制件已登记；`shape`、`spin`、`projectile`、`lifetime`、`cameraFollow`、`light` 的行为；游戏同名覆盖与撤销后露出官方的；`controls` 生效与撤销 |
+| `world-builtin.test.js` | 系统积木与 `entity` 已登记，第 3 版的 `player`、`coin` 等不再内置；`shape`、`spin`、`projectile`、`lifetime`、`cameraFollow`、`light` 的行为；游戏同名覆盖与撤销后露出系统的；`controls` 生效与撤销 |
 
 另在 `devserver.test.js` 里加一例：`buildRelease` 一个含 `.tsx` 的游戏，产物能在 Node 宿主上跑起来。实施时直接构建 `games/hello-tsx`：检查 bundle 里 `@pot/core/jsx-runtime` 保持为外部引用，不带加载器启动后朝第一个金币走，界面从“得分 0”变为“得分 1”。
 
@@ -1020,5 +1080,5 @@ M1 验收：`npm test` 全部通过（含原有用例）；`pot check games/hell
 2. `registry.ts`、`tree.ts`，`world-tree.test.js` 通过。这两步不依赖运行时，可以先在 Node 上完成。
 3. `WorldService` 的数据、挂载与对比、调度、事件、规则、指令、触发检测，`world-diff`、`world-sim` 通过。
 4. 表现与界面求值器，`world-view` 通过。
-5. 官方积木与预制件、`defineGame`，`world-hmr` 通过。
+5. 系统积木与预制件、`defineGame`，`world-hmr` 通过。
 6. `games/hello-tsx`、各 `tsconfig`、发布构建，跑全量 `npm test` 与 `pot check`。
