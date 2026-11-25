@@ -1697,3 +1697,169 @@ M3 收尾（遗留问题）：
 - `load` 在每次 apply 时执行，包括热重载；它应可重复执行，靠服务的缓存去重。热重载时 `step` 不让帧，`load` 里也不要自己等帧（`ctx.loading.frame`、计时器）：回收与重新 apply 之间插进固定步，会把已脱离挂载的实体清掉（15.6）。
 - 预热把 `view.enter` 从第一帧提前到本单元 apply 内，`enter` 依赖的资源须由本单元的 `load` 或此前加载的单元准备好。
 - 测试 `world-loading.test.js`：`load` 的时机（积木、`vars` 已登记，场景尚未挂载）；区间映射与 `within`；预热后对象已建、第一帧不重复；按帧驱动的宿主会让帧并回报“生成场景”；热重载时 `load` 重跑、不让帧、实体保留。
+
+## 18. M4 实施规格
+
+M4 的目标见第 12 节：积木可以有 C# 实现，与 TS 实现互换，写标签的人不需要知道；实测跨语言开销；`pot block verify` 检验两种实现一致；移植碰撞和一个移动积木；评估 wasm 物理库。本节是实施规格，与第 7 节、6.5 不一致的以这里为准。
+
+### 18.1 临时决定
+
+- 存储仍是对象式（6.5 待决第 3 项暂不动）。原因：M1 到 M3 的哈希、热重载、存档、覆盖层、录制回放都建立在“World 是 state 里的普通对象”上，改成列式是一次大重构；而 Puerts 3.0.3 的 `ArrayBuffer` 在 JS 与 C# 之间是拷贝（`SetTransforms` 即如此），列式也做不到零拷贝。所以原生积木走第 7 节的退化方案：每步把用到这个积木的实体的字段打包进一个 `Float64Array`，跨一次语言边界，再解包写回。是否改列式等 18.2 的实测与 18.9 的性能对比出来再定。
+- 原生实现只替换 `step`。`init`、`view` 始终是 TS。原生 `step` 不能调用 `w.emit`、`w.rand`、`w.spawn`、`w.destroy`、`w.query`；需要这些的积木按第 7 节“部分移植”拆开，或者留在 TS。
+- 数值一律用 `double`，与 JS 的 number 相同；超越函数用 18.7 的 `PotMath`（照搬 V8 的实现），使两种实现可以逐位一致，`pot block verify` 先比哈希。
+- 只有官方积木（系统与仓库 `kits/` 里的套件）有 C# 实现，放在 `com.pot.core`。游戏自带 C# 积木（第 7 节“分发”的第二种）接口相同，但 M4 不做 `extraPackages` 的打通。
+- 本机只能测 Windows。iOS（不允许 JIT）与 Android 上的实测、wasm 在这些平台的可用性列为需要用户确认的项目。
+
+### 18.2 跨语言开销实测
+
+在 Runner 里实测，结果记进 18.14：
+
+- 空调用：JS 调一个无参、无返回的 C# 静态方法，每次耗时。
+- 带标量参数与返回值的调用。
+- `ArrayBuffer` 往返：JS 传 1 KB、64 KB、1 MB 的 `Float64Array`，C# 原样返回，每次耗时与每 KB 耗时。
+- 变换写入：1000 个场景对象逐个设置位置，对比一次 `setTransforms`。
+- 纯 JS 基准：同样数据量的循环运算。
+
+测量代码：`packages/com.pot.core/Runtime/PotBench.cs`（只含 `[Preserve]` 的测试方法）与 `js/scripts/bench-interop.js`（用 `pot eval` 在 Runner 里执行）。
+
+### 18.3 布局
+
+布局是积木的 TS 实现与 C# 实现之间的接口：一串按顺序排列的字段，每个字段有路径与类型，占若干个 double 槽。规范写法为 `<积木名>|<字段>:<类型>;<字段>:<类型>;...`，两边逐字比较，不一致就不用原生实现。
+
+类型：
+
+| 类型 | 槽数 | 说明 |
+|---|---|---|
+| `f` | 1 | 数 |
+| `b` | 1 | 布尔，0 或 1 |
+| `f<n>` | n | 定长数组，如 `f3` |
+| `f?` | 2 | 可为 null 的数：有无、值 |
+| `layers` | 1 | 碰撞层名数组或 null，按 World 的层号表换成位掩码；null 为全部层 |
+| `axis` | 2 | 值是指令轴名的字符串，传的是本步这个轴的 x、y（只读） |
+| `action` | 2 | 值是动作名的字符串，传的是本步的 down、pressed（只读） |
+| `?{...}` | 1 + 子字段 | 可为 null 的对象：先一个有无槽，再按子字段排；null 时子字段为 0 |
+
+推导：先 `props` 后 `state`，各按声明顺序。缺省值是数、布尔、数字数组、普通对象（展开为 `a.b` 路径）时自动推出类型；缺省值是 null、字符串、字符串数组，或者类型要用 `f?`、`axis` 这类时，积木在定义里给提示：
+
+```ts
+defineBlock({
+  name: 'moveFps',
+  props: MOVE_PROPS,
+  state: MOVE_STATE,
+  native: {
+    layers: 'layers',
+    ground: { '?': { y: 'f', maxX: 'f?' } },
+    bounds: { '?': { min: 'f2', max: 'f2' } },
+    fallY: 'f?',
+    actions: { move: 'axis', look: 'axis', jump: 'action', sprint: 'action', crouch: 'action' },
+  },
+  step(me, e, w) { ... },
+})
+```
+
+推不出类型、又没有提示的字段，整个积木就没有布局（`pot blocks --name` 说明原因），不能有原生实现。`pot blocks --name <积木>` 输出规范布局字符串，写 C# 实现时照抄。
+
+### 18.4 原生实现的注册与选择
+
+C# 侧：
+
+```csharp
+[PotBlock("moveTopdown", Kit = "topdown")]
+public sealed class MoveTopdownNative : IPotNativeBlock
+{
+    public const string Layout = "moveTopdown|speed:f";
+    public string LayoutString => Layout;
+    public bool UsesCollision => false;
+    public void Step(PotBatch b) { /* 对 b 里的全部实体执行一步 */ }
+}
+```
+
+- `PotNative`（`[Preserve]` 静态类）在首次调用时用反射收集带 `[PotBlock]` 的类型；`PotNative.Blocks()` 返回 JSON：`[{ name, kit, layout, collision }]`。`Kit` 为空表示系统积木。
+- JS 侧 `Host` 增加可选的 `nativeBlocks?(): string`、`nativeStep?(name, buf: ArrayBuffer): ArrayBuffer`、`nativeBodies?(buf: ArrayBuffer): void`。没有这些方法的宿主（Node、测试）就没有原生实现；测试宿主可以注入 JS 写的“假原生实现”，用来测打包、选择与 verify 的流程。
+- 选择：World 在积木登记表变化后重新计算。一个积木用原生实现，要同时满足：宿主有同名实现；登记表栈顶的来源与实现的 `Kit` 对应（`kit:<名字>`，系统为 `system`），游戏自己覆盖或 eject 了的不用；TS 有布局且与 C# 的布局字符串相同。宿主有同名实现但布局不同时，告警一次，给出两边的字符串，改用 TS。
+- `w.native`：`'auto'`（缺省）或 `'off'`；devtools 与 verify 用它切换。`pot query world` 列出当前使用原生实现的积木。
+
+### 18.5 每步的批量执行
+
+积木的 `step` 阶段，原生积木不再逐实体调用，而是：
+
+1. 收集本步开始时存活、带这个积木的实体（顺序与 TS 相同：`data.entities` 的遍历顺序）。
+2. 打包成 `Float64Array`：头部 `[数量, 每实体槽数, dt, tick]`，之后每个实体 `[id, pos×3, rot×3, 布局字段…]`。`axis`、`action` 按 `w.cmd(e)` 取值。
+3. 用到碰撞的实现，在调用前检查碰撞表的版本，变了就用 `nativeBodies` 把全部碰撞体按 id 升序发过去（静态关卡只在首步发一次）。
+4. 调 `nativeStep`，得到同样格式的缓冲区，把 `pos`、`rot` 与 `state` 里的字段写回实体；`props` 与 `axis`、`action` 不写回。
+5. 出错（C# 抛异常、返回长度不对）时告警一次，这个积木改用 TS，不中断模拟。
+
+缓冲区按积木复用，实体数不变时不分配。
+
+### 18.6 原生碰撞
+
+`collide.ts` 的 `BodyTable` 移植为 C# 的 `PotCollide`：`Move`、`Overlap`、`Raycast` 与 TS 逐行对应（候选按 id 升序、子步长 0.2、同样的 EPS 与分轴顺序），网格只是加速结构，可以自己实现。碰撞体缓冲区每个 `[id, 形状, 中心×3, 尺寸×3, 半径, 高, 层位, solid]`，与 TS 的 `BodyEntry` 对应。层名到位的映射由 JS 的碰撞表给出，最多 32 层。
+
+只有原生积木在 C# 里调用 `PotCollide`；TS 积木的 `w.move` 仍走 TS，避免逐实体跨语言。
+
+### 18.7 两个原生积木与 PotMath
+
+- `moveTopdown`（topdown 套件）：打通流程用，没有超越函数。
+- `moveFps`（fps 套件）：真正的移动积木，用到 `PotCollide.Move`、`Overlap`（起身检查）与 `sin`、`cos`、`exp`、`sqrt`、`hypot`。
+- `PotMath`：`Sin`、`Cos`、`Exp` 照搬 V8 `base/ieee754`（fdlibm），`Hypot` 照搬 V8 `Math.hypot` 的缩放与补偿求和；`Sqrt` 用硬件。参数很大（`|x| > 2^19·π/2`）时三角函数走 fdlibm 的大参数分支，同样照搬。原生积木里不用 `System.Math` 的超越函数。
+- C# 代码按 TS 的运算顺序逐句翻译（`a * b * c` 不改成 `a * (b * c)`），取余用 `%`（两边都是 IEEE fmod）。
+
+### 18.8 `pot block verify`
+
+```
+pot block verify <积木> [--test tests/x.json] [--steps 600] [--tolerance 1e-9]
+```
+
+只能在 Runner 里跑（Node 没有原生实现）。devtools 命令 `verify`：
+
+1. 当前不能处于叠加状态（模拟不走），否则报错。
+2. 记下 World 数据的快照、指令来源与 `w.native`。
+3. 两遍：先 `'off'` 后 `'auto'`。每遍把 World 数据换回快照的副本，设指令来源（有 `--test` 时用脚本的输入，`at` 相对于当前步；没有时零输入），连续执行 `steps` 步，逐步记下 World 哈希、这个积木的全部字段与实体变换，并累计这个积木 `step` 阶段的耗时。
+4. 恢复快照、指令来源与 `w.native`。
+5. 返回：`identical`（每步哈希都相同）、第一个不同的步与字段、各字段的最大偏差、`ok`（逐位一致，或最大偏差不超过容差）、两种实现在这个积木上的耗时。
+
+注意：两遍会把规则与 TS 积木各执行一次，有副作用的（例如在 `step` 里放音效）会重复。积木没有原生实现时报“积木 X 没有可用的原生实现”，并给出原因（宿主没有、来源不符、布局不同）。
+
+### 18.9 性能对比
+
+临时演示游戏：平地上铺一些带 `body` 的盒子，N 个带 `moveFps` 的实体（同一份输入）。N 取 1、100、1000，用 verify 的耗时与 `pot query info` 的每步耗时，对比 TS 与 C#。另在 saltline 上跑一次，记下玩家积木两种实现的耗时。结果写进 18.14，并据此回答 18.1 留下的“是否改列式”。
+
+### 18.10 wasm 评估
+
+- 在 Runner（Windows、Puerts V8）里检查 `WebAssembly` 是否可用；手写一个小模块，测 JS 调 wasm 的单次开销，以及 JS 的 `Float64Array` 直接指向 wasm 内存（零拷贝）是否可行。
+- 书面评估一个物理库（Rapier 的确定性版本）：体积、接口、跨平台确定性、接入方式（作为模拟侧的刚体，对应待决第 5 项）。M4 不接入。
+- iOS 上 V8 无 JIT 时 WebAssembly 是否可用，本机测不了，列为需要用户确认的项目。
+
+### 18.11 文件清单
+
+新增：`js/runtime/src/world/layout.ts`（布局推导、规范字符串、打包与解包）、`js/runtime/src/world/native.ts`（原生实现的选择与批量执行）、`js/devtools` 的 verify 命令、`packages/com.pot.core/Runtime/Native/`（`PotNative.cs`、`PotBatch.cs`、`PotBlockAttribute.cs`、`PotCollide.cs`、`PotMath.cs`、`Blocks/MoveTopdown.cs`、`Blocks/MoveFps.cs`）、`PotBench.cs`、`js/scripts/bench-interop.js`。
+
+修改：`registry.ts`（`native` 提示）、`world.ts`（步中调度、`w.native`）、`collide.ts`（版本号与导出缓冲区）、`host.ts`、`unity.ts`、`kits/topdown`、`kits/fps`（布局提示）、`headless.js`、`cli.js`、`mcp.js`、`js/test/helpers.js`（假原生实现）、Skill。
+
+### 18.12 测试
+
+| 文件 | 覆盖 |
+|---|---|
+| `world-layout.test.js` | 自动推导与提示；规范字符串；推不出时的原因；打包、解包往返；`axis`、`action`、`layers`、`?{}` |
+| `world-native.test.js` | 用 JS 假原生实现：选择规则（来源、覆盖、布局不同时告警并回退）；批量执行结果与 TS 逐位相同；出错回退；`w.native = 'off'`；碰撞体缓冲区只在版本变化时发送 |
+| `block-verify.test.js` | verify 的两遍、恢复快照、哈希相同时 `identical`、故意改坏假实现时给出第一个不同的步与字段 |
+
+C# 侧没有自动化测试，靠 Runner 里的 verify：`moveTopdown` 用 hello-tsx 的 `tests/*.json`，`moveFps` 用 saltline 的玩家输入。
+
+M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生积木的 verify 逐位一致（做不到时说明原因并给出最大偏差）；18.2 与 18.9 的测量表；wasm 评估结论。
+
+### 18.13 实施顺序
+
+1. 跨语言开销实测（18.2）。
+2. 布局（18.3）与 `pot blocks` 输出布局。
+3. 原生实现的选择与批量执行（18.4、18.5），先用 JS 假原生实现测通。
+4. C# 桥与 `moveTopdown` 的 C# 实现，Runner 实测 hello-tsx。
+5. `pot block verify`（18.8）。
+6. 原生碰撞、`PotMath` 与 `moveFps` 的 C# 实现（18.6、18.7），verify saltline。
+7. 性能对比（18.9）。
+8. wasm 评估（18.10）。
+9. Skill 与文档同步。
+
+### 18.14 实施时补充的约定
+
+按实施顺序记录，与上文不一致的以这里为准。
