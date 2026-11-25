@@ -29,6 +29,7 @@ export interface BuiltinBlockProps {
   lifetime?: Over<{ seconds: number }>
   projectile?: Over<{ speed: number; dir: Vec3 }>
   light?: Over<{ color: Color; intensity: number; range: number }>
+  body?: Over<{ shape: 'box' | 'sphere' | 'capsule'; size: Vec3; radius: number; height: number; center: Vec3; layer: string; solid: boolean }>
 }
 
 export interface EntityProps extends BuiltinBlockProps, GameBlockProps {

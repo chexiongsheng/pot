@@ -17,8 +17,8 @@ import { evaluate } from './tree'
 import type { EntitySpec, RuleSpec, StageSpec, TreeResult } from './tree'
 import { applyPatches, mergePatches, treeView } from './inspect'
 import type { VarsOf } from './types'
-import { overlappingPairs } from './collide'
-import type { Collider } from './collide'
+import { BodyTable, bodyCollider, bodyEntry, overlappingPairs } from './collide'
+import type { BodyEntry, Collider, Mover, MoveOptions, MoveResult, OverlapShape } from './collide'
 import { WorldView } from './view'
 import { BUILTIN_BLOCKS } from './blocks'
 import { BUILTIN_PREFABS } from './prefabs'
@@ -76,6 +76,20 @@ export interface WorldData {
 
 export type SpawnProps = Record<string, any> & { at?: number[]; rot?: number[]; scale?: number | number[]; name?: string; tags?: string[] }
 export type Handler = (w: WorldService, ...args: any[]) => any
+
+/** w.move 的选项：dt 缺省为 w.dt */
+export type WorldMoveOptions = MoveOptions
+/** w.raycast、w.overlap 的选项：layers 省略时为全部层；ignore 为要跳过的实体或 id */
+export interface QueryOptions {
+  layers?: string[]
+  ignore?: EntityData | number | null
+}
+export interface RayHit {
+  point: [number, number, number]
+  normal: [number, number, number]
+  dist: number
+  entity: EntityData
+}
 
 export interface Cmd {
   axis(name: string): { x: number; y: number }
@@ -208,6 +222,11 @@ export class WorldService extends Service {
   private _source: CommandSource | null = null
   /** 录制：每一步的指令 */
   private _recording: { start: number; steps: StepCommand[] } | null = null
+  /** 碰撞表（17.4）：不进 World 数据，按需刷新 */
+  private _bodies = new BodyTable()
+  /** 实体增删、挂载对比改动时加一，碰撞表据此在同一步内也刷新 */
+  private _bodyVer = 0
+  private _bodySync: { tick: number; ver: number; data: WorldData | null } = { tick: -1, ver: -1, data: null }
 
   constructor(ctx: Context) {
     super(ctx, 'world')
@@ -543,6 +562,7 @@ export class WorldService extends Service {
         continue
       }
       if (last === rec.last) continue
+      this._bodyVer++
       if (!same(old.at, spec.at)) e.pos = [...spec.at]
       if (!same(old.rot, spec.rot)) e.rot = [...spec.rot]
       if (!same(old.scale, spec.scale)) e.scale = [...spec.scale]
@@ -623,6 +643,7 @@ export class WorldService extends Service {
     if (spec.name !== undefined) e.name = spec.name
     for (const name of Object.keys(spec.blocks)) e.b[name] = this._blockData(name, spec.blocks[name])
     data.entities[id] = e
+    this._bodyVer++
     this._init(e, Object.keys(e.b))
     return e
   }
@@ -639,6 +660,7 @@ export class WorldService extends Service {
   /** 立即移除实体；gameplay 为真时把挂载记录标为 dead */
   private _remove(data: WorldData, e: EntityData, gameplay: boolean) {
     delete data.entities[e.id]
+    this._bodyVer++
     this.prev.delete(e.id)
     this._revs.delete(e.id)
     if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id)
@@ -722,6 +744,49 @@ export class WorldService extends Service {
   }
 
   // ---------------------------------------------------------------- 事件
+
+  // ---------------------------------------------------------------- 碰撞（17.4）
+
+  /** 碰撞表：每个固定步第一次查询时刷新，实体增删、挂载改动后也刷新 */
+  private _table() {
+    const data = this.data
+    const s = this._bodySync
+    if (s.tick !== data.tick || s.ver !== this._bodyVer || s.data !== data) {
+      s.tick = data.tick
+      s.ver = this._bodyVer
+      s.data = data
+      this._bodies.sync(Object.values(data.entities))
+    }
+    return this._bodies
+  }
+
+  private _bodyFilter(layers: string[] | undefined, skip: number | null, solidOnly: boolean) {
+    if (layers !== undefined && !Array.isArray(layers)) throw new Error('layers 必须是层名数组')
+    return (b: BodyEntry) => (!solidOnly || b.solid) && b.id !== skip && (!layers || layers.includes(b.layer)) && !this._pendingSet.has(b.id)
+  }
+
+  /** 运动学角色移动（saltline Collision.move 的通用版）：改 e.pos、mover.vel、mover.grounded */
+  move(e: EntityData, mover: Mover, options: WorldMoveOptions = {}): MoveResult {
+    if (!e || !Array.isArray(e.pos)) throw new Error('w.move 的第一个参数必须是实体')
+    if (!mover || !Array.isArray(mover.vel)) throw new Error('w.move 的 mover 必须是 { vel: [x, y, z], grounded }')
+    const opts = { ...options, dt: options.dt ?? this.dt }
+    return this._table().move(e.pos, mover, opts, this._bodyFilter(options.layers, e.id, true))
+  }
+
+  /** 射线：最近的碰撞体，或 null；起点在碰撞体内部时忽略它 */
+  raycast(from: number[], dir: number[], maxDist = Infinity, options: QueryOptions = {}): RayHit | null {
+    const skip = options.ignore == null ? null : typeof options.ignore === 'number' ? options.ignore : options.ignore.id
+    const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, false))
+    if (!hit) return null
+    return { point: hit.point, normal: hit.normal, dist: hit.dist, entity: this.data.entities[hit.id] }
+  }
+
+  /** 与给定形状重叠的实体，按 id 升序 */
+  overlap(shape: OverlapShape, at: number[], options: QueryOptions = {}): EntityData[] {
+    const skip = options.ignore == null ? null : typeof options.ignore === 'number' ? options.ignore : options.ignore.id
+    const ids = this._table().overlap(shape, at, this._bodyFilter(options.layers, skip, false))
+    return ids.map((id) => this.data.entities[id])
+  }
 
   on(event: string, filter: string | Handler, fn?: Handler): () => void {
     const entry: HandlerEntry = typeof filter === 'function' ? { event, fn: filter } : { event, filter, fn: fn! }
@@ -971,6 +1036,11 @@ export class WorldService extends Service {
       const e = data.entities[key]
       const t = e.b.trigger
       if (!t || this._pendingSet.has(e.id)) continue
+      const body = e.b.body ? bodyEntry(e) : null
+      if (body) {
+        colliders.push(bodyCollider(body))
+        continue
+      }
       const [sx, sy, sz] = e.scale.map(Math.abs)
       const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] as [number, number, number] : null
       colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box })

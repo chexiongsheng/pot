@@ -29,6 +29,7 @@ var pot = (() => {
     BUILTIN_BLOCKS: () => BUILTIN_BLOCKS,
     BUILTIN_PREFABS: () => BUILTIN_PREFABS,
     BUILTIN_UNIFORMS: () => BUILTIN_UNIFORMS,
+    BodyTable: () => BodyTable,
     CORE_SERVICES: () => CORE_SERVICES,
     CacheService: () => CacheService,
     Canvas: () => Canvas,
@@ -84,6 +85,7 @@ var pot = (() => {
     applyUniforms: () => applyUniforms,
     assertSerializable: () => assertSerializable,
     bindEntry: () => bindEntry,
+    bodyEntry: () => bodyEntry,
     buildOuterStack: () => buildOuterStack,
     c16: () => c16,
     c256: () => c256,
@@ -2630,8 +2632,8 @@ var pot = (() => {
     }
     const fn = /^(rgba?|hsla?)\(\s*(.*?)\s*\)$/.exec(text);
     if (fn) {
-      const [body, alphaText] = fn[2].includes("/") ? fn[2].split("/") : [fn[2], void 0];
-      const parts = body.includes(",") ? body.split(",") : body.trim().split(/\s+/);
+      const [body2, alphaText] = fn[2].includes("/") ? fn[2].split("/") : [fn[2], void 0];
+      const parts = body2.includes(",") ? body2.split(",") : body2.trim().split(/\s+/);
       let alpha = alphaText;
       if (alpha === void 0 && parts.length === 4) alpha = parts.pop();
       if (parts.length !== 3) throw new TypeError(`无法解析颜色 "${source}"：需要 3 个分量（另可带 alpha）`);
@@ -6407,30 +6409,30 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           continue;
         }
         let target;
-        let body;
+        let body2;
         let repeatable = false;
         if (m[1]) {
           target = `<${m[1]}>`;
           const chunk = three && !m[1].startsWith("pot/") ? threeInclude(m[1]) : void 0;
           if (chunk !== void 0) {
-            body = chunk;
+            body2 = chunk;
             repeatable = true;
           } else {
             const lib = LIBRARY[m[1]];
             if (lib === void 0) throw new Error(`${name}:${i + 1}: 未知的内置库 <${m[1]}>（可用：${Object.keys(LIBRARY).join("、")}${three ? "，以及 three 的 ShaderChunk" : ""}）`);
-            body = lib;
+            body2 = lib;
           }
         } else {
           target = normalize2(dirname(name.startsWith("<") || name.startsWith("(") ? "" : name) + m[2]);
           if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(" → ")}`);
-          body = read(target);
+          body2 = read(target);
         }
         if (!repeatable && once.has(target) && m[1]) {
           out.push("");
           continue;
         }
         once.add(target);
-        expand(target, body, depth + 1, [...stack, target]);
+        expand(target, body2, depth + 1, [...stack, target]);
         out.push(`#line ${i + 2} ${index}`);
       }
     };
@@ -7978,6 +7980,353 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     for (const [a, b] of found) out.push([sorted[a], sorted[b]]);
     return out;
   }
+  var num = (v, d) => typeof v === "number" && Number.isFinite(v) ? v : d;
+  function bodyEntry(e) {
+    const b = e.b.body;
+    if (!b) return null;
+    const s = e.scale;
+    const sx = Math.abs(s[0]), sy = Math.abs(s[1]), sz = Math.abs(s[2]);
+    const ctr = Array.isArray(b.center) ? b.center : [0, 0, 0];
+    const c = [e.pos[0] + num(ctr[0], 0) * s[0], e.pos[1] + num(ctr[1], 0) * s[1], e.pos[2] + num(ctr[2], 0) * s[2]];
+    const kind = b.shape === "sphere" || b.shape === "capsule" ? b.shape : "box";
+    let hx, hy, hz, r = 0, seg = 0;
+    if (kind === "box") {
+      const size = Array.isArray(b.size) ? b.size : [1, 1, 1];
+      hx = num(size[0], 1) * sx / 2;
+      hy = num(size[1], 1) * sy / 2;
+      hz = num(size[2], 1) * sz / 2;
+    } else if (kind === "sphere") {
+      r = num(b.radius, 0.5) * Math.max(sx, sy, sz);
+      hx = hy = hz = r;
+    } else {
+      r = num(b.radius, 0.5) * Math.max(sx, sz);
+      hy = Math.max(r, num(b.height, 2) * sy / 2);
+      seg = hy - r;
+      hx = hz = r;
+    }
+    return {
+      id: e.id,
+      kind,
+      layer: typeof b.layer === "string" ? b.layer : "default",
+      solid: b.solid !== false,
+      c,
+      min: [c[0] - hx, c[1] - hy, c[2] - hz],
+      max: [c[0] + hx, c[1] + hy, c[2] + hz],
+      r,
+      seg,
+      sig: bodySig(e)
+    };
+  }
+  function bodySig(e) {
+    const b = e.b.body;
+    return `${e.pos}|${e.scale}|${b.shape}|${b.size}|${b.radius}|${b.height}|${b.center}|${b.layer}|${b.solid}`;
+  }
+  function bodyCollider(entry) {
+    const [x, y, z] = entry.c;
+    if (entry.kind === "sphere") return { id: entry.id, x, y, z, r: entry.r, box: null };
+    return { id: entry.id, x, y, z, r: 0, box: [entry.max[0] - x, entry.max[1] - y, entry.max[2] - z] };
+  }
+  var EPS = 1e-3;
+  var MAX_STEP = 0.2;
+  var MARGIN = 1;
+  var BIG_CELLS = 64;
+  var BodyTable = class {
+    constructor() {
+      __publicField(this, "_entries", /* @__PURE__ */ new Map());
+      __publicField(this, "_cells", /* @__PURE__ */ new Map());
+      __publicField(this, "_big", /* @__PURE__ */ new Set());
+      __publicField(this, "_range", /* @__PURE__ */ new Map());
+    }
+    get size() {
+      return this._entries.size;
+    }
+    entry(id) {
+      return this._entries.get(id);
+    }
+    /** 按当前实体刷新：位置、缩放、body 属性没变的不动；不在 entities 里的移除 */
+    sync(entities) {
+      const seen = /* @__PURE__ */ new Set();
+      for (const e of entities) {
+        if (!e.b.body) continue;
+        seen.add(e.id);
+        const old = this._entries.get(e.id);
+        if (old && old.sig === bodySig(e)) continue;
+        if (old) this._unindex(e.id);
+        const entry = bodyEntry(e);
+        this._entries.set(e.id, entry);
+        this._index(entry);
+      }
+      for (const id of [...this._entries.keys()]) {
+        if (!seen.has(id)) {
+          this._unindex(id);
+          this._entries.delete(id);
+        }
+      }
+    }
+    _index(entry) {
+      const x0 = Math.floor(entry.min[0] / GRID_CELL), x1 = Math.floor(entry.max[0] / GRID_CELL);
+      const z0 = Math.floor(entry.min[2] / GRID_CELL), z1 = Math.floor(entry.max[2] / GRID_CELL);
+      const count = (x1 - x0 + 1) * (z1 - z0 + 1);
+      if (!Number.isFinite(count) || count > BIG_CELLS) {
+        this._big.add(entry.id);
+        return;
+      }
+      this._range.set(entry.id, [x0, x1, z0, z1]);
+      for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) {
+        const key = `${i},${k}`;
+        let cell = this._cells.get(key);
+        if (!cell) this._cells.set(key, cell = []);
+        cell.push(entry.id);
+      }
+    }
+    _unindex(id) {
+      if (this._big.delete(id)) return;
+      const range = this._range.get(id);
+      if (!range) return;
+      this._range.delete(id);
+      const [x0, x1, z0, z1] = range;
+      for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) {
+        const key = `${i},${k}`;
+        const cell = this._cells.get(key);
+        if (!cell) continue;
+        const at = cell.indexOf(id);
+        if (at >= 0) cell.splice(at, 1);
+        if (!cell.length) this._cells.delete(key);
+      }
+    }
+    /** XZ 区域内的候选，按 id 升序（只按格子筛，不做精确判定） */
+    candidates(minX, minZ, maxX, maxZ, filter) {
+      const x0 = Math.floor(minX / GRID_CELL), x1 = Math.floor(maxX / GRID_CELL);
+      const z0 = Math.floor(minZ / GRID_CELL), z1 = Math.floor(maxZ / GRID_CELL);
+      const count = (x1 - x0 + 1) * (z1 - z0 + 1);
+      let ids;
+      if (!Number.isFinite(count) || count >= this._cells.size) {
+        ids = this._entries.keys();
+      } else {
+        const set = new Set(this._big);
+        for (let i = x0; i <= x1; i++) for (let k = z0; k <= z1; k++) {
+          const cell = this._cells.get(`${i},${k}`);
+          if (cell) for (const id of cell) set.add(id);
+        }
+        ids = set;
+      }
+      const out = [];
+      for (const id of ids) {
+        const entry = this._entries.get(id);
+        if (!filter || filter(entry)) out.push(entry);
+      }
+      return out.sort((a, b) => a.id - b.id);
+    }
+    // ------------------------------------------------------------ move（照搬 saltline Collision）
+    /** 运动学角色移动：改 pos、mover.vel、mover.grounded。filter 由调用方给出（solid、层、跳过自己） */
+    move(pos, mover, options, filter) {
+      const r = options.radius ?? 0.3;
+      const h = options.height ?? 1.8;
+      const stepUp = options.stepUp ?? 0;
+      const dt = options.dt ?? 0;
+      const ground = options.ground ?? null;
+      const v = mover.vel;
+      const dist = Math.max(Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2])) * dt;
+      const n2 = Math.min(64, Math.max(1, Math.ceil(dist / MAX_STEP)));
+      const startGrounded = mover.grounded;
+      const result = { grounded: false, landed: false, hitWall: false, hitCeiling: false };
+      for (let i = 0; i < n2; i++) this._step(pos, mover, r, h, stepUp, dt / n2, ground, filter, result);
+      result.grounded = mover.grounded;
+      result.landed = mover.grounded && !startGrounded;
+      return result;
+    }
+    _step(p, mover, r, h, stepUp, dt, ground, filter, result) {
+      const v = mover.vel;
+      const wasGrounded = mover.grounded;
+      const reach = r + Math.max(Math.abs(v[0]), Math.abs(v[2])) * dt + MARGIN;
+      const boxes = this.candidates(p[0] - reach, p[2] - reach, p[0] + reach, p[2] + reach, filter);
+      const hit = (b, x, y, z) => x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2] && y + h > b.min[1] && y < b.max[1];
+      const blocked = (x, y, z) => {
+        for (const b of boxes) if (hit(b, x, y, z)) return true;
+        return false;
+      };
+      const floor = (x) => ground && (ground.maxX == null || x <= ground.maxX) ? ground.y : null;
+      for (const axis of [0, 2]) {
+        const d = v[axis] * dt;
+        if (!d) continue;
+        const next = [p[0], p[1], p[2]];
+        next[axis] += d;
+        for (const b of boxes) {
+          if (!hit(b, next[0], next[1], next[2])) continue;
+          const rise = b.max[1] - next[1];
+          if (wasGrounded && rise > 0 && rise <= stepUp && !blocked(next[0], b.max[1] + EPS, next[2])) {
+            next[1] = b.max[1] + EPS;
+            continue;
+          }
+          next[axis] = d > 0 ? b.min[axis] - r - EPS : b.max[axis] + r + EPS;
+          v[axis] = 0;
+          result.hitWall = true;
+        }
+        p[0] = next[0];
+        p[1] = next[1];
+        p[2] = next[2];
+      }
+      const dy = v[1] * dt;
+      let ny = p[1] + dy;
+      mover.grounded = false;
+      for (const b of boxes) {
+        if (!hit(b, p[0], ny, p[2])) continue;
+        if (dy <= 0 && b.max[1] <= p[1] + 0.06) {
+          ny = b.max[1];
+          v[1] = 0;
+          mover.grounded = true;
+        } else if (dy > 0 && b.min[1] >= p[1] + h - 0.06) {
+          ny = b.min[1] - h - EPS;
+          v[1] = 0;
+          result.hitCeiling = true;
+        }
+      }
+      const f = floor(p[0]);
+      if (f !== null && ny <= f && p[1] >= f - 0.3) {
+        ny = f;
+        if (v[1] < 0) v[1] = 0;
+        mover.grounded = true;
+      }
+      p[1] = ny;
+      if (!mover.grounded && wasGrounded && v[1] <= 0) {
+        const x = p[0], y = p[1], z = p[2], up = 0.02;
+        let best = null;
+        const g = floor(x);
+        if (g !== null && g <= y + up && g >= y - stepUp) best = g;
+        for (const b of boxes) {
+          const top = b.max[1];
+          if (top > y + up || top < y - stepUp) continue;
+          if (x + r > b.min[0] && x - r < b.max[0] && z + r > b.min[2] && z - r < b.max[2]) {
+            if (best === null || top > best) best = top;
+          }
+        }
+        if (best !== null) {
+          p[1] = best;
+          v[1] = 0;
+          mover.grounded = true;
+        }
+      }
+    }
+    // ------------------------------------------------------------ raycast
+    /** 最近的命中；起点在碰撞体内部时忽略它；距离相同取 id 小的 */
+    raycast(from, dir, maxDist, filter) {
+      const len = Math.hypot(dir[0], dir[1], dir[2]);
+      if (!len || !(maxDist >= 0)) return null;
+      const d = [dir[0] / len, dir[1] / len, dir[2] / len];
+      const o = [from[0], from[1], from[2]];
+      let list;
+      if (Number.isFinite(maxDist)) {
+        const ex = o[0] + d[0] * maxDist, ez = o[2] + d[2] * maxDist;
+        list = this.candidates(Math.min(o[0], ex), Math.min(o[2], ez), Math.max(o[0], ex), Math.max(o[2], ez), filter);
+      } else {
+        list = this.candidates(-Infinity, -Infinity, Infinity, Infinity, filter);
+      }
+      let best = null;
+      for (const b of list) {
+        const hit = b.kind === "box" ? rayBox(o, d, b.min, b.max) : b.kind === "sphere" ? raySphere(o, d, b.c, b.r) : rayCapsule(o, d, b);
+        if (!hit || hit.t > maxDist || best && hit.t >= best.dist) continue;
+        best = { id: b.id, dist: hit.t, point: [o[0] + d[0] * hit.t, o[1] + d[1] * hit.t, o[2] + d[2] * hit.t], normal: hit.n };
+      }
+      return best;
+    }
+    // ------------------------------------------------------------ overlap
+    /** 与给定形状重叠的碰撞体 id，升序 */
+    overlap(shape2, at, filter) {
+      const out = [];
+      if (shape2.kind === "sphere") {
+        const r = shape2.radius;
+        for (const b of this.candidates(at[0] - r, at[2] - r, at[0] + r, at[2] + r, filter)) {
+          if (sphereHits(at, r, b)) out.push(b.id);
+        }
+        return out;
+      }
+      const hx = shape2.size[0] / 2, hy = shape2.size[1] / 2, hz = shape2.size[2] / 2;
+      const min = [at[0] - hx, at[1] - hy, at[2] - hz], max = [at[0] + hx, at[1] + hy, at[2] + hz];
+      for (const b of this.candidates(min[0], min[2], max[0], max[2], filter)) {
+        const hits = b.kind === "sphere" ? dist2Box(b.c, min, max) < b.r * b.r : min[0] < b.max[0] && max[0] > b.min[0] && min[1] < b.max[1] && max[1] > b.min[1] && min[2] < b.max[2] && max[2] > b.min[2];
+        if (hits) out.push(b.id);
+      }
+      return out;
+    }
+  };
+  function dist2Box(p, min, max) {
+    let d2 = 0;
+    for (let i = 0; i < 3; i++) {
+      const q = clamp(p[i], min[i], max[i]) - p[i];
+      d2 += q * q;
+    }
+    return d2;
+  }
+  function dist2Segment(p, b) {
+    const y = clamp(p[1], b.c[1] - b.seg, b.c[1] + b.seg);
+    const dx = p[0] - b.c[0], dy = p[1] - y, dz = p[2] - b.c[2];
+    return dx * dx + dy * dy + dz * dz;
+  }
+  function sphereHits(at, r, b) {
+    if (b.kind === "box") return dist2Box(at, b.min, b.max) < r * r;
+    const rr = r + b.r;
+    if (b.kind === "sphere") {
+      const dx = at[0] - b.c[0], dy = at[1] - b.c[1], dz = at[2] - b.c[2];
+      return dx * dx + dy * dy + dz * dz < rr * rr;
+    }
+    return dist2Segment(at, b) < rr * rr;
+  }
+  function rayBox(o, d, min, max) {
+    let tmin = -Infinity, tmax = Infinity, axis = -1;
+    for (let i = 0; i < 3; i++) {
+      if (d[i] === 0) {
+        if (o[i] <= min[i] || o[i] >= max[i]) return null;
+        continue;
+      }
+      let t1 = (min[i] - o[i]) / d[i], t2 = (max[i] - o[i]) / d[i];
+      if (t1 > t2) [t1, t2] = [t2, t1];
+      if (t1 > tmin) {
+        tmin = t1;
+        axis = i;
+      }
+      if (t2 < tmax) tmax = t2;
+    }
+    if (axis < 0 || tmin < 0 || tmax < tmin) return null;
+    const n2 = [0, 0, 0];
+    n2[axis] = d[axis] > 0 ? -1 : 1;
+    return { t: tmin, n: n2 };
+  }
+  function raySphere(o, d, c, r) {
+    const mx = o[0] - c[0], my = o[1] - c[1], mz = o[2] - c[2];
+    const cc = mx * mx + my * my + mz * mz - r * r;
+    if (cc < 0) return null;
+    const b = mx * d[0] + my * d[1] + mz * d[2];
+    if (b > 0) return null;
+    const disc = b * b - cc;
+    if (disc < 0) return null;
+    const t = -b - Math.sqrt(disc);
+    if (t < 0) return null;
+    return { t, n: [(o[0] + d[0] * t - c[0]) / r, (o[1] + d[1] * t - c[1]) / r, (o[2] + d[2] * t - c[2]) / r] };
+  }
+  function rayCapsule(o, d, b) {
+    const r = b.r, c = b.c;
+    if (dist2Segment(o, b) < r * r) return null;
+    let best = null;
+    const a = d[0] * d[0] + d[2] * d[2];
+    if (a > 1e-12) {
+      const ox = o[0] - c[0], oz = o[2] - c[2];
+      const bb = ox * d[0] + oz * d[2];
+      const cc = ox * ox + oz * oz - r * r;
+      const disc = bb * bb - a * cc;
+      if (disc >= 0) {
+        const t = (-bb - Math.sqrt(disc)) / a;
+        const y = o[1] + d[1] * t;
+        if (t >= 0 && y >= c[1] - b.seg && y <= c[1] + b.seg) {
+          best = { t, n: [(o[0] + d[0] * t - c[0]) / r, 0, (o[2] + d[2] * t - c[2]) / r] };
+        }
+      }
+    }
+    for (const sy of [c[1] - b.seg, c[1] + b.seg]) {
+      const hit = raySphere(o, d, [c[0], sy, c[2]], r);
+      if (hit && (!best || hit.t < best.t)) best = hit;
+    }
+    return best;
+  }
 
   // runtime/src/world/view.ts
   var json = (v) => v === void 0 ? void 0 : JSON.stringify(v);
@@ -8171,6 +8520,21 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
+  // runtime/src/world/blocks/body.ts
+  var body = defineBlock({
+    name: "body",
+    about: "碰撞体（轴对齐，旋转不计）：shape 为 box（size 全长）、sphere（radius）或竖直 capsule（radius，height 为总高）；center 为相对实体的偏移；尺寸乘实体缩放；layer 层名；solid 为 false 时不挡 w.move，只参加射线、重叠与触发",
+    props: {
+      shape: "box",
+      size: [1, 1, 1],
+      radius: 0.5,
+      height: 2,
+      center: [0, 0, 0],
+      layer: "default",
+      solid: true
+    }
+  });
+
   // runtime/src/world/blocks/index.ts
   var shape = defineBlock({
     name: "shape",
@@ -8192,7 +8556,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   });
   var trigger = defineBlock({
     name: "trigger",
-    about: "触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch",
+    about: "触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch。实体也有 body 时改用 body 的形状与偏移",
     props: { radius: 0.5, box: null }
   });
   var lifetime = defineBlock({
@@ -8229,7 +8593,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
     }
   });
-  var BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light];
+  var BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light, body];
 
   // runtime/src/world/prefabs.ts
   var entity = definePrefab("entity", {});
@@ -8335,6 +8699,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_source", null);
       /** 录制：每一步的指令 */
       __publicField(this, "_recording", null);
+      /** 碰撞表（17.4）：不进 World 数据，按需刷新 */
+      __publicField(this, "_bodies", new BodyTable());
+      /** 实体增删、挂载对比改动时加一，碰撞表据此在同一步内也刷新 */
+      __publicField(this, "_bodyVer", 0);
+      __publicField(this, "_bodySync", { tick: -1, ver: -1, data: null });
       this._root = ctx;
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, "system");
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, "system");
@@ -8631,6 +9000,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           continue;
         }
         if (last === rec.last) continue;
+        this._bodyVer++;
         if (!same(old.at, spec.at)) e.pos = [...spec.at];
         if (!same(old.rot, spec.rot)) e.rot = [...spec.rot];
         if (!same(old.scale, spec.scale)) e.scale = [...spec.scale];
@@ -8713,6 +9083,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       if (spec.name !== void 0) e.name = spec.name;
       for (const name of Object.keys(spec.blocks)) e.b[name] = this._blockData(name, spec.blocks[name]);
       data.entities[id] = e;
+      this._bodyVer++;
       this._init(e, Object.keys(e.b));
       return e;
     }
@@ -8727,6 +9098,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     /** 立即移除实体；gameplay 为真时把挂载记录标为 dead */
     _remove(data, e, gameplay) {
       delete data.entities[e.id];
+      this._bodyVer++;
       this.prev.delete(e.id);
       this._revs.delete(e.id);
       if (this._pendingSet.delete(e.id)) this._pending = this._pending.filter((id) => id !== e.id);
@@ -8799,6 +9171,43 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       return this.query(filter).length;
     }
     // ---------------------------------------------------------------- 事件
+    // ---------------------------------------------------------------- 碰撞（17.4）
+    /** 碰撞表：每个固定步第一次查询时刷新，实体增删、挂载改动后也刷新 */
+    _table() {
+      const data = this.data;
+      const s = this._bodySync;
+      if (s.tick !== data.tick || s.ver !== this._bodyVer || s.data !== data) {
+        s.tick = data.tick;
+        s.ver = this._bodyVer;
+        s.data = data;
+        this._bodies.sync(Object.values(data.entities));
+      }
+      return this._bodies;
+    }
+    _bodyFilter(layers, skip, solidOnly) {
+      if (layers !== void 0 && !Array.isArray(layers)) throw new Error("layers 必须是层名数组");
+      return (b) => (!solidOnly || b.solid) && b.id !== skip && (!layers || layers.includes(b.layer)) && !this._pendingSet.has(b.id);
+    }
+    /** 运动学角色移动（saltline Collision.move 的通用版）：改 e.pos、mover.vel、mover.grounded */
+    move(e, mover, options = {}) {
+      if (!e || !Array.isArray(e.pos)) throw new Error("w.move 的第一个参数必须是实体");
+      if (!mover || !Array.isArray(mover.vel)) throw new Error("w.move 的 mover 必须是 { vel: [x, y, z], grounded }");
+      const opts = { ...options, dt: options.dt ?? this.dt };
+      return this._table().move(e.pos, mover, opts, this._bodyFilter(options.layers, e.id, true));
+    }
+    /** 射线：最近的碰撞体，或 null；起点在碰撞体内部时忽略它 */
+    raycast(from, dir, maxDist = Infinity, options = {}) {
+      const skip = options.ignore == null ? null : typeof options.ignore === "number" ? options.ignore : options.ignore.id;
+      const hit = this._table().raycast(from, dir, maxDist, this._bodyFilter(options.layers, skip, false));
+      if (!hit) return null;
+      return { point: hit.point, normal: hit.normal, dist: hit.dist, entity: this.data.entities[hit.id] };
+    }
+    /** 与给定形状重叠的实体，按 id 升序 */
+    overlap(shape2, at, options = {}) {
+      const skip = options.ignore == null ? null : typeof options.ignore === "number" ? options.ignore : options.ignore.id;
+      const ids = this._table().overlap(shape2, at, this._bodyFilter(options.layers, skip, false));
+      return ids.map((id) => this.data.entities[id]);
+    }
     on(event, filter, fn) {
       const entry = typeof filter === "function" ? { event, fn: filter } : { event, filter, fn };
       if (typeof entry.fn !== "function") throw new Error("w.on 需要处理函数");
@@ -9019,6 +9428,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const e = data.entities[key];
         const t = e.b.trigger;
         if (!t || this._pendingSet.has(e.id)) continue;
+        const body2 = e.b.body ? bodyEntry(e) : null;
+        if (body2) {
+          colliders.push(bodyCollider(body2));
+          continue;
+        }
         const [sx, sy, sz] = e.scale.map(Math.abs);
         const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] : null;
         colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box });

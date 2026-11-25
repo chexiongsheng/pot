@@ -6,6 +6,7 @@
 import { defineBlock } from '../registry'
 import type { Vec3 } from '../../host'
 import type { Color, Shape } from '../../scene'
+import { body } from './body'
 
 /** 外形：进入时 scene.spawn 一个图元，跟随实体的变换（缩放乘以 scale） */
 export const shape = defineBlock({
@@ -32,7 +33,7 @@ export const spin = defineBlock({
 /** 触发区：由 WorldService 的触发检测读取（15.9），本身没有逻辑 */
 export const trigger = defineBlock({
   name: 'trigger',
-  about: '触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch',
+  about: '触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch。实体也有 body 时改用 body 的形状与偏移',
   props: { radius: 0.5, box: null as null | Vec3 },
 })
 
@@ -76,4 +77,6 @@ export const light = defineBlock({
   },
 })
 
-export const BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light]
+export { body }
+
+export const BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light, body]

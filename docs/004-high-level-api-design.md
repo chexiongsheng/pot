@@ -1399,14 +1399,41 @@ export default defineGame({ kits: [topdown], ... })
 
 ### 17.4 模拟侧碰撞
 
-把 saltline `src/lib/physics.ts` 的做法通用化，放进 World（6.7）：
+把 saltline `src/lib/physics.ts` 的做法通用化，放进 World（6.7）。代码在 `collide.ts`（碰撞表、网格、`move`、`raycast`、`overlap`），World 只做转发。
 
-- 积木 `body`：`{ shape: 'box' | 'sphere' | 'capsule', size: Vec3, radius, height, static: true, layer: 'default', solid: true }`。静态体登记进 World 的碰撞表，按 XZ 平面的均匀网格（格长 4）索引；静态体的实体被移动或删除时更新索引。`solid: false` 只用于重叠与触发，不挡移动。
-- `layer` 是字符串，查询与移动可按层过滤（saltline 的 `bulletOnly`、`playerOnly` 用层表达：`bullet` 只挡子弹，`playerWall` 只挡玩家）。
-- `w.move(e, delta, { radius, height, stepUp, layers })`：运动学角色（竖直胶囊近似为圆柱）沿 `delta` 移动，子步长 0.2，先 X、Z 分轴推进并处理上台阶，再处理 Y 的落地吸附与撞顶；返回 `{ grounded, hitCeiling, hitWall }`。与 saltline 的 `Collision.move` 逐项一致，`groundMaxX` 改为可选的“地面平面” `ground: { y, maxX }`。
-- `w.raycast(from, dir, maxDist, { layers })`：只对静态体（盒用 slab 法，球、胶囊用解析解），返回最近的 `{ point, normal, dist, entity }` 或 `null`。纯 JS，Node 与 Runner 结果相同。
-- `w.overlap(shape, at, { layers })`：返回重叠的实体列表。`trigger` 积木改为可用 `body` 的形状判定（没有 `body` 时沿用原来的半径判定）。
-- 碰撞表不进 World 数据（由实体的 `body` 推出），热重载时重建。
+积木 `body`（系统级）：
+
+- 属性 `{ shape: 'box' | 'sphere' | 'capsule', size: [1, 1, 1], radius: 0.5, height: 2, center: [0, 0, 0], layer: 'default', solid: true }`。`size` 是盒的全长；`capsule` 是竖直胶囊，`height` 为含两端半球的总高；`center` 是相对实体位置的偏移。尺寸与偏移乘以实体的缩放，旋转不计（碰撞体一律轴对齐）。
+- 没有 `static` 属性：带 `body` 的实体都进碰撞表，World 不给它们积分速度（17.1 第 5 项，刚体不做）。会动的实体（敌人）也可以带 `body`，供射线和重叠查询命中。
+- `solid: false` 只参加 `raycast`、`overlap` 与触发，不挡 `move`。
+- `layer` 是任意字符串。三个查询都接受 `layers`（字符串数组），省略时为全部层。saltline 的 `bulletOnly`、`playerOnly` 用层表达：`bullet` 只给子弹的射线用，`playerWall` 只给玩家的 `move` 用。
+
+碰撞表：
+
+- 由实体的 `body` 推出，不进 World 数据，热重载、读档后自然重建。
+- 按 XZ 平面的均匀网格（格长 4）索引。表在每个固定步第一次查询时刷新：逐个比较带 `body` 实体的位置、缩放与 `body` 属性，变了的重新入格；实体增删、挂载对比改了实体时也触发刷新。同一步内先移动静态体再查询，要到下一步才看得到新位置。
+- 候选按实体 id 升序处理。实体按关卡数据的顺序生成时，这与 saltline 遍历盒数组的顺序一致，逐步结果才能一致。
+
+`w.move(e, mover, options)`：运动学角色移动，逐项照搬 saltline 的 `Collision.move`：
+
+- 角色是竖直的轴对齐盒（与 saltline 相同，不是胶囊）：底面中心为 `e.pos`，半宽 `radius`，高 `height`。
+- `mover` 是 `{ vel: Vec3, grounded: boolean }`，一般放在调用它的积木的状态里。按 `vel × dt` 推进，按最大分量切成不超过 0.2 米的子步（最多 64 步）；每个子步先 X、Z 分轴推进（着地时可上不高于 `stepUp` 的台阶，撞墙时把该轴速度清零），再处理 Y 的落地与撞顶，最后在下坡时吸附到 `stepUp` 以内的支撑面。函数会改 `e.pos`、`mover.vel`、`mover.grounded`。
+- `options`：`{ radius = 0.3, height = 1.8, stepUp = 0, dt = w.dt, layers, ground }`。`ground: { y, maxX? }` 是一块无限大的水平地面，`maxX` 给出时只在 `x <= maxX` 处存在（对应 saltline 的 `groundMaxX`，码头外是海）。
+- 只看 `solid` 的碰撞体，跳过 `e` 自己的 `body`。球与胶囊按包围盒参加 `move`。
+- 返回 `{ grounded, landed, hitWall, hitCeiling }`。
+
+`w.raycast(from, dir, maxDist, { layers, ignore })`：
+
+- 盒用 slab 法，球、竖直胶囊用解析解。`dir` 内部归一化。
+- 起点在某个碰撞体内部时忽略该碰撞体（与 Unity 的射线行为一致）。`ignore` 为实体或实体 id，跳过它。
+- 返回最近的 `{ point, normal, dist, entity }` 或 `null`；距离相同取 id 小的。纯 JS，Node 与 Runner 结果相同。
+
+`w.overlap(shape, at, { layers, ignore })`：
+
+- `shape` 为 `{ kind: 'sphere', radius }` 或 `{ kind: 'box', size }`，`at` 为中心。
+- 球与盒、球与球、球与胶囊精确判定；盒与胶囊按胶囊的包围盒。返回重叠的实体，按 id 升序。
+
+触发：带 `trigger` 的实体若也有 `body`，触发检测用 `body` 的形状（盒为盒，球为球，胶囊取包围盒）和偏移，`trigger` 自己的 `radius`、`box` 不再用；没有 `body` 时沿用原来的判定。
 
 ### 17.5 fps 套件
 
@@ -1487,3 +1514,25 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - hello-tsx 两个用例的哈希不变（`3af39306`、`308d9a76`）。
 - `devserver.test.js` 补了：`pot build` 把套件打进 bundle（bundle 里没有 `require("@pot/kit/...")`）；`pot blocks` 的 `moveTopdown` 层为 `topdown`、套件项 `imported`；不在游戏目录时套件 `imported: false`、积木 `available: true`。
 - Skill 的 `references/world.md` 先改了系统积木列表并加一句套件用法，完整的 Skill 同步仍在第 8 步。
+
+第 3 步（模拟侧碰撞）：
+
+17.4 在动手前按 saltline 的实际实现改过一遍，与最初的写法相比：
+
+- 角色碰撞体是竖直的轴对齐盒，不是“胶囊近似为圆柱”。saltline 的 `Collision` 就是盒，要做到金标准误差 1e-4 只能照搬。
+- `w.move` 的参数由 `delta` 改为 `mover: { vel, grounded }`：saltline 撞墙时会在子步中途清零该轴速度，落地吸附还要读上一步的 `grounded`，只给位移做不到逐步一致。
+- `body` 去掉 `static`，加 `center`；碰撞表改为每步第一次查询时按比较刷新，不再说“静态体被移动时更新索引”（World 拿不到属性被改的通知）。
+- `layers` 省略时为全部层，三个查询一致。
+- 射线起点在碰撞体内时忽略该碰撞体。
+
+实施时的细节：
+
+- `body` 在 `blocks/body.ts`；`trigger` 仍在 `blocks/index.ts`，只改了说明（17.9 写的 `blocks/trigger.ts` 不存在）。
+- 尺寸换算：盒 `size × |scale|`；球半径乘 `max(|sx|, |sy|, |sz|)`（与 `trigger` 一致）；胶囊半径乘 `max(|sx|, |sz|)`，高乘 `|sy|`，高小于直径时按球。`center` 乘带符号的缩放。
+- 碰撞表在三种情况下刷新：`tick` 变了、实体增删或挂载对比改了实体（`_bodyVer`）、World 数据对象被整体替换（读档、冷重启）。刷新时逐个比较位置、缩放与 `body` 属性拼成的签名。等待销毁（`w.destroy` 之后、本步末尾之前）的实体不再命中，与 `w.get` 一致。
+- 覆盖超过 64 个格子的碰撞体（大地面）不入格，每次查询都参加；查询区域的格子数不少于已用格子数时直接遍历全表。
+- `w.move` 每个子步取一次候选，区域为 `pos ± (radius + 本子步水平位移 + 1 米)`。
+- `w.raycast` 的 `maxDist` 缺省为无穷远；`layers` 不是数组时报错。`w.overlap` 一律严格小于（相切不算）。
+- 与 saltline 的比对没有用 saltline 的关卡（它依赖 `level`、`origlevel` 与渲染侧数据），而是 3 组随机关卡（各 60 个 0.25 米网格上的盒，含台阶、墙、悬空的顶，地面 `maxX = 20`）各 600 步，随机方向与速度（含 30 m/s 触发多子步）、随机起跳；位置、速度、`grounded` 与三个标志逐位相等，比 17.6 要求的 1e-4 更严。真实关卡的比对在第 5 步做。
+- `js/tsconfig.json` 补了 `@pot/kit/*` 路径并把 `kits/` 纳入检查：第 2 步漏了，`npm run typecheck` 报找不到 `@pot/kit/topdown`。
+- Skill 的 `references/world.md` 加了 `body` 与三个查询的一段说明。
