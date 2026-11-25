@@ -1484,8 +1484,27 @@ World 的配套改动：
 
 ### 17.8 写实套件
 
-- 名字 `realistic`：`stage` 的预设（黄昏、阴天、夜晚，含天空、雾、环境光、主光、后处理参数），材质预设（湿地面、金属、粗糙混凝土），以及从 saltline 抽出的通用部分（雨、闪电闪光）。
-- 只抽“换个游戏也能用”的部分；apron、sea、中继等 saltline 专属渲染留在游戏里。
+套件在 `kits/realistic/index.ts`，引入写法 `import realistic, { presets, materials, lightningValue } from '@pot/kit/realistic'`。只抽“换个游戏也能用”的部分；apron、sea、中继、saltline 自己的后处理链与雨幕着色器留在游戏里。
+
+`atmosphere`：一个场景的环境，放在任意一个实体上（一个场景只放一个，多个时后 enter 的覆盖前面的）。
+
+- 属性：`preset`（`dusk` 黄昏、`overcast` 阴天、`night` 夜晚，缺省 `dusk`）；分节覆盖 `sun`、`sky`、`ambient`、`fog`、`post`、`weather`（缺省 `{}`，在 enter 时与预设的同名节深合并，字段与低层 `scene.light`、`scene.sky`、`scene.ambient`、`scene.fog`、`scene.post`、`scene.weather` 相同）；`rain`（0 到 1，简写：写入 `weather` 的 `rain`，`wetness` 取 `min(1, rain × 2)`，`puddles` 取 `rain`，`weather` 节里显式给的字段优先）；`reflection`（平面反射分辨率比例，0 关闭，开启时反射平面高度为 0，材质的 `planar` 才有效）；`lightning`（`null` 不打雷，或 `{ every, first, power, flash }`，缺省 `every: [30, 60]` 秒、`first: [12, 30]` 秒、`power: [0.3, 1]`、`flash: 1`）。
+- 预设的数值：`dusk` 取自 saltline 的 `tuning.json` 的 `look`（去掉天气，天气由 `rain` 与 `weather` 给）；`overcast`、`night` 是新调的。`presets` 导出这三份数据（只读），游戏可以拿来改了再传。
+- 表现：enter 时建主方向光（`sun`，带软阴影），依次应用天空、环境光、雾、后处理、天气、反射，最后 `scene.refreshEnvironment()`。主方向光不作为 enter 的返回值（返回的对象会跟随实体变换），由套件自己持有，exit 时销毁；exit 同时关雾、把雨量、湿润、积水归零、关反射。天空与后处理没有“恢复缺省”，exit 不动它们。
+- 不与 `<stage sun>` 同用：两者都会建方向光。用了 `atmosphere` 时 `<stage>` 只给 `camera`、`background`。
+- 闪电：状态 `active`（缺省 true，游戏暂停时写 false，与 `moveFps` 相同）、`next`（距下一次的秒数，-1 表示还没排）、`t`（距上一次的秒数）、`power`、`strikes`（累计次数）。每步 `t` 增加；`active` 时 `next` 减少，到 0 时打一次：`power` 在区间内取 `w.rand`，发事件 `lightning`，payload 为 `{ entity, power, delay }`，`delay` 是雷声相对闪光的延迟（saltline 的公式 `0.5 + (1 - power) × 2 + 随机 0.6`），游戏自己放雷声。之后 `next` 在 `every` 区间内重新取。`first` 是第一次的间隔。
+- 闪光曲线是 saltline 的原式：`lightningValue(t, power)` 在 `t < 0.9` 时为 `power × e^(-5t) × (0.55 + 0.45 × sin 47t × sin(13t + 1))`，否则 0；导出给有自定义后处理的游戏用。`atmosphere` 自己的表现在 `view.update` 里把环境光与雾色乘以 `1 + 值 × flash × 3`，闪光结束后恢复一次，不闪时不调用。
+- 状态只有闪电的几项，`t`、`next` 进 World 数据，存档、热重载后接着算。
+
+`surface`：带材质预设的外形。
+
+- 属性 `{ kind: 'cube', color: null, scale: 1, material: 'concrete' }`。`kind`、`scale` 同系统的 `shape`；`material` 为预设名或材质参数对象（`MaterialOptions` 里的数值、颜色与字符串字段，贴图不能进 World 数据）；`color` 为 null 时取预设的颜色，再没有就是白色。
+- 预设（`materials` 导出）：`wetGround`（湿地面：光滑、`wet: 1`、`planar`）、`metal`（金属）、`concrete`（粗糙混凝土）。名字写错时报“未知的材质预设 X，可用 …”。
+- 不改系统的 `shape`：给 `shape` 加属性会改动所有实体的 World 数据，hello-tsx 的哈希就变了。
+
+saltline 不改用这个套件：它的天空、雾、后处理由自己的着色器链驱动，雨是 apron 遮罩上的雨幕，雷电提亮的是自定义后处理的 uniform，这些都是游戏专属的。`dusk` 预设与闪电的时间分布、曲线来自它。
+
+测试 `kit-realistic.test.js`：预设与分节覆盖、`rain` 简写、exit 时清理、`surface` 的预设与报错、闪电按 `w.rand` 排期并发事件、`active` 为 false 时不打、闪光期间环境光变亮之后恢复。
 
 ### 17.9 文件清单
 
@@ -1501,6 +1520,7 @@ World 的配套改动：
 | `loader.test.js` 增补 | `@pot/kit/x` 解析与后缀；套件内相对路径越界报错；套件文件变化使依赖它的游戏模块失效 |
 | `world-collide.test.js` | 网格索引增删；`move` 的分轴推进、上台阶、落地吸附、撞顶、层过滤；与 saltline `Collision` 在同一组盒上的逐步结果一致；`raycast` 盒、球、胶囊；`overlap` |
 | `kit-fps.test.js` | `moveFps` 走、跑、跳（顶点高度）、土狼时间、跳跃缓冲、蹲伏顶头不能起身；`health` 回血与死亡事件 |
+| `kit-realistic.test.js` | `atmosphere` 的预设、分节覆盖、`rain`、清理、闪电；`surface` 的材质预设 |
 | `devserver.test.js` 增补 | `pot blocks` 的套件层与未引入套件；`pot build` 打进套件；`pot eject --kit` |
 
 M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引入 `topdown` 后 `pot test` 哈希不变；saltline 玩家的金标准比对通过，敌人实机可玩；报告 saltline 迁移前后的源码字节数。
@@ -1627,6 +1647,19 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - saltline 的 game 单元在每个 `ctx.use` 前调用 `ctx.loading.within(本阶段进度, 下一阶段进度)`，循环后恢复 `[0, 1]`。world 单元仍自己报绝对进度，不受影响；collision、enemies 等 `defineGame` 单元的预热进度落在各自阶段内。
 - 测试 `js/test/world-loading.test.js` 5 个用例：`load` 时机、按帧驱动的区间映射（读数据 0.4、生成场景 1/4 为 0.85、4/4 为 1）、`within`（0.5..0.7）与非法区间、热重载重跑不让帧且实体保留、`load` 非函数报错。
 - 实机验证：重建 Runner 后 saltline 启动 5.35 秒、hello-tsx 0.05 秒，均无报错，画面正常。
+
+第 8 步（写实套件）：
+
+17.8 在动手前重写（atmosphere、surface 两块积木，dusk、overcast、night 三个预设，wetGround、metal、concrete 三种材质预设），实施与文档一致。
+
+实施时的细节：
+
+- 套件位于 `kits/realistic/index.ts`，用 `@pot/kit/realistic` 引入。导出 `presets`、`materials`、`lightningValue`、`resolveAtmosphere`、`resolveSurface` 和两块积木，执行 `node scripts/build.js` 后由 kits.json 打包进 Runner。
+- 主方向光由 `view.enter` 创建，存在模块级 Map 中，不作为返回值（返回值会跟随实体变换）；`view.exit` 时销毁主方向光，关闭雾与反射，并把雨、湿度、积水归零。
+- 闪电只在 `step` 中排期与抽取强度，然后发出 `lightning` 事件（`{entity, power, delay}`，delay 供雷声使用）；闪光由 `view.update` 按 `lightningValue` 缩放环境光与雾色，数值不变时跳过。
+- 测试 `js/test/kit-realistic.test.js` 5 个用例：预设与覆盖、rain 与反射、缺省黄昏与未知预设、闪电排期与闪光恢复及 `active` 为 false、热重载去掉后的清理、surface 预设与报错。
+- 实机验证：用临时演示游戏（地面、混凝土方块、金属球）在 dusk、overcast（rain 0.6）、night（rain 1）三个流程状态间切换，三种画面区别明显，平面反射与金属高光正常；切换后场景中只剩一个 atmosphere 实体，闪电事件按 3 秒后首次、之后每 6 到 9 秒一次触发，无报错。
+- scene 不能读 `w.vars`（SceneArgs 只有 state、params、data），想随变量切换环境，应该用流程状态或带 key 的实体来驱动，演示即采用这种做法。
 
 ### 17.13 加载进度
 
