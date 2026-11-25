@@ -24,6 +24,8 @@ import { BUILTIN_BLOCKS } from './blocks'
 import { BUILTIN_PREFABS } from './prefabs'
 import { NativeBlocks } from './native'
 import type { NativeMode } from './native'
+import { verifyNative } from './verify'
+import type { VerifyOptions, VerifyResult } from './verify'
 import type { Host } from '../host'
 import { initialFlow } from './flow'
 import type { FlowData, FlowDef } from './flow'
@@ -574,6 +576,26 @@ export class WorldService extends Service {
     return bit
   }
 
+  /** 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动） */
+  stepNow() {
+    this._step()
+  }
+
+  /** 当前的指令来源（录像回放、pot test、verify 设置的）；没有时为 null */
+  get commandSource(): CommandSource | null {
+    return this._source
+  }
+
+  /** 是否处于叠加状态（模拟不走） */
+  get overlayActive(): boolean {
+    return !!this._overlay()
+  }
+
+  /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管 */
+  verifyNative(block: string, options: VerifyOptions = {}): VerifyResult {
+    return verifyNative(this, this._root.state, block, options)
+  }
+
   /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
   private _syncNativeBodies() {}
 
@@ -1084,11 +1106,14 @@ export class WorldService extends Service {
       for (const block of this.registry.ordered()) {
         if (!block.step) continue
         if (this._native.run(block, alive, isAlive)) continue
+        const timing = this._native.timing
+        const t0 = timing ? this._native.now() : 0
         for (const e of alive) {
           const me = e.b[block.name]
           if (!me || !this._alive(e)) continue
           this._guard(`积木 ${block.name}.step`, undefined, () => block.step!(me, e, this))
         }
+        if (timing) timing.set(block.name, (timing.get(block.name) ?? 0) + this._native.now() - t0)
       }
       // 4. 触发检测
       const touches = this._detect(data)

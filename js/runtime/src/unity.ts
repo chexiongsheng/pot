@@ -53,6 +53,7 @@ export function createUnityHost(): Host {
     nativeBlocks: () => Pot.PotNative.Blocks(),
     nativeStep: (name, buf) => Pot.PotNative.Step(name, buf),
     nativeBodies: (buf) => Pot.PotNative.Bodies(buf),
+    now: () => Pot.PotNative.Now(),
     engine: {
       spawn: (shape, name, parent) => S.Spawn(shape, name, parent),
       destroy: (id) => S.Destroy(id),

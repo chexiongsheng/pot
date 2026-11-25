@@ -226,6 +226,16 @@ const handlers: Record<string, Handler> = {
     }
   },
 
+  /** pot block verify（004 第 18.8 节）：TS 与原生实现跑同一段输入并逐步比较 */
+  verify(msg, rt) {
+    if (!msg.block) throw new Error('用法：pot block verify <积木> [--test tests/x.json] [--steps 600] [--tolerance 1e-9]')
+    return rt.root.world.verifyNative(msg.block, {
+      steps: msg.steps === undefined ? undefined : Number(msg.steps),
+      script: msg.script ?? null,
+      tolerance: msg.tolerance === undefined ? undefined : Number(msg.tolerance),
+    })
+  },
+
   async time(msg, rt) {
     const clock = rt.clock
     switch (msg.action) {

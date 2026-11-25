@@ -26,6 +26,8 @@
  *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules|world|tree] [unit|筛选|挂载]
  *   pot world set <key 路径> <补丁 JSON> [--mount game] [--save] | world clear [--mount game] [--save] | world list
  *                                           运行期按 key 路径改属性；--save 写进游戏的 data/overrides.json（覆盖层）
+ *   pot block verify <积木> [--test tests/x.json] [--steps 600] [--tolerance 1e-9]
+ *                                           在 Runner 里用同一段输入分别跑 TS 与原生（C#）实现，逐步比较并给出耗时
  *   pot plugins | leaks | reload <单元...> | time [get|pause|resume|step|scale] [n]
  *   pot input axis <name> <x> <y> [frames] | input key <name> [down|up|tap] | input text <文字> | input clear
  *                                           input text 里 \n 为回车、\b 为退格
@@ -61,6 +63,19 @@ function print(value) {
 function exitBy(result) {
   print(result)
   process.exitCode = result && result.ok === false ? 1 : 0
+}
+
+/** 读 pot test 脚本：先按当前目录找，再按 Runner 正在运行的游戏目录找 */
+async function readTestScript(api, file) {
+  const candidates = [path.resolve(file)]
+  if (!path.isAbsolute(file)) {
+    const status = await api.status().catch(() => null)
+    const dir = status?.game?.dir
+    if (dir) candidates.push(path.resolve(dir, file))
+  }
+  const hit = candidates.find((f) => fs.existsSync(f))
+  if (!hit) throw new Error(`找不到测试脚本 ${file}（找过：${candidates.join('、')}）`)
+  return JSON.parse(fs.readFileSync(hit, 'utf8'))
 }
 
 function parseValue(text) {
@@ -232,6 +247,12 @@ async function main() {
     case 'state': {
       const [action = 'keys', key, value] = args
       return exitBy(await api.call({ type: 'state', action, key, value: parseValue(value) }))
+    }
+    case 'block': {
+      const [action, name] = args
+      if (action !== 'verify' || !name) return exitBy({ ok: false, error: '用法：pot block verify <积木> [--test tests/x.json] [--steps 600] [--tolerance 1e-9]' })
+      const script = flags.test ? await readTestScript(api, flags.test) : null
+      return exitBy(await api.call({ type: 'verify', block: name, script, steps: flags.steps, tolerance: flags.tolerance, timeout: 600000 }))
     }
     case 'world': {
       const [action = 'list', p, patch] = args

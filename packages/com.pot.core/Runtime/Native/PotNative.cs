@@ -24,6 +24,11 @@ namespace Pot
         }
 
         static Dictionary<string, Entry> entries;
+        static readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+
+        /// <summary>高精度时间（毫秒，起点为首次使用），verify 计时用</summary>
+        [Preserve]
+        public static double Now() { return clock.Elapsed.TotalMilliseconds; }
 
         static Dictionary<string, Entry> All
         {

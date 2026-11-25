@@ -107,6 +107,14 @@ export class NativeBlocks {
     return this._reasons.get(name) ?? (this._host?.nativeStep ? `积木 ${name} 没有原生实现` : '当前宿主没有原生实现')
   }
 
+  /** 高精度时间（毫秒）：宿主的 now，其次 performance.now，最后 Date.now */
+  now(): number {
+    const h = this._host?.now
+    if (h) return h()
+    const p = (globalThis as any).performance
+    return p && typeof p.now === 'function' ? p.now() : Date.now()
+  }
+
   /** 清掉出错回退的记录（verify、热重载后重试） */
   reset() {
     this._failed.clear()
@@ -127,7 +135,7 @@ export class NativeBlocks {
       if (me && isAlive(e)) list.push({ e, me })
     }
     if (!list.length) return true
-    const t0 = this.timing ? now() : 0
+    const t0 = this.timing ? this.now() : 0
     try {
       if (active.impl.collision) this._env.syncBodies()
       const buf = packBatch(active.layout, list, this._env, this._env.dt(), this._env.tick(), this._bufs.get(block.name))
@@ -140,14 +148,9 @@ export class NativeBlocks {
       this._env.warn(`积木 ${block.name} 的原生实现出错，改用 TS：${(err as Error)?.message ?? err}`)
       return false
     } finally {
-      if (this.timing) this.timing.set(block.name, (this.timing.get(block.name) ?? 0) + now() - t0)
+      if (this.timing) this.timing.set(block.name, (this.timing.get(block.name) ?? 0) + this.now() - t0)
     }
     return true
   }
 }
 
-/** 高精度时间（毫秒）：有 performance 用它，没有退回 Date */
-export function now(): number {
-  const p = (globalThis as any).performance
-  return p && typeof p.now === 'function' ? p.now() : Date.now()
-}

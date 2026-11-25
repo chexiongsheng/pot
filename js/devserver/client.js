@@ -37,7 +37,8 @@ function client(port = 7788) {
   return {
     status: () => request(port, 'GET', '/status'),
     logs: (since = 0, level, limit = 200) => request(port, 'GET', `/logs?since=${since}&limit=${limit}${level ? `&level=${level}` : ''}`),
-    call: (msg) => request(port, 'POST', '/call', msg),
+    /** msg.timeout（毫秒）是 Dev Server 等 Runner 的时间，HTTP 请求多等 10 秒 */
+    call: (msg) => request(port, 'POST', '/call', msg, msg && msg.timeout ? msg.timeout + 10000 : 65000),
     open: (target, options = {}) => request(port, 'POST', '/open', { ...options, target }, 130000),
   }
 }

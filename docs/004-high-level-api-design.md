@@ -1912,3 +1912,13 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - `PotBatch` 自己解析布局字符串算偏移（类型的槽数与 `layout.ts` 相同），每块积木一个，`Data` 数组按长度复用。返回时新建 `byte[]` 交给 Puerts（拷贝），与 18.2 测的“往返”一致。
 - `moveTopdown` 的 C# 实现照 TS 的 `if (!x && !y)`：0、-0、NaN 都算没有输入。
 - 实机：Runner 启动 hello-tsx 后 `PotNative.Blocks()` 返回 `moveTopdown`，`w.inspect().native` 为 `['moveTopdown']`，注入 move 轴后玩家由 C# 实现移动，没有告警。两种实现的逐步比对在第 5 步用 verify 做。
+
+第 5 步（pot block verify）：
+
+- 实现在 `js/runtime/src/world/verify.ts`，由 `w.verifyNative(积木, { script, steps, tolerance })` 调用；devtools 命令 `verify`；CLI `pot block verify`，MCP `pot_block_verify`。`--test` 的相对路径先按当前目录找，再按 Runner 正在运行的游戏目录找。Dev Server 的命令白名单加了 `verify`，这条命令的超时是 10 分钟。
+- World 为此加了 `w.stepNow()`（立即执行一步）、`w.commandSource`、`w.overlayActive`。
+- 逐步比较的字段：带这个积木的实体的 `pos`、`rot` 与积木的全部字段（数组、对象展开成 `vel.0`、`stride.walk`）。数值个数乘步数超过 200 万时只比最后一步（结果里 `perStep: false`），每步的 World 哈希仍然全比。
+- `ok`：每步哈希都相同；或者有字段差异但最大偏差不超过容差。哈希不同而字段全同（差异在别的积木或 vars）时 `ok` 为 false。
+- 计时：宿主的 `now()`。Unity 上是 C# 的 `PotNative.Now()`（Stopwatch），`Time.realtimeSinceStartupAsDouble` 被 IL2CPP 裁剪掉了，取不到。Runner 的 V8 没有 `performance`。`tsMs`、`nativeMs` 是这个积木 step 阶段的累计耗时；`tsStepMs`、`nativeStepMs` 是整个模拟步（不含 verify 自己的哈希与记录）。
+- 测试 `block-verify.test.js` 4 个用例（假原生实现）：逐位一致与恢复、偏差的定位与容差、零输入与参数检查、没有原生实现与 devtools 命令。
+- 实机：hello-tsx 的 `tests/all-coins.json`（395 步）与 `tests/first-coin.json` 延长到 2000 步，C# 的 `moveTopdown` 与 TS 逐位一致（`identical: true`）。

@@ -196,5 +196,7 @@ export interface Host {
   nativeStep?(name: string, buf: Float64Array): ArrayBuffer | Float64Array
   /** 把碰撞体表发给原生侧（18.6）；只在碰撞表变化后、用到碰撞的原生积木执行前调用 */
   nativeBodies?(buf: Float64Array): void
+  /** 高精度时间（毫秒，起点任意），用于 verify 的计时；不实现时用 performance.now 或 Date.now */
+  now?(): number
   engine: Engine
 }

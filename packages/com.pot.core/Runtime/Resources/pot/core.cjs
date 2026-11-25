@@ -313,9 +313,9 @@ var pot = (() => {
       "s(?:ec(?:ond)?(?:s)?)?"
     ].map((unit) => `(${numeric}${unit})?`).join("")}$`);
     function parseTime(source) {
-      const capture = timeRegExp.exec(source);
-      if (!capture) return 0;
-      return (parseFloat(capture[1]) * Time2.week || 0) + (parseFloat(capture[2]) * Time2.day || 0) + (parseFloat(capture[3]) * Time2.hour || 0) + (parseFloat(capture[4]) * Time2.minute || 0) + (parseFloat(capture[5]) * Time2.second || 0);
+      const capture2 = timeRegExp.exec(source);
+      if (!capture2) return 0;
+      return (parseFloat(capture2[1]) * Time2.week || 0) + (parseFloat(capture2[2]) * Time2.day || 0) + (parseFloat(capture2[3]) * Time2.hour || 0) + (parseFloat(capture2[4]) * Time2.minute || 0) + (parseFloat(capture2[5]) * Time2.second || 0);
     }
     Time2.parseTime = parseTime;
     function parseDate(date) {
@@ -2223,8 +2223,8 @@ var pot = (() => {
         callback(...args);
       };
       return this._schedule("ctx.throttle()", (args, isDisposed) => {
-        const now2 = clock.time * 1e3;
-        const remaining = delay - now2 + lastCall;
+        const now = clock.time * 1e3;
+        const remaining = delay - now + lastCall;
         if (remaining <= 0) {
           execute(...args);
         } else if (!isDisposed) {
@@ -8950,6 +8950,13 @@ TS：${r.layout.text}
       if (this._active.has(name)) return this._failed.has(name) ? `积木 ${name} 的原生实现出过错，已改用 TS` : null;
       return this._reasons.get(name) ?? (this._host?.nativeStep ? `积木 ${name} 没有原生实现` : "当前宿主没有原生实现");
     }
+    /** 高精度时间（毫秒）：宿主的 now，其次 performance.now，最后 Date.now */
+    now() {
+      const h = this._host?.now;
+      if (h) return h();
+      const p = globalThis.performance;
+      return p && typeof p.now === "function" ? p.now() : Date.now();
+    }
     /** 清掉出错回退的记录（verify、热重载后重试） */
     reset() {
       this._failed.clear();
@@ -8969,7 +8976,7 @@ TS：${r.layout.text}
         if (me && isAlive(e)) list.push({ e, me });
       }
       if (!list.length) return true;
-      const t0 = this.timing ? now() : 0;
+      const t0 = this.timing ? this.now() : 0;
       try {
         if (active.impl.collision) this._env.syncBodies();
         const buf = packBatch(active.layout, list, this._env, this._env.dt(), this._env.tick(), this._bufs.get(block.name));
@@ -8982,15 +8989,185 @@ TS：${r.layout.text}
         this._env.warn(`积木 ${block.name} 的原生实现出错，改用 TS：${err?.message ?? err}`);
         return false;
       } finally {
-        if (this.timing) this.timing.set(block.name, (this.timing.get(block.name) ?? 0) + now() - t0);
+        if (this.timing) this.timing.set(block.name, (this.timing.get(block.name) ?? 0) + this.now() - t0);
       }
       return true;
     }
   };
-  function now() {
-    const p = globalThis.performance;
-    return p && typeof p.now === "function" ? p.now() : Date.now();
+
+  // runtime/src/world/script.ts
+  function expandScript(script) {
+    const input = [...script.input ?? []].sort((a, b) => a.at - b.at);
+    for (const item of input) {
+      if (!Number.isInteger(item.at) || item.at < 0) throw new Error(`测试脚本的 input.at 必须是非负整数，收到 ${JSON.stringify(item.at)}`);
+    }
+    const axes = {};
+    const down = /* @__PURE__ */ new Set();
+    let next = 0;
+    let last = -1;
+    return (step) => {
+      if (step < last) throw new Error("测试脚本只能按步号递增推进");
+      last = step;
+      const events = [];
+      while (next < input.length && input[next].at <= step) {
+        const item = input[next++];
+        for (const [name, v] of Object.entries(item.axis ?? {})) axes[name] = { x: Number(v?.[0]) || 0, y: Number(v?.[1]) || 0 };
+        for (const a of item.down ?? []) down.add(a);
+        for (const a of item.up ?? []) down.delete(a);
+        if (item.emit !== void 0 && item.at === step) events.push(typeof item.emit === "string" ? { name: item.emit } : { name: item.emit.name, payload: item.emit.payload });
+      }
+      return { axes: { ...axes }, down: Object.fromEntries([...down].map((a) => [a, true])), events };
+    };
   }
+  var sameAxis = (a, b) => (a?.x ?? 0) === (b?.x ?? 0) && (a?.y ?? 0) === (b?.y ?? 0);
+  function compressRecording(steps) {
+    const out = [];
+    let axes = {};
+    let down = /* @__PURE__ */ new Set();
+    steps.forEach((cmd, at) => {
+      const item = { at };
+      const axisChange = {};
+      for (const name of /* @__PURE__ */ new Set([...Object.keys(axes), ...Object.keys(cmd.axes)])) {
+        if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [cmd.axes[name]?.x ?? 0, cmd.axes[name]?.y ?? 0];
+      }
+      if (Object.keys(axisChange).length) item.axis = axisChange;
+      const now = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));
+      const pressed = [...now].filter((a) => !down.has(a));
+      const released = [...down].filter((a) => !now.has(a));
+      if (pressed.length) item.down = pressed;
+      if (released.length) item.up = released;
+      const changed = Object.keys(item).length > 1;
+      if (changed) out.push(item);
+      for (const e of cmd.events) out.push({ at, emit: e.payload === void 0 ? e.name : { name: e.name, payload: e.payload } });
+      axes = { ...cmd.axes };
+      down = now;
+    });
+    return out;
+  }
+
+  // runtime/src/world/verify.ts
+  var FIELD_BUDGET = 2e6;
+  function flatten(prefix, v, out) {
+    if (Array.isArray(v)) v.forEach((x, i) => flatten(`${prefix}.${i}`, x, out));
+    else if (isPlainObject2(v)) for (const k of Object.keys(v)) flatten(prefix ? `${prefix}.${k}` : k, v[k], out);
+    else out[prefix] = v;
+  }
+  function capture(w, block) {
+    const frame = /* @__PURE__ */ new Map();
+    for (const e of w.query()) {
+      const me = e.b[block];
+      if (!me) continue;
+      const rec = {};
+      flatten("pos", e.pos, rec);
+      flatten("rot", e.rot, rec);
+      flatten("", me, rec);
+      frame.set(e.id, rec);
+    }
+    return frame;
+  }
+  function verifyNative(w, state, block, options = {}) {
+    const reason = w.nativeBlocks.reason(block);
+    if (reason) throw new Error(reason);
+    if (w.overlayActive) throw new Error("当前处于叠加状态（模拟不走），先恢复再 verify");
+    const steps = options.steps ?? options.script?.steps ?? 600;
+    if (!Number.isInteger(steps) || steps <= 0) throw new Error(`steps 必须是正整数，收到 ${JSON.stringify(steps)}`);
+    const tolerance = options.tolerance ?? 1e-9;
+    const original = w.data;
+    const snapshot = clone(original);
+    const prevMode = w.native;
+    const prevSource = w.commandSource;
+    const native = w.nativeBlocks;
+    const passes = [];
+    let perStep = true;
+    try {
+      for (const mode of ["off", "auto"]) {
+        state.set("world", clone(snapshot));
+        w.native = mode;
+        native.reset();
+        const start = w.data.tick;
+        const cmd = options.script ? expandScript(options.script) : null;
+        w.setCommandSource((tick) => cmd ? cmd(tick - start) : { axes: {}, down: {}, events: [] });
+        native.timing = /* @__PURE__ */ new Map();
+        const pass = { hashes: [], frames: [], last: /* @__PURE__ */ new Map(), blockMs: 0, stepMs: 0 };
+        for (let i = 0; i < steps; i++) {
+          const t0 = native.now();
+          w.stepNow();
+          pass.stepMs += native.now() - t0;
+          pass.hashes.push(worldHash(w.data));
+          if (perStep) {
+            const frame = capture(w, block);
+            if (i === 0) {
+              let size = 0;
+              for (const rec of frame.values()) size += Object.keys(rec).length;
+              if (size * steps > FIELD_BUDGET) perStep = false;
+            }
+            if (perStep) pass.frames.push(frame);
+          }
+        }
+        pass.last = capture(w, block);
+        pass.blockMs = native.timing.get(block) ?? 0;
+        passes.push(pass);
+        if (mode === "auto") {
+          const after = native.reason(block);
+          if (after) throw new Error(`verify 期间原生实现不可用：${after}`);
+        }
+      }
+    } finally {
+      state.set("world", original);
+      w.native = prevMode;
+      w.setCommandSource(prevSource);
+      native.timing = null;
+    }
+    const [ts, nat] = passes;
+    let firstHashDiff = null;
+    for (let i = 0; i < steps; i++) if (ts.hashes[i] !== nat.hashes[i]) {
+      firstHashDiff = i;
+      break;
+    }
+    const maxDiff = {};
+    let firstDiff = null;
+    const compare = (step, a, b) => {
+      for (const id of /* @__PURE__ */ new Set([...a.keys(), ...b.keys()])) {
+        const ra = a.get(id), rb = b.get(id);
+        if (!ra || !rb) {
+          maxDiff["(实体)"] = Infinity;
+          firstDiff ?? (firstDiff = { step, entity: id, field: "(实体)", ts: !!ra, native: !!rb });
+          continue;
+        }
+        for (const field of /* @__PURE__ */ new Set([...Object.keys(ra), ...Object.keys(rb)])) {
+          const x = ra[field], y = rb[field];
+          if (Object.is(x, y)) continue;
+          const d = typeof x === "number" && typeof y === "number" ? Math.abs(x - y) : Infinity;
+          if (!(d === 0)) {
+            const v = Number.isNaN(d) ? Infinity : d;
+            maxDiff[field] = Math.max(maxDiff[field] ?? 0, v);
+            firstDiff ?? (firstDiff = { step, entity: id, field, ts: x, native: y });
+          }
+        }
+      }
+    };
+    if (perStep) for (let i = 0; i < steps; i++) compare(i, ts.frames[i], nat.frames[i]);
+    else compare(steps - 1, ts.last, nat.last);
+    const identical = firstHashDiff === null;
+    const worst = Object.values(maxDiff).reduce((m, v) => Math.max(m, v), 0);
+    return {
+      ok: identical || (firstDiff !== null ? worst <= tolerance : false),
+      block,
+      steps,
+      entities: ts.last.size,
+      identical,
+      firstHashDiff,
+      firstDiff,
+      maxDiff,
+      tolerance,
+      perStep,
+      tsMs: round(ts.blockMs),
+      nativeMs: round(nat.blockMs),
+      tsStepMs: round(ts.stepMs),
+      nativeStepMs: round(nat.stepMs)
+    };
+  }
+  var round = (v) => Math.round(v * 1e3) / 1e3;
 
   // runtime/src/world/flow.ts
   var NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -9395,6 +9572,22 @@ TS：${r.layout.text}
         this._layerBits.set(name, bit);
       }
       return bit;
+    }
+    /** 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动） */
+    stepNow() {
+      this._step();
+    }
+    /** 当前的指令来源（录像回放、pot test、verify 设置的）；没有时为 null */
+    get commandSource() {
+      return this._source;
+    }
+    /** 是否处于叠加状态（模拟不走） */
+    get overlayActive() {
+      return !!this._overlay();
+    }
+    /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管 */
+    verifyNative(block, options = {}) {
+      return verifyNative(this, this._root.state, block, options);
     }
     /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
     _syncNativeBodies() {
@@ -9862,11 +10055,14 @@ TS：${r.layout.text}
         for (const block of this.registry.ordered()) {
           if (!block.step) continue;
           if (this._native.run(block, alive, isAlive)) continue;
+          const timing = this._native.timing;
+          const t0 = timing ? this._native.now() : 0;
           for (const e of alive) {
             const me = e.b[block.name];
             if (!me || !this._alive(e)) continue;
             this._guard(`积木 ${block.name}.step`, void 0, () => block.step(me, e, this));
           }
+          if (timing) timing.set(block.name, (timing.get(block.name) ?? 0) + this._native.now() - t0);
         }
         const touches = this._detect(data);
         for (const rule of this._allRules("every")) {
@@ -9923,18 +10119,18 @@ TS：${r.layout.text}
         const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] : null;
         colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box });
       }
-      const now2 = /* @__PURE__ */ new Set();
+      const now = /* @__PURE__ */ new Set();
       const events = [];
       for (const [a, b] of overlappingPairs(colliders)) {
         const key = `${a.id}:${b.id}`;
-        now2.add(key);
+        now.add(key);
         if (!data.contacts[key]) {
           data.contacts[key] = true;
           events.push({ name: "touch", args: [data.entities[a.id], data.entities[b.id]] });
         }
       }
       for (const key of Object.keys(data.contacts)) {
-        if (!now2.has(key)) delete data.contacts[key];
+        if (!now.has(key)) delete data.contacts[key];
       }
       return events;
     }
@@ -10205,6 +10401,7 @@ TS：${r.layout.text}
       nativeBlocks: () => Pot.PotNative.Blocks(),
       nativeStep: (name, buf) => Pot.PotNative.Step(name, buf),
       nativeBodies: (buf) => Pot.PotNative.Bodies(buf),
+      now: () => Pot.PotNative.Now(),
       engine: {
         spawn: (shape2, name, parent) => S.Spawn(shape2, name, parent),
         destroy: (id) => S.Destroy(id),
@@ -10575,9 +10772,9 @@ TS：${r.layout.text}
         }
         const edge = {};
         for (const k of keyEdges) {
-          const now2 = input.key(k);
-          edge[k] = now2 && !prevKeys[k];
-          prevKeys[k] = now2;
+          const now = input.key(k);
+          edge[k] = now && !prevKeys[k];
+          prevKeys[k] = now;
         }
         let focus = local.$focus ? byPath.get(local.$focus) : void 0;
         if (local.$focus && (!focus || !focusables.includes(focus))) {
@@ -10645,56 +10842,6 @@ TS：${r.layout.text}
       };
       placed.forEach(draw);
     };
-  }
-
-  // runtime/src/world/script.ts
-  function expandScript(script) {
-    const input = [...script.input ?? []].sort((a, b) => a.at - b.at);
-    for (const item of input) {
-      if (!Number.isInteger(item.at) || item.at < 0) throw new Error(`测试脚本的 input.at 必须是非负整数，收到 ${JSON.stringify(item.at)}`);
-    }
-    const axes = {};
-    const down = /* @__PURE__ */ new Set();
-    let next = 0;
-    let last = -1;
-    return (step) => {
-      if (step < last) throw new Error("测试脚本只能按步号递增推进");
-      last = step;
-      const events = [];
-      while (next < input.length && input[next].at <= step) {
-        const item = input[next++];
-        for (const [name, v] of Object.entries(item.axis ?? {})) axes[name] = { x: Number(v?.[0]) || 0, y: Number(v?.[1]) || 0 };
-        for (const a of item.down ?? []) down.add(a);
-        for (const a of item.up ?? []) down.delete(a);
-        if (item.emit !== void 0 && item.at === step) events.push(typeof item.emit === "string" ? { name: item.emit } : { name: item.emit.name, payload: item.emit.payload });
-      }
-      return { axes: { ...axes }, down: Object.fromEntries([...down].map((a) => [a, true])), events };
-    };
-  }
-  var sameAxis = (a, b) => (a?.x ?? 0) === (b?.x ?? 0) && (a?.y ?? 0) === (b?.y ?? 0);
-  function compressRecording(steps) {
-    const out = [];
-    let axes = {};
-    let down = /* @__PURE__ */ new Set();
-    steps.forEach((cmd, at) => {
-      const item = { at };
-      const axisChange = {};
-      for (const name of /* @__PURE__ */ new Set([...Object.keys(axes), ...Object.keys(cmd.axes)])) {
-        if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [cmd.axes[name]?.x ?? 0, cmd.axes[name]?.y ?? 0];
-      }
-      if (Object.keys(axisChange).length) item.axis = axisChange;
-      const now2 = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));
-      const pressed = [...now2].filter((a) => !down.has(a));
-      const released = [...down].filter((a) => !now2.has(a));
-      if (pressed.length) item.down = pressed;
-      if (released.length) item.up = released;
-      const changed = Object.keys(item).length > 1;
-      if (changed) out.push(item);
-      for (const e of cmd.events) out.push({ at, emit: e.payload === void 0 ? e.name : { name: e.name, payload: e.payload } });
-      axes = { ...cmd.axes };
-      down = now2;
-    });
-    return out;
   }
 
   // runtime/src/world/game.ts
@@ -10774,7 +10921,7 @@ TS：${r.layout.text}
           const key = `ui:${unit}`;
           ctx.state.define(key, { version: 1, init: () => ({}) });
           const emit = (name, payload) => w.emitUI(name, payload);
-          const capture = (on) => w.setUICapture(unit, on);
+          const capture2 = (on) => w.setUICapture(unit, on);
           ctx.effect(() => () => w.setUICapture(unit, false), "world.uiCapture");
           let lastError = "";
           ctx.on("update", () => {
@@ -10804,7 +10951,7 @@ TS：${r.layout.text}
               return;
             }
             lastError = "";
-            render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture });
+            render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture: capture2 });
           });
         };
         const warm = async () => {
