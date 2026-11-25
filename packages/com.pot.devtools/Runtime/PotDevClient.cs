@@ -39,6 +39,7 @@ namespace Pot.Dev
             public float y;
             public int frames;
             public string mode;
+            public string text;
         }
 
         public static PotDevClient Instance { get; private set; }
@@ -410,6 +411,9 @@ namespace Pot.Dev
                 case "key":
                     if (string.IsNullOrEmpty(cmd.name)) throw new Exception("input key 需要 name");
                     PotInput.InjectKey(cmd.name, string.IsNullOrEmpty(cmd.mode) ? "tap" : cmd.mode);
+                    break;
+                case "text":
+                    PotInput.InjectText(cmd.text);
                     break;
                 case "clear":
                 case null:

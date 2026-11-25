@@ -2543,6 +2543,10 @@ var pot = (() => {
     wheel() {
       return this._host.engine.wheel();
     }
+    /** 本帧键入的文字：退格为 \b，回车为 \n（输入框用；只有桌面键盘） */
+    text() {
+      return this._host.engine.textInput?.() ?? "";
+    }
     /** 窗口是否有焦点（失焦时可以自动暂停） */
     focused() {
       return this._host.engine.focused();
@@ -4783,6 +4787,21 @@ var pot = (() => {
           cx += this._charWidth(ch, size, ff) + sp;
         }
       }
+    }
+    /** 压入裁剪矩形：之后的绘制只在矩形内可见，可嵌套（取交集），与 unclip 成对使用 */
+    clip(x, y, w, h) {
+      this._list.push(["c", n(x), n(y), n(Math.max(0, w)), n(Math.max(0, h))].join(FS));
+    }
+    /** 弹出最近一次 clip */
+    unclip() {
+      this._list.push(["C", ""].join(FS));
+    }
+    /** 画贴图：tex 为 Texture（或贴图 id）；tint 为染色，uv 为 [u, v, w, h]（缺省整张） */
+    image(tex, x, y, w, h, options = {}) {
+      const id = typeof tex === "number" ? tex : tex?.id;
+      if (!Number.isFinite(id)) throw new Error("ui.image：需要贴图（Texture）");
+      const uv = options.uv ? options.uv.map((v) => String(Math.round(v * 1e4) / 1e4)).join(",") : "";
+      this._list.push(["i", n(x), n(y), n(w), n(h), String(id), this.hex(options.tint ?? "#ffffff", options.alpha), n(options.radius ?? 0), uv].join(FS));
     }
     /** 鼠标是否在矩形内 */
     hit(x, y, w, h) {
@@ -8581,6 +8600,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         },
         wheel: () => I.Wheel(),
         focused: () => I.Focused(),
+        textInput: () => I.TextInput(),
         uiSubmit: (list) => U.Submit(list),
         uiMeasure: (text, size, flags) => {
           U.Measure(text, size, flags);

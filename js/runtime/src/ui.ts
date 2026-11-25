@@ -62,6 +62,14 @@ export function fontFlags(o: FontOptions | boolean | undefined): number {
   return (w >= 6 ? 1 : 0) | (opt.mono ? 8 : 0) | (w === 4 || w === 7 ? 0 : w << 4)
 }
 
+export interface ImageOptions {
+  tint?: Color
+  alpha?: number
+  radius?: number
+  /** 贴图坐标 [u, v, w, h]，0..1，v 向上 */
+  uv?: [number, number, number, number]
+}
+
 export interface RectOptions {
   radius?: number
   alpha?: number
@@ -385,6 +393,24 @@ export class UIService extends Service {
         cx += this._charWidth(ch, size, ff) + sp
       }
     }
+  }
+
+  /** 压入裁剪矩形：之后的绘制只在矩形内可见，可嵌套（取交集），与 unclip 成对使用 */
+  clip(x: number, y: number, w: number, h: number) {
+    this._list.push(['c', n(x), n(y), n(Math.max(0, w)), n(Math.max(0, h))].join(FS))
+  }
+
+  /** 弹出最近一次 clip */
+  unclip() {
+    this._list.push(['C', ''].join(FS))
+  }
+
+  /** 画贴图：tex 为 Texture（或贴图 id）；tint 为染色，uv 为 [u, v, w, h]（缺省整张） */
+  image(tex: { id: number } | number, x: number, y: number, w: number, h: number, options: ImageOptions = {}) {
+    const id = typeof tex === 'number' ? tex : tex?.id
+    if (!Number.isFinite(id)) throw new Error('ui.image：需要贴图（Texture）')
+    const uv = options.uv ? options.uv.map((v) => String(Math.round(v * 10000) / 10000)).join(',') : ''
+    this._list.push(['i', n(x), n(y), n(w), n(h), String(id), this.hex(options.tint ?? '#ffffff', options.alpha), n(options.radius ?? 0), uv].join(FS))
   }
 
   /** 鼠标是否在矩形内 */

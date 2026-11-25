@@ -91,6 +91,7 @@ export function createUnityHost(): Host {
       },
       wheel: () => I.Wheel(),
       focused: () => I.Focused(),
+      textInput: () => I.TextInput(),
       uiSubmit: (list) => U.Submit(list),
       uiMeasure: (text, size, flags) => {
         U.Measure(text, size, flags)

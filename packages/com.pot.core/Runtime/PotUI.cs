@@ -17,6 +17,10 @@ namespace Pot
     ///   a cx cy radius color thickness start sweep     圆弧（角度制，0 度朝上，顺时针）
     ///   g x y w h radius vertical stops                线性渐变；vertical 1 为从上到下、0 为从左到右；stops 为 color@pos 以 ; 分隔（pos 0..1 递增）
     ///   t x y w h color size align flags text          文字；align 0..8 对应 左上/中上/右上/左中/居中/右中/左下/中下/右下；flags 1 粗体 2 阴影 4 换行 8 等宽，位 4..7 为字重/100（0 表示按粗体位取 400/700）
+    ///   i x y w h texId color radius uv                贴图；color 为染色，uv 为 "u,v,w,h"（空为整张）
+    ///   c x y w h                                      压入裁剪矩形（与当前裁剪取交集）
+    ///   C                                              弹出裁剪矩形
+    /// 裁剪内部仍用屏幕坐标：绘制时减去当前裁剪的原点。
     /// </summary>
     [Preserve]
     public static class PotUI
@@ -225,6 +229,72 @@ namespace Pot
             GUI.matrix = matrix;
         }
 
+        static readonly List<Rect> clips = new List<Rect>();
+        static float ox, oy;
+
+        static Rect R(string[] f, int i)
+        {
+            return new Rect(F(f[i]) - ox, F(f[i + 1]) - oy, F(f[i + 2]), F(f[i + 3]));
+        }
+
+        static void PushClip(Rect abs)
+        {
+            if (clips.Count > 0)
+            {
+                var top = clips[clips.Count - 1];
+                var x0 = Mathf.Max(abs.xMin, top.xMin);
+                var y0 = Mathf.Max(abs.yMin, top.yMin);
+                var x1 = Mathf.Min(abs.xMax, top.xMax);
+                var y1 = Mathf.Min(abs.yMax, top.yMax);
+                abs = new Rect(x0, y0, Mathf.Max(0, x1 - x0), Mathf.Max(0, y1 - y0));
+                GUI.EndClip();
+            }
+            clips.Add(abs);
+            GUI.BeginClip(abs);
+            ox = abs.x;
+            oy = abs.y;
+        }
+
+        static void PopClip()
+        {
+            if (clips.Count == 0) return;
+            clips.RemoveAt(clips.Count - 1);
+            GUI.EndClip();
+            if (clips.Count > 0)
+            {
+                var top = clips[clips.Count - 1];
+                GUI.BeginClip(top);
+                ox = top.x;
+                oy = top.y;
+            }
+            else
+            {
+                ox = 0;
+                oy = 0;
+            }
+        }
+
+        static void Image(string[] f)
+        {
+            var tex = PotScene.GetTexture((int)F(f[5]));
+            if (tex == null) return;
+            var rect = R(f, 1);
+            var color = C(f[6]);
+            var radius = f.Length > 7 ? F(f[7]) : 0;
+            var uv = f.Length > 8 ? f[8] : "";
+            if (string.IsNullOrEmpty(uv))
+            {
+                GUI.DrawTexture(rect, tex, ScaleMode.StretchToFill, true, 0, color, 0, radius);
+                return;
+            }
+            var p = uv.Split(',');
+            var coords = new Rect(F(p[0]), F(p[1]), F(p[2]), F(p[3]));
+            var old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTextureWithTexCoords(rect, tex, coords, true);
+            GUI.color = old;
+        }
+
         /// <summary>由 PotUIDrawer.OnGUI 调用</summary>
         internal static void Draw()
         {
@@ -236,6 +306,9 @@ namespace Pot
             }
             var white = Texture2D.whiteTexture;
             var content = new GUIContent();
+            clips.Clear();
+            ox = 0;
+            oy = 0;
             for (var i = 0; i < parsed.Length; i++)
             {
                 var record = parsed[i];
@@ -246,20 +319,29 @@ namespace Pot
                     switch (f[0])
                     {
                         case "r":
-                            GUI.DrawTexture(new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4])), white, ScaleMode.StretchToFill, true, 0, C(f[5]), 0, F(f[6]));
+                            GUI.DrawTexture(R(f, 1), white, ScaleMode.StretchToFill, true, 0, C(f[5]), 0, F(f[6]));
                             break;
                         case "b":
-                            GUI.DrawTexture(new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4])), white, ScaleMode.StretchToFill, true, 0, C(f[5]), F(f[6]), F(f[7]));
+                            GUI.DrawTexture(R(f, 1), white, ScaleMode.StretchToFill, true, 0, C(f[5]), F(f[6]), F(f[7]));
                             break;
                         case "l":
-                            Line(new Vector2(F(f[1]), F(f[2])), new Vector2(F(f[3]), F(f[4])), C(f[5]), F(f[6]));
+                            Line(new Vector2(F(f[1]) - ox, F(f[2]) - oy), new Vector2(F(f[3]) - ox, F(f[4]) - oy), C(f[5]), F(f[6]));
                             break;
                         case "g":
-                            GUI.DrawTexture(new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4])), Gradient(f[6] == "1", f[7]), ScaleMode.StretchToFill, true, 0, Color.white, 0, F(f[5]));
+                            GUI.DrawTexture(R(f, 1), Gradient(f[6] == "1", f[7]), ScaleMode.StretchToFill, true, 0, Color.white, 0, F(f[5]));
+                            break;
+                        case "i":
+                            Image(f);
+                            break;
+                        case "c":
+                            PushClip(new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4])));
+                            break;
+                        case "C":
+                            PopClip();
                             break;
                         case "a":
                         {
-                            float cx = F(f[1]), cy = F(f[2]), r = F(f[3]), thick = F(f[5]), start = F(f[6]), sweep = F(f[7]);
+                            float cx = F(f[1]) - ox, cy = F(f[2]) - oy, r = F(f[3]), thick = F(f[5]), start = F(f[6]), sweep = F(f[7]);
                             var color = C(f[4]);
                             var segments = Mathf.Clamp(Mathf.CeilToInt(Mathf.Abs(sweep) / 6f), 1, 120);
                             var prev = Vector2.zero;
@@ -275,7 +357,7 @@ namespace Pot
                         }
                         case "t":
                         {
-                            var rect = new Rect(F(f[1]), F(f[2]), F(f[3]), F(f[4]));
+                            var rect = R(f, 1);
                             var flags = (int)F(f[8]);
                             var style = Style((int)F(f[6]), (int)F(f[7]), flags);
                             content.text = f.Length > 9 ? f[9] : "";
@@ -296,6 +378,7 @@ namespace Pot
                     // 单条命令格式错误不影响其他命令
                 }
             }
+            while (clips.Count > 0) PopClip();
         }
     }
 

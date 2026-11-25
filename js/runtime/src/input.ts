@@ -59,6 +59,11 @@ export class InputService extends Service {
     return this._host.engine.wheel()
   }
 
+  /** 本帧键入的文字：退格为 \b，回车为 \n（输入框用；只有桌面键盘） */
+  text(): string {
+    return this._host.engine.textInput?.() ?? ''
+  }
+
   /** 窗口是否有焦点（失焦时可以自动暂停） */
   focused() {
     return this._host.engine.focused()

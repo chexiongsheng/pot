@@ -18,7 +18,8 @@
  *   pot status | logs [--follow] [--level error]
  *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules] [unit]
  *   pot plugins | leaks | reload <单元...> | time [get|pause|resume|step|scale] [n]
- *   pot input axis <name> <x> <y> [frames] | input key <name> [down|up|tap] | input clear
+ *   pot input axis <name> <x> <y> [frames] | input key <name> [down|up|tap] | input text <文字> | input clear
+ *                                           input text 里 \n 为回车、\b 为退格
  *   pot screenshot [输出文件.png] [宽度]
  *
  * Runner 不依赖 Dev Server：直接运行 PotRunner.exe <游戏目录> 即可试玩，改源码自动热重载。
@@ -173,6 +174,7 @@ async function main() {
       const [action, name, a, b, c] = args
       if (action === 'axis') return exitBy(await api.call({ type: 'input', action, name, x: +a, y: +b, frames: c ? +c : 0 }))
       if (action === 'key') return exitBy(await api.call({ type: 'input', action, name, mode: a ?? 'tap' }))
+      if (action === 'text') return exitBy(await api.call({ type: 'input', action, text: String(name ?? '').replace(/\\n/g, '\n').replace(/\\b/g, '\b') }))
       return exitBy(await api.call({ type: 'input', action: action ?? 'clear' }))
     }
     case 'screenshot': {

@@ -74,6 +74,7 @@ class MockEngine {
   screen() { return [1280, 720] }
   wheel() { return 0 }
   focused() { return true }
+  textInput() { const t = this.typed ?? ''; this.typed = ''; return t }
   uiSubmit(list) { this.ui = list; this.uiSubmits = (this.uiSubmits ?? 0) + 1 }
   uiMeasure(text, size) { return [String(text).length * size * 0.6, size * 1.3] }
   audioClip(name, rate, channels, data) { (this.clips ??= new Map()).set(name, { rate, channels, bytes: data.length }); return true }

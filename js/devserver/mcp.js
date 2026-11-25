@@ -20,7 +20,7 @@ const tools = [
   { name: 'pot_plugins', description: '已加载单元及其挂载点', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_leaks', description: '泄漏检查：最近一次热重载未回收的旧版本、对象数、定时器数', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_time', description: '控制游戏时间。action: get | pause | resume | step（frames）| scale（value）', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['get', 'pause', 'resume', 'step', 'scale'] }, frames: { type: 'number' }, value: { type: 'number' } } } },
-  { name: 'pot_input', description: '注入虚拟输入。action: axis（name,x,y,frames 可选）| key（name, mode: down/up/tap）| clear', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['axis', 'key', 'clear'] }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, frames: { type: 'number' }, mode: { type: 'string', enum: ['down', 'up', 'tap'] } }, required: ['action'] } },
+  { name: 'pot_input', description: '注入虚拟输入。action: axis（name,x,y,frames 可选）| key（name, mode: down/up/tap）| text（text：键入的文字，\\b 退格、\\n 回车）| clear', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['axis', 'key', 'text', 'clear'] }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, frames: { type: 'number' }, mode: { type: 'string', enum: ['down', 'up', 'tap'] }, text: { type: 'string' } }, required: ['action'] } },
   { name: 'pot_screenshot', description: '截取 Runner 当前画面（PNG）', inputSchema: { type: 'object', properties: { width: { type: 'number', description: '缩放到的宽度，默认 640' } } } },
 ]
 

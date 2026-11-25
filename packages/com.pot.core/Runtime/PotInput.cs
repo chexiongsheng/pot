@@ -153,6 +153,14 @@ namespace Pot
             return Input.mouseScrollDelta.y;
         }
 
+        /// <summary>本帧键入的文字（退格为 \b，回车为 \n），输入框用</summary>
+        [Preserve]
+        public static string TextInput()
+        {
+            var real = Input.inputString ?? "";
+            return virtualText.Length > 0 ? real + virtualText : real;
+        }
+
         /// <summary>应用失去焦点时不应继续射击/移动（JS 用于自动暂停）</summary>
         [Preserve]
         public static bool Focused()
@@ -163,6 +171,14 @@ namespace Pot
         // ---- 虚拟输入注入 ----
 
         static bool wantLock;
+        static string virtualText = "";
+
+        /// <summary>注入键入的文字（\b 退格、\n 回车），在下一次 JS tick 中由 TextInput 读到一次</summary>
+        public static void InjectText(string text)
+        {
+            Touch();
+            virtualText += text ?? "";
+        }
         static float automatedUntil = -1f;
 
         /// <summary>
@@ -203,6 +219,7 @@ namespace Pot
         public static void ClearVirtual()
         {
             automatedUntil = -1f;
+            virtualText = "";
             axes.Clear();
             held.Clear();
             down.Clear();
@@ -213,6 +230,7 @@ namespace Pot
         /// <summary>每帧 JS tick 之后调用：推进虚拟输入的帧状态</summary>
         public static void EndFrame()
         {
+            virtualText = "";
             down.Clear();
             up.Clear();
             if (tapRelease.Count > 0)

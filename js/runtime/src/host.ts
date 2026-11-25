@@ -73,6 +73,8 @@ export interface Engine {
   screen(): [number, number]
   wheel(): number
   focused(): boolean
+  /** 本帧键入的文字（退格为 \b，回车为 \n）；同一帧内多次调用结果相同 */
+  textInput?(): string
 
   // ---- 2D 绘制 ----
   /** 提交本帧绘制命令（格式见 PotUI.cs） */
