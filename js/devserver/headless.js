@@ -131,12 +131,32 @@ function emptyGame() {
 
 const plain = (v) => JSON.parse(JSON.stringify(v ?? {}, (_k, x) => (typeof x === 'function' ? '[function]' : x)))
 
+/**
+ * 有 flow 时逐个状态切过去再各推进 steps 步（16.15 第 7 步）：
+ * scene / ui 里按状态分支的写法也能被校验到，只在后面状态里用到的预制件也会登记
+ */
+function visitFlowStates(runtime, steps, errors = []) {
+  const world = runtime.root.world
+  const start = world.flow.state
+  for (const name of world.flowStates) {
+    if (name === start) continue
+    try {
+      world.goto(name)
+      for (let i = 0; i < steps; i++) runtime.tick(1 / 60)
+    } catch (e) {
+      errors.push(`流程状态 ${name}：${String(e?.message ?? e).split('\n')[0]}`)
+    }
+  }
+  return errors
+}
+
 /** pot blocks：积木、预制件、界面标签、内置节点（16.8） */
 async function listBlocks(dir) {
   const inGame = !!dir && fs.existsSync(path.join(dir, 'manifest.json')) && usesWorld(dir)
   const { pot, runtime } = await loadGame(dir, inGame ? {} : { files: emptyGame() })
   try {
     runtime.tick(1 / 60)
+    if (inGame && !runtime.failures.length) visitFlowStates(runtime, 1)
     const reg = runtime.root.world.registry
     const sysBlocks = new Set(pot.BUILTIN_BLOCKS)
     const sysPrefabs = new Set(pot.BUILTIN_PREFABS)
@@ -163,7 +183,7 @@ async function listBlocks(dir) {
   }
 }
 
-/** pot check 的求值校验与类型生成（16.9）：启动、推进 steps 个固定步并画一帧界面 */
+/** pot check 的求值校验与类型生成（16.9）：启动、推进 steps 个固定步并画一帧界面；有 flow 时再逐个状态切过去各推进 steps 步 */
 async function evaluateGame(dir, options = {}) {
   const errors = []
   const warnings = []
@@ -171,12 +191,7 @@ async function evaluateGame(dir, options = {}) {
   try {
     for (const f of runtime.failures) errors.push(`单元 ${f.name} 启动失败：${String(f.error).split('\n')[0]}`)
     for (let i = 0; i < (options.steps ?? 2); i++) runtime.tick(1 / 60)
-    for (const l of host.logs) {
-      const first = l.text.split('\n')[0]
-      if (l.level === 'error') {
-        if (!/启动失败/.test(first)) errors.push(first)
-      } else if (l.level === 'warn') warnings.push(first)
-    }
+    // 类型按开始状态的 vars 生成，免得被后面切状态时改过的值带偏
     let types = null
     if (!runtime.failures.length) {
       const w = runtime.root.world
@@ -184,6 +199,13 @@ async function evaluateGame(dir, options = {}) {
       const sysNames = new Set(pot.BUILTIN_BLOCKS.map((b) => b.name))
       const blocks = w.registry.blockNames().map((n) => w.registry.block(n)).filter((b) => !sys.has(b) && !sysNames.has(b.name))
       types = pot.generateTypes(blocks, w.vars)
+    }
+    if (!runtime.failures.length) visitFlowStates(runtime, options.steps ?? 2, errors)
+    for (const l of host.logs) {
+      const first = l.text.split('\n')[0]
+      if (l.level === 'error') {
+        if (!/启动失败/.test(first)) errors.push(first)
+      } else if (l.level === 'warn') warnings.push(first)
     }
     return { errors: [...new Set(errors)], warnings: [...new Set(warnings)], types }
   } finally {

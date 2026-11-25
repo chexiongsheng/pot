@@ -1,0 +1,54 @@
+{
+  "name": "开始后吃第一个金币，暂停时不动，继续后回到进行中",
+  "steps": 120,
+  "input": [
+    {
+      "at": 0,
+      "emit": "start"
+    },
+    {
+      "at": 2,
+      "axis": {
+        "move": [
+          0.832,
+          0.555
+        ]
+      }
+    },
+    {
+      "at": 40,
+      "axis": {
+        "move": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "at": 50,
+      "down": [
+        "pause"
+      ]
+    },
+    {
+      "at": 51,
+      "up": [
+        "pause"
+      ]
+    },
+    {
+      "at": 80,
+      "emit": "resume"
+    }
+  ],
+  "expect": {
+    "vars": {
+      "score": 1
+    },
+    "count": {
+      "coin": 4
+    },
+    "flow": "play",
+    "hash": "308d9a76"
+  }
+}
