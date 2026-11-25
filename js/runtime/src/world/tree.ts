@@ -47,6 +47,8 @@ export interface TreeResult {
   stage: StageSpec | null
   /** 以大写标签直接引用的预制件（挂载时自动登记） */
   prefabs: Prefab[]
+  /** 告警（不影响求值）：列表里的节点缺 key */
+  warnings: string[]
 }
 
 const BUILTIN_TAGS = ['rule', 'stage']
@@ -101,7 +103,7 @@ function flatChildren(children: any): any[] {
 }
 
 export function evaluate(root: PotChild, registry: Registry): TreeResult {
-  const result: TreeResult = { entities: [], rules: [], stage: null, prefabs: [] }
+  const result: TreeResult = { entities: [], rules: [], stage: null, prefabs: [], warnings: [] }
   const errors: string[] = []
   const paths = new Map<string, SourcePos | undefined>()
   const usedPrefabs = new Set<Prefab>()
@@ -124,14 +126,20 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
     return true
   }
 
-  const visit = (child: any, layer: Layer, depth: number) => {
+  /** 子节点：静态写出的子节点数组（jsxs）里的元素不算列表，其余数组（map 的结果）是列表，列表里的节点要写 key */
+  const children = (value: any, layer: Layer, depth: number, isStatic: boolean) => {
+    if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic)
+    else visit(value, layer, depth + 1, false)
+  }
+
+  const visit = (child: any, layer: Layer, depth: number, dynamic = false) => {
     if (child === null || child === undefined || child === true || child === false || child === '') return
     if (depth > 64) {
       errors.push('场景树嵌套超过 64 层，可能是函数组件递归')
       return
     }
     if (Array.isArray(child)) {
-      for (const c of child) visit(c, layer, depth + 1)
+      for (const c of child) visit(c, layer, depth + 1, true)
       return
     }
     if (typeof child === 'string' || typeof child === 'number') {
@@ -144,11 +152,15 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
     }
     const node = child as PotNode
     const type = node.type
+    if (dynamic && node.key === null && type !== 'rule' && type !== 'stage') {
+      result.warnings.push(`${sourcePrefix(node.source)}列表里的 <${nodeName(node)}> 缺少 key：增删元素后实体身份会错位（序号 key 只适合静态布置）`)
+    }
+    const isStatic = !!(node as any).static
     if (type === Fragment) {
-      if (node.key === null) visit(node.props.children, { ...layer, source: node.source }, depth + 1)
+      if (node.key === null) children(node.props.children, { ...layer, source: node.source }, depth, isStatic)
       else {
         const prefix = join(layer, `#${node.key}`)
-        visit(node.props.children, { prefix, counts: new Map(), source: node.source }, depth + 1)
+        children(node.props.children, { prefix, counts: new Map(), source: node.source }, depth, isStatic)
       }
       return
     }
@@ -162,7 +174,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
         errors.push(`${sourcePrefix(node.source)}函数组件 ${name} 出错：${error?.message ?? error}`)
         return
       }
-      visit(out, { prefix, counts: new Map(), source: node.source }, depth + 1)
+      children(out, { prefix, counts: new Map(), source: node.source }, depth, true)
       return
     }
     if (type === 'rule') return rule(node, layer)
@@ -336,7 +348,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
     result.stage = spec
   }
 
-  visit(root, { prefix: '', counts: new Map() }, 0)
+  children(root, { prefix: '', counts: new Map() }, 0, true)
   if (errors.length) {
     const error = new Error(errors.join('\n'))
     ;(error as any).errors = errors

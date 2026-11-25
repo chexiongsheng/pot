@@ -79,6 +79,7 @@ var pot = (() => {
     WorldService: () => WorldService,
     WorldView: () => WorldView,
     ancestors: () => ancestors,
+    applyPatches: () => applyPatches,
     applyUniforms: () => applyUniforms,
     assertSerializable: () => assertSerializable,
     bindEntry: () => bindEntry,
@@ -109,6 +110,7 @@ var pot = (() => {
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
     formatSource: () => formatSource,
+    generateTypes: () => generateTypes,
     getPropertyDescriptor: () => getPropertyDescriptor,
     getTraceable: () => getTraceable,
     hash: () => hash,
@@ -139,11 +141,14 @@ var pot = (() => {
     sourcePrefix: () => sourcePrefix,
     symbols: () => symbols,
     threeChunks: () => threeChunks,
+    treeView: () => treeView,
+    typeOfValue: () => typeOfValue,
     unitOf: () => unitOf,
     unitOfFiber: () => unitOfFiber,
     unity: () => unity,
     vertexInputs: () => vertexInputs,
-    withProps: () => withProps
+    withProps: () => withProps,
+    worldHash: () => worldHash
   });
 
   // node_modules/cosmokit/lib/index.mjs
@@ -6902,7 +6907,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
 
   // runtime/src/world/registry.ts
   var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "children"]);
-  var PREFAB_RESERVED = /* @__PURE__ */ new Set(["is", "tags"]);
+  var PREFAB_RESERVED = /* @__PURE__ */ new Set(["is", "tags", "about"]);
   var IDENT = /^[a-z][A-Za-z0-9]*$/;
   function defineBlock(def) {
     if (!def || typeof def.name !== "string" || !IDENT.test(def.name)) {
@@ -7398,7 +7403,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return out;
   }
   function evaluate(root, registry) {
-    const result = { entities: [], rules: [], stage: null, prefabs: [] };
+    const result = { entities: [], rules: [], stage: null, prefabs: [], warnings: [] };
     const errors = [];
     const paths = /* @__PURE__ */ new Map();
     const usedPrefabs = /* @__PURE__ */ new Set();
@@ -7418,14 +7423,18 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       paths.set(path, node.source);
       return true;
     };
-    const visit = (child, layer, depth) => {
+    const children = (value, layer, depth, isStatic) => {
+      if (Array.isArray(value)) for (const c of value) visit(c, layer, depth + 1, !isStatic);
+      else visit(value, layer, depth + 1, false);
+    };
+    const visit = (child, layer, depth, dynamic = false) => {
       if (child === null || child === void 0 || child === true || child === false || child === "") return;
       if (depth > 64) {
         errors.push("场景树嵌套超过 64 层，可能是函数组件递归");
         return;
       }
       if (Array.isArray(child)) {
-        for (const c of child) visit(c, layer, depth + 1);
+        for (const c of child) visit(c, layer, depth + 1, true);
         return;
       }
       if (typeof child === "string" || typeof child === "number") {
@@ -7438,11 +7447,15 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       const node = child;
       const type = node.type;
+      if (dynamic && node.key === null && type !== "rule" && type !== "stage") {
+        result.warnings.push(`${sourcePrefix(node.source)}列表里的 <${nodeName(node)}> 缺少 key：增删元素后实体身份会错位（序号 key 只适合静态布置）`);
+      }
+      const isStatic = !!node.static;
       if (type === Fragment) {
-        if (node.key === null) visit(node.props.children, { ...layer, source: node.source }, depth + 1);
+        if (node.key === null) children(node.props.children, { ...layer, source: node.source }, depth, isStatic);
         else {
           const prefix = join(layer, `#${node.key}`);
-          visit(node.props.children, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth + 1);
+          children(node.props.children, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth, isStatic);
         }
         return;
       }
@@ -7456,7 +7469,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           errors.push(`${sourcePrefix(node.source)}函数组件 ${name} 出错：${error?.message ?? error}`);
           return;
         }
-        visit(out, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth + 1);
+        children(out, { prefix, counts: /* @__PURE__ */ new Map(), source: node.source }, depth, true);
         return;
       }
       if (type === "rule") return rule(node, layer);
@@ -7616,12 +7629,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         errors.push(`${sourcePrefix(node.source)}一棵场景树只能有一个 <stage>${result.stage.source ? `（第一个在 ${result.stage.source.file}:${result.stage.source.line}）` : ""}`);
         return;
       }
-      const { children, ...rest } = node.props;
+      const { children: children2, ...rest } = node.props;
       const spec = clone(rest);
       if (node.source) spec.source = node.source;
       result.stage = spec;
     };
-    visit(root, { prefix: "", counts: /* @__PURE__ */ new Map() }, 0);
+    children(root, { prefix: "", counts: /* @__PURE__ */ new Map() }, 0, true);
     if (errors.length) {
       const error = new Error(errors.join("\n"));
       error.errors = errors;
@@ -7731,6 +7744,50 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       return out;
     });
+  }
+  var IDENT2 = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  function typeOfValue(value, depth = 0) {
+    if (value === null || value === void 0) return "any";
+    if (typeof value === "number") return "number";
+    if (typeof value === "string") return "string";
+    if (typeof value === "boolean") return "boolean";
+    if (depth > 6) return "any";
+    if (Array.isArray(value)) {
+      if (value.length === 3 && value.every((n2) => typeof n2 === "number")) return "Vec3";
+      if (!value.length) return "any[]";
+      const types = [...new Set(value.map((v) => typeOfValue(v, depth + 1)))];
+      return types.length === 1 ? `${types[0]}[]` : `(${types.join(" | ")})[]`;
+    }
+    if (isPlainObject2(value)) {
+      const keys = Object.keys(value);
+      if (!keys.length) return "Record<string, any>";
+      return `{ ${keys.map((k) => `${IDENT2.test(k) ? k : JSON.stringify(k)}: ${typeOfValue(value[k], depth + 1)}`).join("; ")} }`;
+    }
+    return "any";
+  }
+  function generateTypes(blocks, vars) {
+    const lines = ["// 由 pot check / pot types 生成，不要手改", "import type { Over, Vec3 } from '@pot/core'", "", "declare module '@pot/core' {", "  interface GameBlockProps {"];
+    for (const b of blocks) lines.push(`    ${b.name}?: Over<${typeOfValue(b.props ?? {})}>`);
+    lines.push("  }", "  interface GameVars {");
+    for (const key of Object.keys(vars)) lines.push(`    ${IDENT2.test(key) ? key : JSON.stringify(key)}: ${typeOfValue(vars[key])}`);
+    lines.push("  }", "}", "", "export {}", "");
+    return lines.join("\n");
+  }
+  function canonical(value) {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    if (value && typeof value === "object") return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+    if (typeof value === "number") return Number.isFinite(value) ? String(Math.round(value * 1e6) / 1e6) : "null";
+    return JSON.stringify(value ?? null);
+  }
+  function worldHash(data) {
+    const { contacts: _c, ...rest } = data;
+    const text = canonical(rest);
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
   }
 
   // runtime/src/world/collide.ts
@@ -8389,6 +8446,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const input = this._inputs.get(id);
       const patches = mergePatches(input?.overrides, this._patches.get(id));
       const entities = patches ? applyPatches(result.entities, patches, this.registry, (m) => this._warnOnce(`挂载 ${id}：${m}`)) : result.entities;
+      for (const warning of result.warnings) this._warnOnce(warning);
       this._results.set(id, result);
       this._diff(this.data, id, entities);
       this._rules.set(id, result.rules);

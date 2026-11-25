@@ -4,7 +4,10 @@
  *   pot dev [--port 7788] [--root 目录]      启动 Dev Server（AI ↔ Runner 通道；/files/ 提供 root 下的文件给手机 Runner）
  *   pot open <游戏目录|.potg|URL> [--reset]   让已连接的 Runner 打开游戏（--reset 清空存档）
  *   pot restart [--reset]                   冷重启当前游戏（默认保留 state）
- *   pot check <游戏目录>                     类型检查 + 试打包，Runner 运行前发现错误
+ *   pot check <游戏目录>                     试打包 + 求值校验（defineGame 游戏）+ 生成 .pot/types.d.ts + tsc 类型检查
+ *   pot types <游戏目录>                     只生成 .pot/types.d.ts（游戏自写积木的属性、vars 的类型）
+ *   pot blocks [关键字] [--name 名字] [--dir 游戏目录] [--json]
+ *                                           列出积木、预制件、界面标签、内置节点（系统级加游戏自写的），不需要 Runner
  *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
  *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
  *   pot release <游戏目录> [--platform win64|android|webgl[,…]] [--unity Unity.exe] [--out 目录]
@@ -88,6 +91,33 @@ async function main() {
     case 'check': {
       const { checkGame } = require('./builder')
       return exitBy(await checkGame(path.resolve(args[0] ?? '.')))
+    }
+    case 'types': {
+      const { generateGameTypes } = require('./builder')
+      return exitBy(await generateGameTypes(path.resolve(args[0] ?? '.')))
+    }
+    case 'blocks': {
+      const { listBlocks } = require('./headless')
+      const dir = path.resolve(flags.dir ?? '.')
+      const { game, items } = await listBlocks(dir)
+      if (flags.name) {
+        const found = items.filter((i) => i.name === flags.name)
+        if (!found.length) return exitBy({ ok: false, error: `没有 ${flags.name}` })
+        return print(found.length === 1 ? found[0] : found)
+      }
+      const word = args[0]?.toLowerCase()
+      const hit = word ? items.filter((i) => i.name.toLowerCase().includes(word) || String(i.about).toLowerCase().includes(word)) : items
+      if (flags.json) return print(hit)
+      const KIND = { block: '积木', prefab: '预制件', ui: '界面', node: '节点' }
+      const brief = (i) => {
+        if (i.kind === 'block') return Object.keys(i.props).join(', ')
+        if (i.kind === 'prefab') return Object.keys(i.blocks).join(' + ') || '（空）'
+        return Object.keys(i.props).filter((k) => !['at', 'w', 'h', 'grow', 'pad', 'hidden'].includes(k)).join(', ')
+      }
+      console.log(game ? `游戏 ${game}（系统级 + 游戏自写）` : '系统级（不在用 defineGame 的游戏目录下）')
+      for (const i of hit) console.log(`[${i.layer}] ${KIND[i.kind]} ${i.name}：${i.about}${brief(i) ? `  {${brief(i)}}` : ''}`)
+      console.log('详情：pot blocks --name <名字>')
+      return
     }
     case 'build': {
       const { buildRelease } = require('./builder')

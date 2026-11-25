@@ -309,6 +309,64 @@ test('pot check：hello 通过；缺单元、语法错误、类型错误都能�
   }
 })
 
+/** 复制 hello-tsx 到临时目录，tsconfig 的 paths 改成绝对路径 */
+function copyHelloTsx(prefix) {
+  const src = path.resolve(helloDir, '../hello-tsx')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  fs.cpSync(src, dir, { recursive: true, filter: (f) => !f.includes(`${path.sep}.pot`) })
+  const tsconfig = path.join(dir, 'tsconfig.json')
+  const abs = (rel) => JSON.stringify(path.resolve(__dirname, '../runtime/src', rel).replace(/\\/g, '/'))
+  fs.writeFileSync(tsconfig, fs.readFileSync(tsconfig, 'utf8')
+    .replace('"../../js/tsconfig.json"', JSON.stringify(path.resolve(__dirname, '../tsconfig.json').replace(/\\/g, '/')))
+    .replace(/"[^"]*js\/runtime\/src\/index\.ts"/, abs('index.ts'))
+    .replace(/"[^"]*js\/runtime\/src\/jsx-runtime\.ts"/, abs('jsx-runtime.ts'))
+    .replace(/"[^"]*js\/runtime\/src\/jsx-dev-runtime\.ts"/, abs('jsx-dev-runtime.ts')))
+  return dir
+}
+
+test('pot check（defineGame 游戏）：求值报错带行号、列表缺 key 告警、生成 .pot/types.d.ts；pot blocks 列出游戏的积木', async () => {
+  const { checkGame } = require('../devserver/builder')
+  const { listBlocks } = require('../devserver/headless')
+  const dir = copyHelloTsx('pot-check-tsx-')
+  try {
+    const ok = await checkGame(dir)
+    assert.deepEqual(ok.errors, [])
+    assert.equal(ok.warnings, undefined)
+    const types = fs.readFileSync(path.join(dir, '.pot/types.d.ts'), 'utf8')
+    assert.match(types, /interface GameVars \{\s+score: number\s+\}/)
+
+    const game = path.join(dir, 'src/plugins/game.tsx')
+    const source = fs.readFileSync(game, 'utf8')
+    fs.writeFileSync(game, source
+      .replace("import { defineGame, definePrefab } from '@pot/core'", "import { defineBlock, defineGame, definePrefab } from '@pot/core'\nconst jumps = defineBlock({ name: 'jumps', about: '跳', props: { height: 1, at: [0, 0, 0] } })")
+      .replace('vars: { score: 0 },', "vars: { score: 0, best: { name: '', n: 0 } },\n  blocks: [jumps],")
+      .replace('<Coin key={i} at={at} />', '<Coin at={at} />')
+      .replace('<Player at={[0, 0.5, 0]} />', '<Player at={[0, 0.5, 0]} />\n    <wall />'))
+    const bad = await checkGame(dir)
+    assert.equal(bad.ok, false)
+    assert.ok(bad.errors.some((e) => /game\.tsx:\d+ 未知的标签 <wall>/.test(e)), bad.errors.join('\n'))
+
+    fs.writeFileSync(game, fs.readFileSync(game, 'utf8').replace('\n    <wall />', ''))
+    const warn = await checkGame(dir)
+    assert.deepEqual(warn.errors, [])
+    assert.ok(warn.warnings.some((w) => /game\.tsx:\d+ 列表里的 <coin> 缺少 key/.test(w)), JSON.stringify(warn.warnings))
+    const generated = fs.readFileSync(path.join(dir, '.pot/types.d.ts'), 'utf8')
+    assert.match(generated, /jumps\?: Over<\{ height: number; at: Vec3 \}>/)
+    assert.match(generated, /best: \{ name: string; n: number \}/)
+
+    const { items } = await listBlocks(dir)
+    const jumpsItem = items.find((i) => i.name === 'jumps')
+    assert.deepEqual([jumpsItem.kind, jumpsItem.layer, jumpsItem.about, jumpsItem.props], ['block', 'game', '跳', { height: 1, at: [0, 0, 0] }])
+    assert.deepEqual(items.find((i) => i.name === 'coin').blocks.trigger, { radius: 0.8 })
+    assert.equal(items.find((i) => i.name === 'shape').layer, 'system')
+    assert.ok(items.some((i) => i.kind === 'ui' && i.name === 'button'))
+    const sys = await listBlocks(null)
+    assert.ok(!sys.items.some((i) => i.name === 'coin'), '不在游戏目录时只列系统级')
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('MCP：initialize / tools/list', async () => {
   const { spawn } = require('child_process')
   const child = spawn(process.execPath, [path.join(__dirname, '../devserver/cli.js'), 'mcp', '--port', '1'], { stdio: ['pipe', 'pipe', 'inherit'] })

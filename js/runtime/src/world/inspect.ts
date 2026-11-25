@@ -114,3 +114,59 @@ export function applyPatches(specs: EntitySpec[], patches: Record<string, any>, 
     return out
   })
 }
+
+// ---------------------------------------------------------------- 类型生成（16.9）
+
+const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+/** 由缺省值推出 TS 类型：数、字符串、布尔照搬；三个数的数组为 Vec3；普通对象递归；null 为 any */
+export function typeOfValue(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) return 'any'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'boolean') return 'boolean'
+  if (depth > 6) return 'any'
+  if (Array.isArray(value)) {
+    if (value.length === 3 && value.every((n) => typeof n === 'number')) return 'Vec3'
+    if (!value.length) return 'any[]'
+    const types = [...new Set(value.map((v) => typeOfValue(v, depth + 1)))]
+    return types.length === 1 ? `${types[0]}[]` : `(${types.join(' | ')})[]`
+  }
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value)
+    if (!keys.length) return 'Record<string, any>'
+    return `{ ${keys.map((k) => `${IDENT.test(k) ? k : JSON.stringify(k)}: ${typeOfValue((value as any)[k], depth + 1)}`).join('; ')} }`
+  }
+  return 'any'
+}
+
+/** .pot/types.d.ts 的内容：游戏自写积木的属性覆盖、vars 的类型 */
+export function generateTypes(blocks: { name: string; props?: Record<string, any> }[], vars: Record<string, any>) {
+  const lines = ['// 由 pot check / pot types 生成，不要手改', "import type { Over, Vec3 } from '@pot/core'", '', "declare module '@pot/core' {", '  interface GameBlockProps {']
+  for (const b of blocks) lines.push(`    ${b.name}?: Over<${typeOfValue(b.props ?? {})}>`)
+  lines.push('  }', '  interface GameVars {')
+  for (const key of Object.keys(vars)) lines.push(`    ${IDENT.test(key) ? key : JSON.stringify(key)}: ${typeOfValue(vars[key])}`)
+  lines.push('  }', '}', '', 'export {}', '')
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------- World 哈希（16.10）
+
+function canonical(value: any): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`
+  if (typeof value === 'number') return Number.isFinite(value) ? String(Math.round(value * 1e6) / 1e6) : 'null'
+  return JSON.stringify(value ?? null)
+}
+
+/** World 数据（去掉 contacts）规范化 JSON 的 FNV-1a 32 位值，十六进制；数保留 6 位小数 */
+export function worldHash(data: Record<string, any>) {
+  const { contacts: _c, ...rest } = data
+  const text = canonical(rest)
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}

@@ -117,10 +117,16 @@ async function packGame(gameDir, outFile) {
   return { file: target, id: manifest.id, version: manifest.version, files: entries.length, bytes: zip.length }
 }
 
-/** 检查：manifest、单元与 manifest 对应、试打包（语法/模块解析）、tsc 类型检查（有 tsconfig.json 时） */
+/**
+ * 检查：manifest、单元与 manifest 对应、试打包（语法/模块解析）；
+ * 用了 defineGame 的游戏再在无画面宿主上求值（树求值、规则、界面的报错与告警）并生成 .pot/types.d.ts；
+ * 最后 tsc 类型检查（有 tsconfig.json 时）。告警放在 warnings 里，不影响 ok。
+ */
 async function checkGame(gameDir) {
   gameDir = path.resolve(gameDir)
   const errors = []
+  const warnings = []
+  let types = null
   let manifest
   try {
     manifest = readManifest(gameDir)
@@ -132,10 +138,23 @@ async function checkGame(gameDir) {
     const name = typeof item === 'string' ? item : item?.name
     if (!names.has(name)) errors.push(`manifest.plugins 中的 "${name}" 没有对应的 src/plugins/${name}.ts（或 .tsx）`)
   }
+  let bundled = true
   try {
     await bundleUnits(gameDir)
   } catch (error) {
+    bundled = false
     errors.push(...formatErrors(error))
+  }
+  const headless = require('./headless')
+  if (bundled && headless.usesWorld(gameDir)) {
+    try {
+      const result = await headless.evaluateGame(gameDir)
+      errors.push(...result.errors)
+      warnings.push(...result.warnings)
+      if (result.types) types = headless.writeTypes(gameDir, result.types)
+    } catch (error) {
+      errors.push(`求值校验出错：${error?.message ?? error}`)
+    }
   }
   if (fs.existsSync(path.join(gameDir, 'tsconfig.json'))) {
     const tsc = require.resolve('typescript/bin/tsc')
@@ -143,7 +162,17 @@ async function checkGame(gameDir) {
     const out = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim()
     if (result.status !== 0) errors.push(...out.split(/\r?\n/).filter(Boolean))
   }
-  return { ok: errors.length === 0, errors }
+  return { ok: errors.length === 0, errors, ...(warnings.length ? { warnings } : {}), ...(types ? { types } : {}) }
 }
 
-module.exports = { buildRelease, packGame, checkGame, listUnits, walk }
+/** pot types：只生成 .pot/types.d.ts */
+async function generateGameTypes(gameDir) {
+  gameDir = path.resolve(gameDir)
+  const headless = require('./headless')
+  if (!headless.usesWorld(gameDir)) return { ok: false, errors: ['游戏没有用 defineGame，不需要生成类型'] }
+  const result = await headless.evaluateGame(gameDir)
+  if (!result.types) return { ok: false, errors: result.errors }
+  return { ok: true, file: headless.writeTypes(gameDir, result.types) }
+}
+
+module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk }

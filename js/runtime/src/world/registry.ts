@@ -11,7 +11,7 @@ import type { Prefab, PotNode } from './node'
 /** 实体标签与 w.spawn 上不是积木名的属性 */
 export const RESERVED = new Set(['key', 'at', 'rot', 'scale', 'name', 'tags', 'children'])
 /** 预制件定义里不是积木名的字段 */
-export const PREFAB_RESERVED = new Set(['is', 'tags'])
+export const PREFAB_RESERVED = new Set(['is', 'tags', 'about'])
 
 const IDENT = /^[a-z][A-Za-z0-9]*$/
 
@@ -43,7 +43,8 @@ export function defineBlock<P extends object = {}, S extends object = {}>(def: B
   return def
 }
 
-export function definePrefab<P = any>(name: string, def: { is?: Prefab | string; tags?: string[]; [block: string]: any } = {}): Prefab<P> {
+/** def.about：一句话说明（pot blocks 显示） */
+export function definePrefab<P = any>(name: string, def: { is?: Prefab | string; tags?: string[]; about?: string; [block: string]: any } = {}): Prefab<P> {
   if (typeof name !== 'string' || !IDENT.test(name)) throw new Error(`definePrefab：预制件名必须是小写开头的驼峰标识符，收到 ${JSON.stringify(name)}`)
   if (!isPlainObject(def)) throw new Error(`definePrefab(${name})：定义必须是普通对象`)
   const prefab = ((props: any) => makeNode(prefab, props, props?.key)) as any

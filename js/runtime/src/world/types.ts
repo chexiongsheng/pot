@@ -9,7 +9,18 @@ import type { PotChild, Prefab } from './node'
 import type { World } from './world'
 
 /** 积木覆盖：对象为字段覆盖，true 用默认值，false / null 去掉 */
-type Over<T> = Partial<T> | boolean | null
+export type Over<T> = Partial<T> | boolean | null
+
+/** 游戏自写积木的属性覆盖：由 pot check / pot types 生成到 .pot/types.d.ts，以声明合并补进来 */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface GameBlockProps {}
+
+/** w.vars 的类型：由 pot check / pot types 按运行时的 vars 生成 */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface GameVars {}
+
+/** 生成过类型时 w.vars 就是 GameVars（新变量要先写进 defineGame 的 vars）；没生成过时放行任意字段 */
+export type VarsOf = keyof GameVars extends never ? Record<string, any> : GameVars
 
 export interface BuiltinBlockProps {
   shape?: Over<{ kind: Shape; color: Color; scale: number | Vec3 }>
@@ -22,7 +33,7 @@ export interface BuiltinBlockProps {
   light?: Over<{ color: Color; intensity: number; range: number }>
 }
 
-export interface EntityProps extends BuiltinBlockProps {
+export interface EntityProps extends BuiltinBlockProps, GameBlockProps {
   key?: string | number | null
   at?: Vec3
   rot?: Vec3

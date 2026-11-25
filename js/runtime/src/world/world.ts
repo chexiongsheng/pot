@@ -16,6 +16,7 @@ import type { BlockDef } from './registry'
 import { evaluate } from './tree'
 import type { EntitySpec, RuleSpec, StageSpec, TreeResult } from './tree'
 import { applyPatches, mergePatches, treeView } from './inspect'
+import type { VarsOf } from './types'
 import { overlappingPairs } from './collide'
 import type { Collider } from './collide'
 import { WorldView } from './view'
@@ -233,8 +234,8 @@ export class WorldService extends Service {
     return this.data.tick * this.dt
   }
 
-  get vars() {
-    return this.data.vars
+  get vars(): VarsOf {
+    return this.data.vars as any
   }
 
   /** 挂载 id 对应的单元（展示用）；w.spawn 生成的实体没有挂载，记为 (world) */
@@ -429,6 +430,7 @@ export class WorldService extends Service {
     const input = this._inputs.get(id)
     const patches = mergePatches(input?.overrides, this._patches.get(id))
     const entities = patches ? applyPatches(result.entities, patches, this.registry, (m) => this._warnOnce(`挂载 ${id}：${m}`)) : result.entities
+    for (const warning of result.warnings) this._warnOnce(warning)
     this._results.set(id, result)
     this._diff(this.data, id, entities)
     this._rules.set(id, result.rules)

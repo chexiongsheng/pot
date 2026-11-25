@@ -1310,3 +1310,10 @@ M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，
   - 补丁里未知的积木、积木没有的字段、对不上的路径都只告警（每条一次），合法的部分照常生效；`world set` 对不存在的挂载直接报错。
   - `--save` 由 Dev Server 直接写文件，不经过 Runner；只支持以本机目录打开的游戏（Runner 上报的 `game.kind` 为 `Directory`）。`world clear --save` 删掉文件里该挂载的部分。
   - `pot query world <筛选>` 复用 `query` 的第二个参数；`pot world list` 列出当前的运行期补丁。
+- 无画面宿主、`pot blocks`、求值校验与类型（第 5 步）：
+  - 无画面宿主优先加载 `js/dist` 的产物，没有时用包里的 `core.cjs`、`devtools.cjs`；引擎没实现的方法一律返回空串（多数宿主方法以空串表示成功）。只对源码里出现 `defineGame` 的游戏做求值校验和类型生成，低层游戏的 `pot check` 行为不变。
+  - 求值校验收集 `world` 记录器的 error 与 warn（只取第一行），去掉与 `runtime.failures` 重复的“启动失败”。
+  - 场景树也做“列表缺 `key`”告警，判定方式与界面树相同（16.15 第 3 步）；`rule`、`stage` 不要求 `key`。
+  - `w.vars` 的类型为 `VarsOf`：生成过 `GameVars` 时就是它（新变量要先写进 `defineGame` 的 `vars` 再跑 `pot check`），没生成过时放行任意字段。生成文件 `import type { Over, Vec3 }`。游戏的 `tsconfig.json` 的 `include` 要加 `.pot/*.d.ts`（hello-tsx 已加，模板在第 7 步加）。
+  - 生成的类型只含游戏自写的积木（与系统积木同名的覆盖不生成，类型沿用系统的）；实体标签的索引签名保留，所以拼错的积木名 tsc 仍不报，靠求值校验报“未知的积木”。
+  - `definePrefab` 的定义里可写 `about`（保留字段，不当积木名）。`pot blocks` 的层只有 `system`、`game`；不在用 `defineGame` 的游戏目录下时只列系统级。
