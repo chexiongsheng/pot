@@ -1332,3 +1332,138 @@ M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，
   - 模板位于 Skill 目录下：新模板是 `skills/pot-game-dev/templates/game/`（`game.tsx`、`data/coins.json`、`tests/smoke.json`、`AGENTS.md`，`tsconfig.json` 的 `include` 加 `.pot/*.d.ts`），原低层模板改名为 `skills/pot-game-dev/templates/game-lowlevel/`。16.11、16.12 里的 `templates/game-lowlevel/` 指的就是它。
   - hello-tsx 的暂停键用一个游戏积木 `pauseKey`（`w.cmd().pressed('pause')` 时 `w.goto('paused')`）挂在玩家上，`controls` 把动作 `pause` 映射到 Esc；暂停、结算等界面用一个函数组件 `Menu`。`devserver.test.js` 里改写 hello-tsx 源码的用例随之调整替换串。
   - 后续待办（不在 M2 内做）：界面结构变化后焦点不复位。quiz-tsx 答完一题换下一题时，焦点停在原来的按钮位置，按 Tab 移到下一个选项，而不是落到新题的第一个选项上。要定的行为：流程状态切换、或焦点所在节点的 key 路径消失时，焦点清空还是移到第一个可聚焦节点；是否提供 `autoFocus` 属性让界面声明首个焦点。实机验证时发现，记录于 2026-11-25。
+
+## 17. M3 实施规格
+
+M3 的目标见第 13 节：模拟侧碰撞、`moveFps`、AI 积木、套件机制；整理出 `fps` 与写实两个套件；saltline 的玩家和敌人改为积木（渲染单元保留）；`moveTopdown`、`cameraFollow` 迁入 `topdown` 套件。本节是实施规格，与 6.7、6.12 不一致的以这里为准。
+
+### 17.1 临时决定
+
+- 第 14 节待决第 4 项（套件目录与版本）：
+  - 套件源码放仓库根的 `kits/<名字>/`，入口是 `kits/<名字>/index.ts`。
+  - `npm run build`（`js/scripts/build.js`）把全部套件源码打成 `packages/com.pot.core/Runtime/Resources/pot/kits.json`（入库），格式为 `{ "files": { "topdown/index.ts": "源码", ... } }`。Runner 没有套件目录时从这里读。
+  - 套件版本跟随 core，不单独编号，`defineKit` 不设 `version`。发布的游戏（`pot build`）把用到的套件打进 bundle，运行时不再依赖 Runner 里的套件。
+- 套件目录（KitRoot）的来源，按顺序取第一个存在的：Runner 参数 `-potKits=<目录>`、环境变量 `POT_KITS`、编辑器下的 `<Unity 工程>/../kits`。都没有时只读 `kits.json`，套件不热重载。
+- 第 5 项（刚体）仍不做。碰撞只有静态体与运动学角色移动，`body` 不带速度积分。
+- 第 6 项（实体层级）保持平的。
+
+### 17.2 套件机制
+
+`defineKit` 与 `kits`：
+
+```ts
+// kits/topdown/index.ts
+import { defineKit, defineBlock } from '@pot/core'
+export const moveTopdown = defineBlock({ ... })
+export default defineKit({
+  name: 'topdown',
+  about: '俯视角移动与跟随相机',
+  blocks: [moveTopdown, cameraFollow],
+  prefabs: [],
+  controls: { move: { axis: 'wasd' } },
+  requires: [],
+})
+
+// games/hello-tsx/src/plugins/game.tsx
+import topdown from '@pot/kit/topdown'
+export default defineGame({ kits: [topdown], ... })
+```
+
+- `defineKit` 返回冻结的句柄，并登记到全局的套件目录（名字到句柄），供报错与 `pot blocks` 使用。重复 `defineKit` 同名时以后者为准（热重载）。
+- `defineGame` 的 `kits`：先按 `requires` 展开闭包（深度优先，依赖在前，去重），再按顺序登记，全部在游戏的 `blocks`、`prefabs` 之前。`controls` 的合并顺序为套件（展开后的顺序）、游戏，按动作名覆盖。
+- 两个套件登记了同名的积木或预制件时报错“积木 X 同时由套件 a 和 b 提供”，除非游戏自己的 `blocks`/`prefabs` 也有这个名字（游戏覆盖二者）。套件与系统同名时套件覆盖系统，不报错。
+- 登记表的条目带来源 `source`：`system`、`kit:<名字>`、`game`。`registry.sourceOf(kind, name)` 返回栈顶的来源。
+- 树求值遇到未知的积木或预制件时，查全局套件目录：有套件提供这个名字就报“未知的积木 X，它属于套件 fps，请加到 defineGame 的 kits”，否则沿用原来的报错。
+
+模块解析：
+
+- 加载器（`js/devtools/src/loader.ts`）支持 `@pot/kit/<名字>[/子路径]`，按 `RESOLVE_SUFFIXES` 解析，模块的记录路径为 `@pot/kit/topdown/index.ts` 这种形式。套件内的相对路径 import 不得越出该套件的目录；套件不能 import 游戏目录的文件。
+- 读取：`Host` 增加可选方法 `readKit(path)`（`path` 形如 `topdown/index.ts`），找不到返回 `null`。Unity 侧 `GameFS.ReadKit` 先读 KitRoot 下的文件，再回退 `kits.json`；无画面宿主与测试直接读仓库的 `kits/`。宿主没有 `readKit` 时，引入套件报“当前宿主不支持套件”。
+- 热重载：GameSession 在有 KitRoot 时另起一个监视器，变化的路径加前缀 `@pot/kit/` 后与游戏文件一样交给 `devtools.changed`，加载器按记录路径失效并反向传播到依赖它的游戏模块。
+- 原来的报错“游戏代码只能依赖 @pot/core 和游戏目录内的相对路径文件”改为“只能依赖 @pot/core、@pot/kit/* 和游戏目录内的相对路径文件”。
+- `pot build`：`builder.js` 加一个 esbuild 插件，把 `@pot/kit/*` 解析到仓库的 `kits/`，打进 bundle；import 白名单加 `@pot/kit/*`。
+- 游戏与模板的 `tsconfig.json` 的 `paths` 加 `"@pot/kit/*": ["<到仓库 kits 的相对路径>/*"]`。
+
+工具：
+
+- `pot blocks` 的层为 `system`、套件名、`game`。未引入的套件也列出来（层为套件名，另标 `"available": true`，并给出引入写法），这样 AI 查得到“有个 fps 套件提供 moveFps”。
+- 类型：套件在自己的源码里对 `GameBlockProps` 做声明合并（`declare module '@pot/core' { interface GameBlockProps { moveTopdown?: Over<...> } }`），引入套件即得到类型；`pot check` 生成的 `.pot/types.d.ts` 只含 game 层的积木。
+- `pot check` 报套件之间的同名冲突（即上面的报错）。
+- `pot eject --kit <名字> [游戏目录]`：把套件源码复制到游戏的 `src/kits/<名字>/`，并把游戏里的 `@pot/kit/<名字>` 改成相对路径。之后这份副本归游戏所有，不再随 Runner 更新。
+
+### 17.3 topdown 套件
+
+- `moveTopdown`、`cameraFollow` 从 `js/runtime/src/world/blocks/` 移到 `kits/topdown/`，从 `BUILTIN_BLOCKS` 和 `BuiltinBlockProps` 去掉。代码不改，只改 import。
+- hello-tsx 加 `import topdown from '@pot/kit/topdown'` 和 `kits: [topdown]`，其余不变，`pot test` 的哈希不变即为“行为不变”。
+- 用到这两个积木的测试改为引入套件（测试经无画面宿主读仓库的 `kits/`）；`devserver.test.js` 的层断言改为 `kit:topdown` 对应的 `topdown`。
+
+### 17.4 模拟侧碰撞
+
+把 saltline `src/lib/physics.ts` 的做法通用化，放进 World（6.7）：
+
+- 积木 `body`：`{ shape: 'box' | 'sphere' | 'capsule', size: Vec3, radius, height, static: true, layer: 'default', solid: true }`。静态体登记进 World 的碰撞表，按 XZ 平面的均匀网格（格长 4）索引；静态体的实体被移动或删除时更新索引。`solid: false` 只用于重叠与触发，不挡移动。
+- `layer` 是字符串，查询与移动可按层过滤（saltline 的 `bulletOnly`、`playerOnly` 用层表达：`bullet` 只挡子弹，`playerWall` 只挡玩家）。
+- `w.move(e, delta, { radius, height, stepUp, layers })`：运动学角色（竖直胶囊近似为圆柱）沿 `delta` 移动，子步长 0.2，先 X、Z 分轴推进并处理上台阶，再处理 Y 的落地吸附与撞顶；返回 `{ grounded, hitCeiling, hitWall }`。与 saltline 的 `Collision.move` 逐项一致，`groundMaxX` 改为可选的“地面平面” `ground: { y, maxX }`。
+- `w.raycast(from, dir, maxDist, { layers })`：只对静态体（盒用 slab 法，球、胶囊用解析解），返回最近的 `{ point, normal, dist, entity }` 或 `null`。纯 JS，Node 与 Runner 结果相同。
+- `w.overlap(shape, at, { layers })`：返回重叠的实体列表。`trigger` 积木改为可用 `body` 的形状判定（没有 `body` 时沿用原来的半径判定）。
+- 碰撞表不进 World 数据（由实体的 `body` 推出），热重载时重建。
+
+### 17.5 fps 套件
+
+- `moveFps`：saltline 玩家移动的通用版。属性为速度（走、跑、蹲、瞄准）、加速度（地面、减速、空中）、跳跃顶点高、土狼时间、跳跃缓冲、上台阶高度、胶囊尺寸、视角灵敏度；动作名可配（缺省 `move`、`look`、`jump`、`sprint`、`crouch`）。状态有 `vel`、`yaw`、`pitch`、`grounded`、`crouched`、`coyote`、`buffer`、`lastSafe`。用 `w.move`，出界拉回 `lastSafe`。
+- `cameraFps`：相机挂在眼高，带 fov 与步伐摆动；震动用 `w.rand`（可复现），不用 `Math.random`。
+- `health`：`{ max, regen, regenDelay }`，状态 `hp`、`lastHit`；`w.damage(e, n)` 扣血并发事件，到 0 发 `died`。
+- `aiChase`、`aiPatrol`：简单的追击与巡逻（视线用 `w.raycast`），作为套件的示例；saltline 的鸥、犬不用它们（见 17.7）。
+- 套件提供的动作映射：`move` 为 WASD、`look` 为鼠标、`jump` 为空格、`sprint` 为左 Shift、`crouch` 为 C 或左 Ctrl。
+
+### 17.6 saltline 玩家迁移
+
+- 迁移前先录金标准：在旧版上用固定的输入脚本（走、跑、跳、蹲、上台阶、贴墙、落水）跑 600 步，逐步记下位置、`grounded`、`crouched`；迁移后同一脚本比对，位置误差不超过 1e-4。这需要 saltline 的玩家改为固定步推进（旧版用 `update` 的可变 `dt`），所以先做一个只改步长的提交，再录金标准。
+- 关卡的盒改为带 `body` 的实体（静态、按层），由 world 单元从 `level` 数据生成；渲染不变。
+- 玩家改为实体 `<entity key="player" moveFps={...} cameraFps={...} health={...} />`；落地音效、脚步声、落水救援、回血等 saltline 专属逻辑写成游戏积木。
+- 其他单元（weapon、enemies、hud）读写的 `player()` 状态改由适配函数 `player(ctx)` 从实体上取，签名不变，避免一次改动所有单元。
+
+### 17.7 saltline 敌人迁移
+
+- 鸥、犬写成游戏积木（`gull`、`hound`），AI 状态进实体的积木状态；弹道池、爆炸池改为实体加 `projectile`、`lifetime`；攻击令牌放 `w.vars`。
+- 模型、动画保留为表现：积木只写状态（位置、朝向、动画参数），渲染单元按状态驱动模型。
+- 视线与避障从 `scene.raycast`（引擎物理）改为 `w.raycast`（模拟侧静态体）。关卡的碰撞盒与渲染网格并不完全重合，所以行为只能做到“近似一致”：验收看实机可玩、敌人能追击和攻击，不做逐步比对。随机改用 `w.rand`。
+- 这一步规模最大（enemies.ts 678 行），允许分几个提交：先犬后鸥，每次保持游戏可玩。
+
+### 17.8 写实套件
+
+- 名字 `realistic`：`stage` 的预设（黄昏、阴天、夜晚，含天空、雾、环境光、主光、后处理参数），材质预设（湿地面、金属、粗糙混凝土），以及从 saltline 抽出的通用部分（雨、闪电闪光）。
+- 只抽“换个游戏也能用”的部分；apron、sea、中继等 saltline 专属渲染留在游戏里。
+
+### 17.9 文件清单
+
+新增：`kits/topdown/`、`kits/fps/`、`kits/realistic/`、`js/runtime/src/world/kit.ts`（`defineKit`、展开与冲突检查、全局目录）、`js/runtime/src/world/collide.ts`（碰撞表、网格、`move`、`raycast`、`overlap`）、`js/runtime/src/world/blocks/body.ts`、`packages/com.pot.core/Runtime/Resources/pot/kits.json`（生成）。
+
+修改：`registry.ts`（来源）、`game.ts`（`kits`）、`tree.ts`（未知积木的提示）、`world.ts`（碰撞表、`move`、`raycast`、`overlap`、`damage`）、`blocks/index.ts`、`blocks/trigger.ts`、`types.ts`、`inspect.ts`、`host.ts`、`unity.ts`、`js/devtools/src/loader.ts`、`js/scripts/build.js`、`js/devserver/builder.js`、`headless.js`、`cli.js`、`mcp.js`、`GameFS.cs`、`GameSession.cs`、`PotRunner.cs`、`games/hello-tsx/`、`games/saltline/`、Skill 与模板。
+
+### 17.10 测试
+
+| 文件 | 覆盖 |
+|---|---|
+| `world-kit.test.js` | `kits` 展开 `requires` 且只登记一次；套件之间同名报错、游戏覆盖后不报；`controls` 覆盖顺序；未引入套件时的提示；登记表来源；热重载后套件改动生效 |
+| `loader.test.js` 增补 | `@pot/kit/x` 解析与后缀；套件内相对路径越界报错；套件文件变化使依赖它的游戏模块失效 |
+| `world-collide.test.js` | 网格索引增删；`move` 的分轴推进、上台阶、落地吸附、撞顶、层过滤；与 saltline `Collision` 在同一组盒上的逐步结果一致；`raycast` 盒、球、胶囊；`overlap` |
+| `kit-fps.test.js` | `moveFps` 走、跑、跳（顶点高度）、土狼时间、跳跃缓冲、蹲伏顶头不能起身；`health` 回血与死亡事件 |
+| `devserver.test.js` 增补 | `pot blocks` 的套件层与未引入套件；`pot build` 打进套件；`pot eject --kit` |
+
+M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引入 `topdown` 后 `pot test` 哈希不变；saltline 玩家的金标准比对通过，敌人实机可玩；报告 saltline 迁移前后的源码字节数。
+
+### 17.11 实施顺序
+
+1. 套件机制（17.2），`world-kit`、`loader` 增补通过，Runner 实测套件热重载。
+2. topdown 套件（17.3），hello-tsx 哈希不变。
+3. 模拟侧碰撞（17.4），与 saltline `Collision` 的比对用例通过。
+4. fps 套件（17.5）。
+5. saltline 玩家迁移（17.6）：固定步、金标准、迁移、比对。
+6. saltline 敌人迁移（17.7）。
+7. 写实套件（17.8）。
+8. Skill、模板与文档同步。
+
+### 17.12 实施时补充的约定
+
+按实施顺序记录，与上文不一致的以这里为准。
