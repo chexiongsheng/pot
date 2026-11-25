@@ -1661,6 +1661,14 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - 实机验证：用临时演示游戏（地面、混凝土方块、金属球）在 dusk、overcast（rain 0.6）、night（rain 1）三个流程状态间切换，三种画面区别明显，平面反射与金属高光正常；切换后场景中只剩一个 atmosphere 实体，闪电事件按 3 秒后首次、之后每 6 到 9 秒一次触发，无报错。
 - scene 不能读 `w.vars`（SceneArgs 只有 state、params、data），想随变量切换环境，应该用流程状态或带 key 的实体来驱动，演示即采用这种做法。
 
+第 9 步（Skill、模板与文档同步）：
+
+- `SKILL.md`：`defineGame` 的字段加上 `kits`、`load`，并用一句话列出三个套件；`references/world.md` 的目录说明同步更新。
+- `references/world.md`：骨架示例加 `kits`、`load`；套件段加 `realistic`；新增“写实环境”一节（`atmosphere` 的预设、分节覆盖、`rain`、`reflection`、`lightning` 事件，`surface` 的材质预设，以及按流程状态切换环境的写法）和“加载进度”一节（`load(ctx, step)`、启动预热、80% 与 20% 的分配、`within`）。
+- `references/api.md` 的 `ctx.loading`：加 `window`、`within(lo, hi)`，以及父单元挂 `defineGame` 子单元时的用法。`references/pitfalls.md` 的“启动很慢”一条指向 `load`。
+- 模板 `templates/game/AGENTS.md` 加“套件”一节。不新增写实模板：写实环境只需在场景里加两三个实体，在 `world.md` 中给出示例就够了，多一个模板反而要多维护一份 `tests` 与哈希。
+- `pot blocks` 能列出 `realistic` 套件和它的积木，用临时演示游戏跑 `pot check` 通过。
+
 ### 17.13 加载进度
 
 现状：低层有 `ctx.loading.step(text, progress)`，Runner 外壳在启动期间画加载界面与进度条；saltline 的低层单元写成 `async apply`，分阶段 `await` 报进度。`defineGame` 写的游戏没有插 `await` 的地方，只能显示“加载 单元名”；场景实体的表现（`view.enter`）要到加载结束后的第一帧才一次性创建，大场景会在进度条消失后卡一帧。

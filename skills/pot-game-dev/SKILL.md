@@ -9,7 +9,7 @@ pot 的游戏包是一个目录：`manifest.json` + `src/plugins/*.ts`（每个�
 
 ## 高层写法（新游戏优先用）
 
-新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ vars, controls, blocks, flow, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）和 `games/quiz-tsx`（纯界面）。
+新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ kits, vars, controls, blocks, flow, load, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。玩法与风格按需引入套件（`@pot/kit/topdown` 俯视角、`fps` 第一人称、`realistic` 写实环境与材质），耗时的预载写在 `load` 里。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）和 `games/quiz-tsx`（纯界面）。
 
 五条规矩：
 
@@ -69,7 +69,7 @@ MCP 方式：`pot mcp --port 7788` 提供同名工具（`pot_status`、`pot_open
 
 ## 详细参考（按需读取）
 
-- `references/world.md`：高层写法：defineGame、积木与预制件、规则、World、流程、界面标签、测试脚本格式。
+- `references/world.md`：高层写法：defineGame、积木与预制件、套件、写实环境、加载进度、规则、World、流程、界面标签、测试脚本格式。
 - `references/api.md`：低层 Game API（scene、state、data、cache、input、timer、clock）的语义。
 - `references/hot-reload.md`：热重载流程、失败结果怎么读、冷重启与泄漏检查。
 - `references/pitfalls.md`：坑点库。遇到新坑按“现象、原因、做法、来源”追加。

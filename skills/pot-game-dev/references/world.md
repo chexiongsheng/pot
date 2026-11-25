@@ -10,10 +10,12 @@
 import { defineBlock, defineGame, definePrefab } from '@pot/core'
 
 export default defineGame({
+  kits: [topdown],                          // 引入的套件，见“积木与预制件”
   vars: { score: 0 },                       // World 的运行变量（存在 state 里），w.vars 读写
   controls: { actions: { pause: 'escape' } },// 指令映射：axes 轴名 → 输入轴，actions 动作名 → 按键
   blocks: [myBlock],                        // 游戏自写的积木（defineBlock）
   flow: { start: 'title', states: { ... } },// 流程，见下文
+  load: async (ctx, step) => { ... },       // 可选：挂载场景前的预载，见“加载进度”
   scene: (s) => <>...</>,                   // 场景树：s.state、s.params、s.data
   ui: (w, ui) => <>...</>,                  // 界面树：每帧求值
 })
@@ -28,7 +30,7 @@ export default defineGame({
 - 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。
 - 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`、`body`）。游戏同名定义会覆盖系统的。
 - 碰撞在模拟侧：带 `body`（轴对齐的盒、球或竖直胶囊，可设 `layer`、`solid`）的实体进碰撞表。`w.move(e, mover, { radius, height, stepUp, layers, ground })` 做角色移动（`mover` 为 `{ vel, grounded }`，放在积木状态里）；`w.raycast(from, dir, maxDist, { layers, ignore, solid })` 返回最近的 `{ point, normal, dist, entity }` 或 null；`w.overlap({ kind: 'sphere', radius }, at)` 返回重叠的实体。三者都是纯 JS、可复现，玩法判定不要用 `scene.raycast`。
-- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
+- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`realistic`（`import realistic from '@pot/kit/realistic'`）提供写实环境 `atmosphere` 和带材质预设的 `surface`，见下文“写实环境”。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
 
 ## 场景树
 
@@ -36,6 +38,37 @@ export default defineGame({
 - `scene` 只在挂载和流程“进入”时求值；它是纯函数，按 `s.state` 决定放什么，属性只是初值。
 - `map` 出来的实体要写 `key`，否则 `pot check` 告警；身份按 key 路径记，热重载时没变的实体保留。
 - 运行中生成用 `w.spawn(Coin, { at })`，这些实体不在树里，流程“进入”时被清掉。
+
+## 写实环境（realistic 套件）
+
+`atmosphere` 放在一个不带外形的实体上，管主方向光、天空、环境光、雾、后处理、天气和平面反射，实体销毁或热重载去掉时全部还原。`surface` 是带材质的外形。
+
+```tsx
+<entity key="env" atmosphere={{ preset: 'night', rain: 1, reflection: 0.5, lightning: { first: [3, 3], every: [6, 9] } }} />
+<entity key="ground" scale={[40, 1, 40]} surface={{ kind: 'plane', material: 'wetGround' }} />
+<entity key="box" at={[0, 1, 4]} surface={{ kind: 'cube', material: 'concrete', color: '#8c7a6a' }} />
+<rule on="lightning" do={(w, p) => { /* p.entity、p.power（0..1）、p.delay：雷声延迟秒数 */ }} />
+```
+
+- `atmosphere.preset`：`dusk`（缺省，黄昏干燥）、`overcast`（阴天）、`night`（夜）。`sun`、`sky`、`ambient`、`fog`、`post`、`weather` 六节按字段覆盖预设；`rain`（0..1）是简写，同时设湿度和积水，`weather` 里显式写的字段优先；`reflection`（0..1）开平面反射；`lightning` 为 null 时不打雷，有值时按 `w.rand` 排期，到点发 `lightning` 事件并让画面闪一下，积木状态 `active` 设为 false 可暂停。
+- `surface`：`kind`、`scale` 同 `shape`；`material` 为预设名（`wetGround`、`metal`、`concrete`）或材质参数对象；`color` 为 null 时取预设颜色。
+- 想按关卡或天气切换环境：`scene` 不能读 `w.vars`，用流程状态决定写哪个预设，并让 `key` 随之变化（如 `key={'env-' + s.state}`），旧环境会先还原再建新的。
+- 预设与材质是 `presets`、`materials` 导出，可以读来做自己的组合；名字写错时报“未知的预设 X，可用 …”。
+
+## 加载进度
+
+启动期间 Runner 显示加载界面。`defineGame` 写了 `load(ctx, step)` 时，它在登记积木和 `vars` 之后、挂载场景之前执行，用来预读数据、模型或编译材质：
+
+```tsx
+load: async (ctx, step) => {
+  await step('读取关卡', 0.2)
+  for (let i = 0; i < n; i++) { /* ... */ await step(`烘焙 ${i + 1}/${n}`, 0.2 + 0.8 * (i + 1) / n) }
+},
+```
+
+- `step(文字, 0..1)` 报的是本单元内的进度，并在超出帧预算时让一帧；热重载时 `load` 也会执行但不让帧，要写成可重复执行。不要自己等帧。
+- 启动时框架还会逐个预热场景实体的表现（报“生成场景 k/n”），进度条消失后不会再卡一帧。有 `load` 且有 `scene` 时，`load` 占前 80%，预热占后 20%。
+- 父单元按顺序挂多个 `defineGame` 子单元时，用 `ctx.loading.within(lo, hi)` 把下一个子单元的进度映射到 `[lo, hi]`，挂完后 `within(0, 1)` 复原（见 `references/api.md` 的 `ctx.loading`）。
 
 ## 规则
 

@@ -12,6 +12,10 @@
 
 界面回调（`onPress`、`onChange`、`onSubmit`）只改 `ui.local` 或调 `ui.emit`，不直接改 `w.vars`；要改 World 就发事件，由 `<rule on="事件名">` 或 `flow` 的 `on` 处理。
 
+## 套件
+
+玩法与风格按需引入：`import x from '@pot/kit/<名字>'`，再写进 `defineGame({ kits: [x] })`。现有 `topdown`（俯视角移动与跟随相机）、`fps`（第一人称、生命值、简单 AI）、`realistic`（写实天空、雾、雨、闪电与材质预设）。`pot blocks` 会列出全部套件的积木。耗时的预载写进 `defineGame` 的 `load(ctx, step)`。
+
 ## 命令（在 pot 的 js 目录下，或用 `pot` 别名）
 
 ```powershell
