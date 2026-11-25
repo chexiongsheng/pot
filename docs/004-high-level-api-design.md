@@ -1963,3 +1963,12 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - 18.1 留下的“是否改列式”：暂不改。列式能免掉打包、解包，但现在的瓶颈在“每步传属性”，先做上一条；等 iOS 实测后再评估。
 - 原生积木更适合计算重的积木（大量射线、寻路、群体避让），或者无 JIT 的平台。`pot block verify` 会给出两种实现的耗时，游戏可以按实测决定要不要用（`w.native = 'off'`）。
 - saltline 的 `BodyTable.sync` 每步重算 559 个碰撞体的签名（约 0.6 ms，第 6 步记录）仍是 TS 侧的大头之一，也记为待办（例如只对标了可移动的碰撞体重算）。
+
+第 8 步（wasm 评估）：
+
+- Windows Runner（Puerts 3.0.3 自带的 V8）里 `typeof WebAssembly` 为 `undefined`；`SharedArrayBuffer`、`Atomics`、`BigInt64Array` 都有。JS 调 wasm 的开销、`Float64Array` 直接指向 wasm 内存是否可行，都无从测起。
+- 静态检查各平台的 V8 二进制（只作旁证）：Android 三个 ABI 的 `libPapiV8.so` 里连 `WebAssembly.Module` 字符串都没有，应是构建时关掉了 webassembly；Windows、macOS、Linux、iOS、OpenHarmony 的二进制里有这个字符串，但 Windows 上运行时没有暴露。
+- iOS 不允许 JIT，V8 只能无 JIT 运行；V8 在无 JIT 模式下不支持 wasm（Node 加 `--jitless` 时也会提示关掉 `expose_wasm`）。所以即使重新编译 Puerts 的 V8 打开 webassembly，iOS 上也用不了，而 iOS 恰恰是最需要原生加速的平台（第 7 步）。
+- 物理库的书面评估（以 Rapier 为例）：Rapier 的 JS 版（`@dimforge/rapier3d-deterministic`）只有 wasm 构建，打开增强确定性后跨平台结果一致，wasm 约 1.5 到 2 MB，接口经 wasm-bindgen。按上面的结论，它在 Runner 里用不了。
+- 结论与建议（第 14 节待决第 5 项）：不走 wasm。模拟侧的刚体如果要做，走 M4 的原生积木路径：TS 留参考实现（或只在有原生实现的宿主上提供刚体），C# 用确定性的物理库（BEPUphysics v2、Jitter2 一类的纯 C# 库）或自己写的简化刚体。跨架构（x64 与 ARM）的浮点一致性要另行验证，第 6 步的逐位一致只在同一台 x64 机器上测过。在这之前，刚体仍只在表现侧用宿主物理（不确定，不进 World）。这一条需要用户确认。
+- 第 7 节、18.10 里“wasm 与 C# 同样的接口”的设想暂不实施。
