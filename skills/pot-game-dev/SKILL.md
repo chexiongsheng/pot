@@ -27,7 +27,7 @@ pot 的游戏包是一个目录：`manifest.json` + `src/plugins/*.ts`（每个�
 2. 写代码。新变量先写进 `vars`。
 3. `pot check <游戏>`：tsc + 无画面求值（逐个流程状态都会求值），生成 `.pot/types.d.ts` 给 `w.vars` 和积木属性提供类型。
 4. `pot test <游戏>`：跑 `tests/*.json` 输入脚本（`--update` 写回哈希）。改玩法时同步更新脚本。
-5. Runner 实测：`pot open`、`pot query world`、`pot input text <文字>`、`pot screenshot`。
+5. Runner 实测：`pot open`、`pot query world`、`pot input text <文字>`、`pot screenshot`。官方积木的 C# 实现与 TS 是否一致、哪个快：`pot block verify <积木> --test tests/x.json`。
 
 下面“必须遵守的规则”是低层写法（`export function apply(ctx)`）的规矩；高层写法由 `defineGame` 代办了其中大部分（持久数据就是 `vars` 和积木状态），第 10、11 条仍然适用。
 
@@ -69,7 +69,7 @@ MCP 方式：`pot mcp --port 7788` 提供同名工具（`pot_status`、`pot_open
 
 ## 详细参考（按需读取）
 
-- `references/world.md`：高层写法：defineGame、积木与预制件、套件、写实环境、加载进度、规则、World、流程、界面标签、测试脚本格式。
+- `references/world.md`：高层写法：defineGame、积木与预制件、套件、写实环境、加载进度、规则、World、流程、界面标签、原生积木（C#）与 verify、测试脚本格式。
 - `references/api.md`：低层 Game API（scene、state、data、cache、input、timer、clock）的语义。
 - `references/hot-reload.md`：热重载流程、失败结果怎么读、冷重启与泄漏检查。
 - `references/pitfalls.md`：坑点库。遇到新坑按“现象、原因、做法、来源”追加。

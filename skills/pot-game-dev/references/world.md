@@ -25,7 +25,7 @@ export default defineGame({
 
 ## 积木与预制件
 
-- `defineBlock({ name, about, props, state, order, init, step, view })`：`props` 是来自标签的属性及缺省值（只读），`state` 是积木自己的可写状态。`step(me, e, w)` 每个固定步调用，`me` 是属性与状态合在一起的对象，`e` 是实体数据（`e.pos`、`e.rot`、`e.tags`、`e.b`）。`step` 只读写实体数据和 `w`，不碰 `ctx.scene`，随机数用 `w.rand`，不用 `Math.random`、`Date`。
+- `defineBlock({ name, about, props, state, order, init, step, view })`：`props` 是来自标签的属性及缺省值（只读），`state` 是积木自己的可写状态。`step(me, e, w)` 每个固定步调用，`me` 是属性与状态合在一起的对象，`e` 是实体数据（`e.pos`、`e.rot`、`e.tags`、`e.b`）。`step` 只读写实体数据和 `w`，不碰 `ctx.scene`，随机数用 `w.rand`，不用 `Math.random`、`Date`；三角函数用 `dmath.sin`、`dmath.cos`（`import { dmath } from '@pot/core'`），不用 `Math.sin`、`Math.cos`：不同 JS 引擎、原生实现之间 `Math.sin` 不保证逐位相同。`view` 里可以随便用 `Math`。
 - `definePrefab('coin', { is, tags, about, ...积木 })`：一组积木的组合，返回值可直接当大写标签 `<Coin />`，也可写进 `rule` 的 `a`、`b` 和 `w.spawn`。`is` 继承另一个预制件，积木字段深合并，写 `false` 去掉继承来的积木。
 - 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。
 - 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`、`body`）。游戏同名定义会覆盖系统的。
@@ -149,6 +149,15 @@ const Menu = (p: { title: string; children?: any }) =>
 
 - `s.data.load('x.json')`、`ui.data.load('x.json')` 读 `data/` 下的 JSON，改文件即热重载。
 - `data/overrides.json`：按挂载和 key 路径给实体打补丁（调参不改源码）。`pot world set <路径> '<补丁 JSON>' [--save]` 在运行期试，`--save` 写进文件。
+
+## 原生积木（C#）
+
+官方积木可以另有 C# 实现，Runner 自动换用，写标签的人不需要知道；结果与 TS 逐位一致。现有：`moveTopdown`（topdown）、`moveFps`（fps）。
+
+- `pot query world` 的 `native` 列出当前走 C# 的积木；`w.native = 'off'` 一律用 TS。游戏覆盖或 eject 了同名积木时用游戏的 TS。
+- `pot block verify <积木> [--test tests/x.json] [--steps 600]`：在 Runner 里用同一段输入分别跑两种实现，逐步比较，给出第一个不同的步与字段、两种实现的耗时。`changedSteps` 为 0 说明这个积木在这段输入下什么都没做（例如 `active` 为 false、角色已死），要换输入。
+- 有 JIT 的平台上，`moveFps` 这类积木 TS 已经够快（每实体每步约 1 µs），C# 版因为每步要打包、拷贝数据并不更快；它主要为没有 JIT 的平台（iOS）准备。是否用以 verify 的实测为准。
+- `pot blocks --name <积木>` 的 `layout` 是 C# 实现要对上的布局字符串，`layoutError` 说明为什么没有布局。游戏自写的积木目前不能有 C# 实现。
 
 ## 检查与测试
 

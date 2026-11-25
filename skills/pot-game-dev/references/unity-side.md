@@ -30,6 +30,9 @@ Unity -batchmode -quit -projectPath <Unity 工程> -executeMethod Pot.Build.PotB
 
 ## C# 侧的坑
 
+- 原生积木（`packages/com.pot.core/Runtime/Native/`）：类加 `[Preserve, PotBlock("名字", Kit = "套件")]` 并实现 `IPotNativeBlock`；`Layout` 照抄 `pot blocks --name` 的 `layout`。逐句照 TS 翻译，运算顺序不能改（`a * b * c` 不写成 `a * (b * c)`），超越函数用 `PotMath`（与 V8、`dmath` 逐位一致），`Math.Max/Min` 用 `PotMath.Max/Min`（JS 的正负零语义）。改完用 `pot block verify` 验。
+- IL2CPP 会裁掉没被引用的引擎 API：从 JS 调 `UnityEngine.Time.realtimeSinceStartupAsDouble` 得到 null。JS 要用的 C# 方法放在我们自己的 `[Preserve]` 类里（如 `PotNative.Now()`）。
+
 ### 构建报 Puerts_il2cpp.cpp not found
 - 原因：Puerts 的构建前检查要求 `Assets/Gen/Plugins/puerts_il2cpp/Puerts_il2cpp.cpp` 存在，Mono 后端也一样。
 - 做法：构建前调用 `Pot.Build.PotBuild.EnsurePuertsGenerated()`（已由构建脚本保证）。

@@ -748,9 +748,9 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 
 1. 界面运行时：M1 用自己写的极小求值器（6.8），M2 在它上面加布局（16.1）；做界面重的游戏时再评估是否改用 Preact 加仿 DOM。
 2. 类型给法：已定为生成（16.9）。`vars` 和游戏自写积木的类型由 `pot check`、`pot types` 写到 `.pot/types.d.ts`。
-3. 存储模型：对象式、列式、列式加游标（推荐第三种）。
+3. 存储模型：对象式、列式、列式加游标（推荐第三种）。M4 实测后暂不改（18.14 第 7 步）：原生积木的瓶颈在每步传属性，先做“属性只传一次”。
 4. 系统积木与套件的 TS 源码放在哪：已定方向（6.12）。系统积木打进 Runner 的 `core.cjs`；套件作为随 Runner 分发、可热重载、可弹出的源码模块，发布时打进游戏的 bundle。待定的是套件目录在 Runner 包里的位置和版本号规则，M3 实施时定。
-5. 刚体动力学：只在表现侧用宿主物理（非确定），还是在模拟侧接入 wasm 物理库（倾向后者，取决于 WebAssembly 可用性的实测）。
+5. 刚体动力学：只在表现侧用宿主物理（非确定），还是在模拟侧接入 wasm 物理库（倾向后者，取决于 WebAssembly 可用性的实测）。M4 实测 Runner 的 V8 没有 WebAssembly，iOS 无 JIT 也用不了（18.14 第 8 步），改为倾向走原生积木（C# 物理库），待用户确认。
 6. 实体层级：实体标签是否允许子节点和父子变换，还是保持平的、只用片段和函数组件分组。
 7. 登记方式：套件已定为 import 加 `defineGame({ kits })`，两个套件同名报错（6.12）。游戏自写的积木与预制件仍待定：在 `defineGame` 里显式列出，还是约定 `src/blocks/`、`src/prefabs/` 目录自动加载。
 8. 命名：积木在代码里叫 Block 是否合适；服务名 `ctx.world`、入口 `defineGame` / `defineBlock` / `definePrefab` 是否沿用。
@@ -1843,6 +1843,7 @@ pot block verify <积木> [--test tests/x.json] [--steps 600] [--tolerance 1e-9]
 | `world-layout.test.js` | 自动推导与提示；规范字符串；推不出时的原因；打包、解包往返；`axis`、`action`、`layers`、`?{}` |
 | `world-native.test.js` | 用 JS 假原生实现：选择规则（来源、覆盖、布局不同时告警并回退）；批量执行结果与 TS 逐位相同；出错回退；`w.native = 'off'`；碰撞体缓冲区只在版本变化时发送 |
 | `block-verify.test.js` | verify 的两遍、恢复快照、哈希相同时 `identical`、故意改坏假实现时给出第一个不同的步与字段 |
+| `dmath.test.js` | `dmath.sin/cos` 的特殊值、与 `Math` 的差不超过 1 ulp、奇偶性、fdlibm 的已知结果（与 C# `PotMath` 的逐位比较在 Runner 里做） |
 
 C# 侧没有自动化测试，靠 Runner 里的 verify：`moveTopdown` 用 hello-tsx 的 `tests/*.json`，`moveFps` 用 saltline 的玩家输入。
 
@@ -1972,3 +1973,23 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - 物理库的书面评估（以 Rapier 为例）：Rapier 的 JS 版（`@dimforge/rapier3d-deterministic`）只有 wasm 构建，打开增强确定性后跨平台结果一致，wasm 约 1.5 到 2 MB，接口经 wasm-bindgen。按上面的结论，它在 Runner 里用不了。
 - 结论与建议（第 14 节待决第 5 项）：不走 wasm。模拟侧的刚体如果要做，走 M4 的原生积木路径：TS 留参考实现（或只在有原生实现的宿主上提供刚体），C# 用确定性的物理库（BEPUphysics v2、Jitter2 一类的纯 C# 库）或自己写的简化刚体。跨架构（x64 与 ARM）的浮点一致性要另行验证，第 6 步的逐位一致只在同一台 x64 机器上测过。在这之前，刚体仍只在表现侧用宿主物理（不确定，不进 World）。这一条需要用户确认。
 - 第 7 节、18.10 里“wasm 与 C# 同样的接口”的设想暂不实施。
+
+第 9 步（Skill 与文档同步）：
+
+- Skill：`references/world.md` 的积木规则加了“三角函数用 `dmath`”，新增“原生积木（C#）”一节（现有的原生积木、`w.native`、`pot block verify` 与 `changedSteps`、何时值得用、布局字符串）；`SKILL.md` 的验证顺序补 verify，索引更新；`references/unity-side.md` 的“C# 侧的坑”补写原生积木的要点与 IL2CPP 裁剪引擎 API 的坑。
+- 文档：18.12 测试表加 `dmath.test.js`；第 14 节待决第 3、5 项补 M4 的结论。
+
+M4 验收：
+
+- `npm test` 274 个用例，273 个通过，唯一失败的是一直失败的 pot_gfx 一致性用例；`tsc` 通过；hello-tsx 的两个测试哈希不变，saltline 玩家金标准通过。
+- 两个原生积木逐位一致：`moveTopdown` 在 hello-tsx 的 `all-coins`（395 步）与 `first-coin`（延长到 2000 步）；`moveFps` 在 saltline 的 840 步玩家输入（未锁鼠标 778 步、锁定并转视角 788 步有变化），以及 fpsbench 的 1、100、1000 个实体各 600 步。
+- 测量表见第 1 步（跨语言开销）与第 7 步（性能对比）；wasm 评估见第 8 步。
+
+M4 留下的待办：
+
+- 原生积木的属性只传一次（第 7 节约束 1），需要属性变化的检测。
+- `BodyTable.sync` 每步重算全部碰撞体签名，saltline 上约 0.6 ms。
+- iOS、Android 真机实测（无 JIT 的 TS 耗时、IL2CPP 在 ARM 上与 x64 是否逐位一致，Android 上 clang 可能把乘加合成 FMA）。
+- C# 碰撞只移植了 `move` 与盒的 `overlap`；`dmath` 的三角函数在超大参数时不保证一致。
+- 游戏自带 C# 积木（`extraPackages`）没有打通。
+
