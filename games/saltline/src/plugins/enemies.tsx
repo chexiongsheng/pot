@@ -189,7 +189,8 @@ const slFoe = defineBlock({
       else if (me.attackT <= 0) { me.attack = 'burst'; me.shots = T.burst; me.attackT = 0 }
     } else {
       me.attackT -= dt
-      if (me.attackT <= 0 && me.shots > 0) { fire(me, e, w, chestOf(p)); me.shots--; me.attackT = T.burstGap }
+      if (!fighting) { me.shots = 0 } // 玩家已死或不在 playing：不再对着尸体打完连发
+      else if (me.attackT <= 0 && me.shots > 0) { fire(me, e, w, chestOf(p)); me.shots--; me.attackT = T.burstGap }
       if (me.shots <= 0) { me.attack = 'idle'; me.cooldown = lerp(T.cooldown[0], T.cooldown[1], w.rand()); releaseToken(me, w) }
     }
   },

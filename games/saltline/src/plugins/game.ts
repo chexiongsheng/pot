@@ -45,6 +45,9 @@ export async function apply(ctx: Context) {
     g.phaseTime = 0
   }
 
+  /** 暂停只能回到 intro 或 playing；旧存档里 resume 可能是 paused，否则“继续”会一直停在暂停 */
+  const resumable = (r: Phase): Phase => (r === 'intro' ? 'intro' : 'playing')
+
   function queue(counts: { gull: number; hound: number }, pursuit: boolean) {
     let delay = 0
     const types: EnemyType[] = []
@@ -108,7 +111,7 @@ export async function apply(ctx: Context) {
       g.resume = 'intro'
       g.fade = 1
     } else if (cmd === 'resume') {
-      g.phase = g.resume
+      g.phase = resumable(g.resume)
     } else if (cmd === 'title') {
       emit(ctx, 'saltline/clear-enemies')
       Object.assign(g, fresh(g.settings))
@@ -176,7 +179,7 @@ export async function apply(ctx: Context) {
     lastFocus = focus
     if (g.phase === 'paused' && input.pressed('escape')) {
       if (g.panel) g.panel = ''
-      else g.phase = g.resume
+      else g.phase = resumable(g.resume)
       return
     }
 

@@ -33,7 +33,7 @@ class MockEngine {
   }
   spawn(shape, name, parent) {
     const id = this.nextId++
-    this.objects.set(id, { id, shape, name, parent, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], localPosition: [0, 0, 0], color: null, active: true })
+    this.objects.set(id, { id, shape, name, parent, position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], localPosition: [0, 0, 0], localRotation: [0, 0, 0], color: null, active: true })
     return id
   }
   destroy(id) { this.objects.delete(id) }

@@ -1669,6 +1669,14 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - 模板 `templates/game/AGENTS.md` 加“套件”一节。不新增写实模板：写实环境只需在场景里加两三个实体，在 `world.md` 中给出示例就够了，多一个模板反而要多维护一份 `tests` 与哈希。
 - `pot blocks` 能列出 `realistic` 套件和它的积木，用临时演示游戏跑 `pot check` 通过。
 
+M3 收尾（遗留问题）：
+
+- Escape 暂停：实机连续切换 6 次都正常（`escape`、`Escape` 两种键名都能识别）。之前报告的“不生效”是测试时玩家已经死亡（dead 阶段不响应暂停），代码没有问题。
+- 存档卡在暂停：存档中 `resume` 被写成了 `paused`（调试时直接改 state 造成），之后“继续”和 Escape 都会回到 `paused`，出不来。game 单元加了 `resumable`：恢复时只回到 `intro` 或 `playing`，旧存档也能恢复。
+- 玩家死后敌人：感知本来就只在 `playing` 阶段生效，弹道也只在 `playing` 阶段伤人，但已经开始的连发会继续打完。现在不在 `playing` 阶段时直接中止连发并交还令牌；敌人照常巡逻、搜索，死亡画面背后的世界不冻结。
+- 敌人行为与旧版只是近似一致：新增 `js/test/saltline-enemies.test.js`，在真实关卡上锁定迁移后的行为（同样输入逐步相同；交战、预警、开火、掉血；暂停冻结；死后不再生成弹道；clear-enemies 清空）。撤掉上一条修复时，“死后”用例会失败。测试宿主的 MockEngine 补了 `localRotation` 缺省值。
+- saltline 不改用 realistic 套件，维持 17.8 的结论。
+
 ### 17.13 加载进度
 
 现状：低层有 `ctx.loading.step(text, progress)`，Runner 外壳在启动期间画加载界面与进度条；saltline 的低层单元写成 `async apply`，分阶段 `await` 报进度。`defineGame` 写的游戏没有插 `await` 的地方，只能显示“加载 单元名”；场景实体的表现（`view.enter`）要到加载结束后的第一帧才一次性创建，大场景会在进度条消失后卡一帧。
