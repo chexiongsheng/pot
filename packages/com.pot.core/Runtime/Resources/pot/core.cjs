@@ -6688,6 +6688,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "budget", 50);
       /** 本次启动/加载让出的帧数 */
       __publicField(this, "yields", 0);
+      /** 接下来加载的单元可用的进度区间（绝对值，004 第 17.13 节）；begin 时重置为 [0, 1] */
+      __publicField(this, "window", [0, 1]);
       __publicField(this, "_waiters", []);
       __publicField(this, "_sliceStart", Date.now());
       __publicField(this, "_explicit", false);
@@ -6709,6 +6711,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     unit(name) {
       if (!this.active || this._explicit) return;
       this.report(`加载 ${name}`);
+    }
+    /** 设置接下来加载的单元可用的进度区间：自己报进度的父单元在 ctx.use(子单元) 前调用 */
+    within(lo, hi) {
+      if (!(lo >= 0 && hi <= 1 && lo <= hi)) throw new Error(`loading.within 需要 0 <= lo <= hi <= 1，收到 ${lo}、${hi}`);
+      this.window = [lo, hi];
     }
     /** 等到下一帧（宿主 pump 时继续） */
     frame() {
@@ -6736,6 +6743,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       this._explicit = false;
       this.yields = 0;
       this.progress = -1;
+      this.window = [0, 1];
       this._sliceStart = Date.now();
       this.report(text);
     }
@@ -8371,37 +8379,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         seen.add(e.id);
         let v = this._entities.get(e.id);
         if (!v) this._entities.set(e.id, v = { e, blocks: /* @__PURE__ */ new Map() });
-        v.e = e;
-        const rev = w.revision(e.id);
-        for (const [name, rec] of v.blocks) {
-          if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue;
-          this._exit(rec, e);
-          v.blocks.delete(name);
-        }
-        for (const def of ordered) {
-          const me = e.b[def.name];
-          if (!def.view || !me) continue;
-          const rec = v.blocks.get(def.name);
-          if (rec) {
-            rec.me = me;
-            continue;
-          }
-          const created = { def, me, objs: [], scales: [], rev };
-          v.blocks.set(def.name, created);
-          if (def.view.enter) {
-            this._guard(`积木 ${def.name}.view.enter`, () => {
-              const out = def.view.enter(me, e, ctx, w);
-              const list = out === void 0 || out === null ? [] : Array.isArray(out) ? out : [out];
-              const unit = w.unitOfMount(e.mount);
-              for (const obj of list) {
-                if (!(obj instanceof Entity)) continue;
-                created.objs.push(obj);
-                created.scales.push(obj.scale);
-                this._label(obj.id, unit);
-              }
-            });
-          }
-        }
+        this._enter(v, e, ordered);
       }
       for (const [id, v] of this._entities) {
         if (seen.has(id)) continue;
@@ -8417,6 +8395,59 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
       }
       this._sync();
+    }
+    /**
+     * 启动加载期的预热（004 第 17.13 节）：提前建好实体的表现，第一帧不再重复 enter。
+     * 返回本次新建了表现的积木数（没有带 view 的积木时为 0）。
+     */
+    warm(e) {
+      let v = this._entities.get(e.id);
+      if (!v) this._entities.set(e.id, v = { e, blocks: /* @__PURE__ */ new Map() });
+      const before = v.blocks.size;
+      this._enter(v, e, this._world.registry.ordered());
+      return v.blocks.size - before;
+    }
+    /** 实体是否有要建表现的积木 */
+    hasView(e) {
+      for (const name in e.b) if (e.b[name] && this._world.registry.block(name)?.view) return true;
+      return false;
+    }
+    /** 出现、替换、消失的积木：按积木顺序 enter，定义或属性修订号变了的先 exit */
+    _enter(v, e, ordered) {
+      const w = this._world;
+      const registry = w.registry;
+      const ctx = this._root;
+      v.e = e;
+      const rev = w.revision(e.id);
+      for (const [name, rec] of v.blocks) {
+        if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue;
+        this._exit(rec, e);
+        v.blocks.delete(name);
+      }
+      for (const def of ordered) {
+        const me = e.b[def.name];
+        if (!def.view || !me) continue;
+        const rec = v.blocks.get(def.name);
+        if (rec) {
+          rec.me = me;
+          continue;
+        }
+        const created = { def, me, objs: [], scales: [], rev };
+        v.blocks.set(def.name, created);
+        if (def.view.enter) {
+          this._guard(`积木 ${def.name}.view.enter`, () => {
+            const out = def.view.enter(me, e, ctx, w);
+            const list = out === void 0 || out === null ? [] : Array.isArray(out) ? out : [out];
+            const unit = w.unitOfMount(e.mount);
+            for (const obj of list) {
+              if (!(obj instanceof Entity)) continue;
+              created.objs.push(obj);
+              created.scales.push(obj.scale);
+              this._label(obj.id, unit);
+            }
+          });
+        }
+      }
     }
     /** 改记场景对象的展示归属 */
     _label(id, unit) {
@@ -10267,8 +10298,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
   function defineGame(def) {
     if (!def || typeof def !== "object") throw new Error("defineGame 的参数必须是对象");
-    for (const key of ["scene", "ui"]) {
-      if (def[key] !== void 0 && typeof def[key] !== "function") throw new Error(`defineGame：${key} 必须是返回标签树的函数`);
+    for (const key of ["scene", "ui", "load"]) {
+      if (def[key] !== void 0 && typeof def[key] !== "function") throw new Error(`defineGame：${key} 必须是${key === "load" ? "函数" : "返回标签树的函数"}`);
     }
     if (def.blocks !== void 0 && !Array.isArray(def.blocks)) throw new Error("defineGame：blocks 必须是 defineBlock 结果的数组");
     if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
@@ -10302,17 +10333,23 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           };
         }, "world.controls");
         w.mergeVars(def.vars);
+        const loading = ctx.loading;
+        const starting = loading.active;
+        const [lo, hi] = loading.window;
         const scene = def.scene;
-        if (scene) {
+        const ui = def.ui;
+        const mid = def.load && scene ? lo + (hi - lo) * 0.8 : hi;
+        const setupScene = () => {
+          if (!scene) return;
           const mountScene = () => {
             const s = w.flowScene;
             w.mount(scene({ state: s.state, params: s.params, data: ctx.data }), { overrides: readOverrides(ctx, unit) });
           };
           mountScene();
           if (flow) w.onFlowEnter(mountScene);
-        }
-        const ui = def.ui;
-        if (ui) {
+        };
+        const setupUI = () => {
+          if (!ui) return;
           const logger = ctx.logger("world");
           const render = createUIRenderer((message) => logger.error(message), (message) => logger.warn(message));
           const key = `ui:${unit}`;
@@ -10350,7 +10387,36 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             lastError = "";
             render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture });
           });
-        }
+        };
+        const warm = async () => {
+          const mount = w.data.mounts[unit];
+          if (!mount) return;
+          const list = [];
+          for (const rec of Object.values(mount.keys)) {
+            const e = !rec.dead && w.data.entities[rec.id];
+            if (e && w.view.hasView(e)) list.push(e);
+          }
+          const from = def.load ? mid : lo;
+          for (let k = 0; k < list.length; k++) {
+            if (w.data.entities[list[k].id] !== list[k]) continue;
+            w.view.warm(list[k]);
+            await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * (k + 1) / list.length);
+          }
+        };
+        const finish = () => {
+          setupScene();
+          setupUI();
+          if (starting && scene && loading.active) return warm();
+        };
+        if (!def.load) return finish();
+        const step = (text, progress = 0) => {
+          if (!starting || !loading.active) return Promise.resolve();
+          const p = Math.min(1, Math.max(0, Number(progress) || 0));
+          return loading.step(text, lo + (mid - lo) * p);
+        };
+        const loaded = def.load(ctx, step);
+        if (loaded && typeof loaded.then === "function") return loaded.then(finish);
+        return finish();
       }
     };
   }

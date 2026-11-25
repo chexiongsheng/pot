@@ -28,10 +28,14 @@ export async function apply(ctx: Context) {
     ['world', '加载场景', 0], ['collision', '加载碰撞', 0.75], ['player', '加载角色', 0.76], ['weapon', '加载武器', 0.8],
     ['enemies', '加载敌人', 0.9], ['hud', '加载界面', 0.97], ['menu', '加载菜单', 0.99],
   ]
-  for (const [unit, text, progress] of stages) {
+  for (let i = 0; i < stages.length; i++) {
+    const [unit, text, progress] = stages[i]
     await ctx.loading.step(text, progress)
+    // 子单元若用 defineGame 的 load 或启动预热，进度落在本阶段区间内
+    ctx.loading.within(progress, stages[i + 1]?.[2] ?? 1)
     await ctx.use(unit)
   }
+  ctx.loading.within(0, 1)
 
   const cutCount = () => g.relays.filter((r) => r === 'cut').length
   const aliveCount = () => foes(ctx).filter((e) => e.mode !== 'dying').length + g.pending.length

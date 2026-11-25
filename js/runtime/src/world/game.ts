@@ -14,7 +14,7 @@ import { checkFlow } from './flow'
 import type { FlowDef } from './flow'
 import { unitOf } from '../units'
 import { createUIRenderer } from './ui-eval'
-import type { Controls, World } from './world'
+import type { Controls, EntityData, World } from './world'
 
 /** ui 的第二个参数（16.3） */
 export interface GameUI {
@@ -54,6 +54,12 @@ export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   blocks?: BlockDef<any, any>[]
   /** 游戏自写的、只在运行时才按名字用到的预制件（w.spawn('名字')） */
   prefabs?: Prefab<any>[]
+  /**
+   * 预载（004 第 17.13 节）：在登记积木、vars 之后、挂载场景之前执行，用来预读数据、模型、编译材质。
+   * step(文字, 0..1) 报本单元内的进度并在启动加载期按预算让帧。热重载时也会执行（不让帧），应可重复执行；
+   * 不要自己等帧。
+   */
+  load?: (ctx: Context, step: (text: string, progress?: number) => Promise<void>) => void | Promise<void>
   /** 世界里有什么：返回标签树，挂到 ctx.world 上 */
   scene?: (s: SceneArgs) => PotChild
   /** 屏幕上画什么：每帧求值，画到 ctx.ui */
@@ -80,13 +86,13 @@ function readOverrides(ctx: Context, mount: string): Record<string, any> | undef
 }
 
 export interface GameUnit {
-  apply(ctx: Context): void
+  apply(ctx: Context): void | Promise<void>
 }
 
 export function defineGame<V extends Record<string, any> = Record<string, any>>(def: GameDef<V>): GameUnit {
   if (!def || typeof def !== 'object') throw new Error('defineGame 的参数必须是对象')
-  for (const key of ['scene', 'ui'] as const) {
-    if (def[key] !== undefined && typeof def[key] !== 'function') throw new Error(`defineGame：${key} 必须是返回标签树的函数`)
+  for (const key of ['scene', 'ui', 'load'] as const) {
+    if (def[key] !== undefined && typeof def[key] !== 'function') throw new Error(`defineGame：${key} 必须是${key === 'load' ? '函数' : '返回标签树的函数'}`)
   }
   if (def.blocks !== undefined && !Array.isArray(def.blocks)) throw new Error('defineGame：blocks 必须是 defineBlock 结果的数组')
   if (def.prefabs !== undefined && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
@@ -122,8 +128,16 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
         }
       }, 'world.controls')
       w.mergeVars(def.vars)
+      const loading = ctx.loading
+      const starting = loading.active
+      const [lo, hi] = loading.window
       const scene = def.scene
-      if (scene) {
+      const ui = def.ui
+      // 进度区间：load 与预热都有时 load 占前 80%
+      const mid = def.load && scene ? lo + (hi - lo) * 0.8 : hi
+
+      const setupScene = () => {
+        if (!scene) return
         const mountScene = () => {
           const s = w.flowScene
           w.mount(scene({ state: s.state, params: s.params, data: ctx.data }), { overrides: readOverrides(ctx, unit) })
@@ -131,8 +145,9 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
         mountScene()
         if (flow) w.onFlowEnter(mountScene)
       }
-      const ui = def.ui
-      if (ui) {
+
+      const setupUI = () => {
+        if (!ui) return
         const logger = ctx.logger('world')
         const render = createUIRenderer((message) => logger.error(message), (message) => logger.warn(message))
         const key = `ui:${unit}`
@@ -166,6 +181,41 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
           render(tree, { ui: ctx.ui, input: ctx.input, local, emit, capture })
         })
       }
+
+      // 启动加载期提前建好本挂载实体的表现，逐个回报“生成场景 k/n”（17.13）
+      const warm = async () => {
+        const mount = w.data.mounts[unit]
+        if (!mount) return
+        const list: EntityData[] = []
+        for (const rec of Object.values(mount.keys)) {
+          const e = !rec.dead && w.data.entities[rec.id]
+          if (e && w.view.hasView(e)) list.push(e)
+        }
+        const from = def.load ? mid : lo
+        for (let k = 0; k < list.length; k++) {
+          // 预热期间实体可能已被别处删掉（例如 load 之外的异步代码）
+          if (w.data.entities[list[k].id] !== list[k]) continue
+          w.view.warm(list[k])
+          await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * (k + 1) / list.length)
+        }
+      }
+
+      const finish = (): void | Promise<void> => {
+        setupScene()
+        setupUI()
+        if (starting && scene && loading.active) return warm()
+      }
+
+      if (!def.load) return finish()
+      const step = (text: string, progress = 0) => {
+        // 热重载时不让帧：回收与重新 apply 之间不能插进固定步（15.6）
+        if (!starting || !loading.active) return Promise.resolve()
+        const p = Math.min(1, Math.max(0, Number(progress) || 0))
+        return loading.step(text, lo + (mid - lo) * p)
+      }
+      const loaded = def.load(ctx, step)
+      if (loaded && typeof (loaded as any).then === 'function') return (loaded as Promise<void>).then(finish)
+      return finish()
     },
   }
 }

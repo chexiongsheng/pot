@@ -25,6 +25,8 @@ export class LoadingService extends Service {
   budget = 50
   /** 本次启动/加载让出的帧数 */
   yields = 0
+  /** 接下来加载的单元可用的进度区间（绝对值，004 第 17.13 节）；begin 时重置为 [0, 1] */
+  window: [number, number] = [0, 1]
   private _waiters: (() => void)[] = []
   private _sliceStart = Date.now()
   private _explicit = false
@@ -52,6 +54,12 @@ export class LoadingService extends Service {
   unit(name: string) {
     if (!this.active || this._explicit) return
     this.report(`加载 ${name}`)
+  }
+
+  /** 设置接下来加载的单元可用的进度区间：自己报进度的父单元在 ctx.use(子单元) 前调用 */
+  within(lo: number, hi: number) {
+    if (!(lo >= 0 && hi <= 1 && lo <= hi)) throw new Error(`loading.within 需要 0 <= lo <= hi <= 1，收到 ${lo}、${hi}`)
+    this.window = [lo, hi]
   }
 
   /** 等到下一帧（宿主 pump 时继续） */
@@ -83,6 +91,7 @@ export class LoadingService extends Service {
     this._explicit = false
     this.yields = 0
     this.progress = -1
+    this.window = [0, 1]
     this._sliceStart = Date.now()
     this.report(text)
   }

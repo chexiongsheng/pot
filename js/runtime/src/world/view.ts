@@ -85,37 +85,7 @@ export class WorldView {
       seen.add(e.id)
       let v = this._entities.get(e.id)
       if (!v) this._entities.set(e.id, (v = { e, blocks: new Map() }))
-      v.e = e
-      const rev = w.revision(e.id)
-      for (const [name, rec] of v.blocks) {
-        if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue
-        this._exit(rec, e)
-        v.blocks.delete(name)
-      }
-      for (const def of ordered) {
-        const me = e.b[def.name]
-        if (!def.view || !me) continue
-        const rec = v.blocks.get(def.name)
-        if (rec) {
-          rec.me = me
-          continue
-        }
-        const created: BlockView = { def, me, objs: [], scales: [], rev }
-        v.blocks.set(def.name, created)
-        if (def.view.enter) {
-          this._guard(`积木 ${def.name}.view.enter`, () => {
-            const out = def.view!.enter!(me, e, ctx, w)
-            const list = out === undefined || out === null ? [] : Array.isArray(out) ? out : [out]
-            const unit = w.unitOfMount(e.mount)
-            for (const obj of list) {
-              if (!(obj instanceof Entity)) continue
-              created.objs.push(obj)
-              created.scales.push(obj.scale)
-              this._label(obj.id, unit)
-            }
-          })
-        }
-      }
+      this._enter(v, e, ordered)
     }
     for (const [id, v] of this._entities) {
       if (seen.has(id)) continue
@@ -133,6 +103,62 @@ export class WorldView {
     }
     // 3. 变换同步
     this._sync()
+  }
+
+  /**
+   * 启动加载期的预热（004 第 17.13 节）：提前建好实体的表现，第一帧不再重复 enter。
+   * 返回本次新建了表现的积木数（没有带 view 的积木时为 0）。
+   */
+  warm(e: EntityData): number {
+    let v = this._entities.get(e.id)
+    if (!v) this._entities.set(e.id, (v = { e, blocks: new Map() }))
+    const before = v.blocks.size
+    this._enter(v, e, this._world.registry.ordered())
+    return v.blocks.size - before
+  }
+
+  /** 实体是否有要建表现的积木 */
+  hasView(e: EntityData): boolean {
+    for (const name in e.b) if (e.b[name] && this._world.registry.block(name)?.view) return true
+    return false
+  }
+
+  /** 出现、替换、消失的积木：按积木顺序 enter，定义或属性修订号变了的先 exit */
+  private _enter(v: EntityView, e: EntityData, ordered: BlockDef[]) {
+    const w = this._world
+    const registry = w.registry
+    const ctx = this._root
+    v.e = e
+    const rev = w.revision(e.id)
+    for (const [name, rec] of v.blocks) {
+      if (e.b[name] && registry.block(name) === rec.def && rec.rev === rev) continue
+      this._exit(rec, e)
+      v.blocks.delete(name)
+    }
+    for (const def of ordered) {
+      const me = e.b[def.name]
+      if (!def.view || !me) continue
+      const rec = v.blocks.get(def.name)
+      if (rec) {
+        rec.me = me
+        continue
+      }
+      const created: BlockView = { def, me, objs: [], scales: [], rev }
+      v.blocks.set(def.name, created)
+      if (def.view.enter) {
+        this._guard(`积木 ${def.name}.view.enter`, () => {
+          const out = def.view!.enter!(me, e, ctx, w)
+          const list = out === undefined || out === null ? [] : Array.isArray(out) ? out : [out]
+          const unit = w.unitOfMount(e.mount)
+          for (const obj of list) {
+            if (!(obj instanceof Entity)) continue
+            created.objs.push(obj)
+            created.scales.push(obj.scale)
+            this._label(obj.id, unit)
+          }
+        })
+      }
+    }
   }
 
   /** 改记场景对象的展示归属 */

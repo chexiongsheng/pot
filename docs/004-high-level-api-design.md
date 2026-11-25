@@ -1614,6 +1614,20 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - 实机验证：开局 8 个敌人由 `pending` 生成，鸥发现玩家后进入 `combat` 并开火，玩家掉血，罗盘出现敌人标记；子弹事件击杀鸥、犬各一，鸥坠毁后消失，犬约 10 秒后回收，击杀数加 2；暂停 2 秒内敌人位置、模式与 `tokenGap` 不变；重试后敌人与弹道清空。运行日志无新错误。
 - 源码字节数：迁移前 `enemies.ts` 28570、`physics.ts` 6574、`types.ts` 4363、`hud.ts` 12159、`game.ts` 10877，合计 62543；迁移后 `enemies.tsx` 29998、`physics.ts` 1610、`types.ts` 4634、`hud.ts` 12048、`game.ts` 10817，合计 59107（另有测试夹具 `saltline-collision.ts` 5100，不计入游戏）。敌人单元本身略增（行为照搬，多了积木声明、状态初值与对象池），减少主要来自 `Collision` 移出游戏。
 
+第 7 步（加载进度）：
+
+17.13 在动手前写好；实施时把“有要预热的实体时”改成“有 `scene` 时”（见 17.13 进度区间一节，apply 开始时还不知道实体数）。
+
+实施时的细节：
+
+- `LoadingService` 加 `window` 与 `within(lo, hi)`，非法区间（不满足 `0 <= lo <= hi <= 1`）抛错，`begin` 时重置为 `[0, 1]`。
+- `WorldView` 把 `frame` 里的 enter/exit 抽成 `_enter`，新增 `warm(e)`（建 `EntityView` 并 enter，返回新建的积木表现数）与 `hasView(e)`。第一帧照常走 `_enter`，已建的表现不会重复创建。
+- `defineGame` 的 apply：登记完成、`mergeVars` 之后，有 `load` 时先执行；`load` 的 `step` 只在启动加载期间（apply 开始时 `loading.active`）回报并可能让帧，热重载时直接返回已完成的 Promise。`load` 返回 Promise 时 apply 也返回 Promise，否则保持同步。之后挂载场景、设置界面，启动期间再逐个预热本挂载里带表现的实体，每个之后 `step("生成场景 k/n")`。
+- `load` 不是函数时 `defineGame` 报“load 必须是函数”。
+- saltline 的 game 单元在每个 `ctx.use` 前调用 `ctx.loading.within(本阶段进度, 下一阶段进度)`，循环后恢复 `[0, 1]`。world 单元仍自己报绝对进度，不受影响；collision、enemies 等 `defineGame` 单元的预热进度落在各自阶段内。
+- 测试 `js/test/world-loading.test.js` 5 个用例：`load` 时机、按帧驱动的区间映射（读数据 0.4、生成场景 1/4 为 0.85、4/4 为 1）、`within`（0.5..0.7）与非法区间、热重载重跑不让帧且实体保留、`load` 非函数报错。
+- 实机验证：重建 Runner 后 saltline 启动 5.35 秒、hello-tsx 0.05 秒，均无报错，画面正常。
+
 ### 17.13 加载进度
 
 现状：低层有 `ctx.loading.step(text, progress)`，Runner 外壳在启动期间画加载界面与进度条；saltline 的低层单元写成 `async apply`，分阶段 `await` 报进度。`defineGame` 写的游戏没有插 `await` 的地方，只能显示“加载 单元名”；场景实体的表现（`view.enter`）要到加载结束后的第一帧才一次性创建，大场景会在进度条消失后卡一帧。
@@ -1627,7 +1641,7 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 进度区间：
 
 - 低层新增 `ctx.loading.within(lo, hi)`：设置接下来加载的单元可用的进度区间（绝对值），`begin` 时重置为 `[0, 1]`。由多个单元组成、自己报进度的父单元（如 saltline 的 game）在每个 `ctx.use(子单元)` 前调用；只有一个 `defineGame` 单元的游戏不用管。
-- `defineGame` 单元在开始 apply 时读取区间：有 `load` 且有要预热的实体时，`load` 占前 80%、预热占后 20%；只有其中一项时独占整个区间。
+- `defineGame` 单元在开始 apply 时读取区间：有 `load` 且有 `scene` 时，`load` 占前 80%、预热占后 20%；只有其中一项时独占整个区间。apply 开始时场景还没挂载，不知道要预热多少实体，所以按有无 `scene` 划分；场景里没有带表现的实体时，后 20% 由下一次回报补齐。
 
 约束：
 
