@@ -1467,6 +1467,30 @@ ${code}
           throw new Error(`未知查询：${msg.what}`);
       }
     },
+    record(msg, rt) {
+      const w = rt.root.world;
+      const pot = globalThis.pot;
+      switch (msg.action) {
+        case "start":
+          w.startRecording();
+          return { recording: true, tick: w.tick };
+        case "stop": {
+          const rec = w.stopRecording();
+          if (!rec) throw new Error("没有在录制：先 pot record start");
+          const vars = JSON.parse(JSON.stringify(w.vars));
+          return {
+            steps: rec.steps.length,
+            input: pot.compressRecording(rec.steps),
+            expect: { vars, flow: w.flow.state, hash: pot.worldHash(rt.state.get("world")) }
+          };
+        }
+        case "status":
+        case void 0:
+          return { recording: w.recording };
+        default:
+          throw new Error(`未知 record 操作：${msg.action}`);
+      }
+    },
     world(msg, rt) {
       const w = rt.root.world;
       switch (msg.action) {

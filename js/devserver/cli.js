@@ -6,6 +6,9 @@
  *   pot restart [--reset]                   冷重启当前游戏（默认保留 state）
  *   pot check <游戏目录>                     试打包 + 求值校验（defineGame 游戏）+ 生成 .pot/types.d.ts + tsc 类型检查
  *   pot types <游戏目录>                     只生成 .pot/types.d.ts（游戏自写积木的属性、vars 的类型）
+ *   pot test [游戏目录] [--update]          在无画面宿主上跑 tests/*.json（没有时跑冒烟），--update 写回 World 哈希
+ *   pot record start [--reset] | record stop <文件.json> [--name 名字]
+ *                                           在 Runner 里录制指令，停止时写成 pot test 的脚本（--reset 先清空存档重开）
  *   pot blocks [关键字] [--name 名字] [--dir 游戏目录] [--json]
  *                                           列出积木、预制件、界面标签、内置节点（系统级加游戏自写的），不需要 Runner
  *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
@@ -91,6 +94,34 @@ async function main() {
     case 'check': {
       const { checkGame } = require('./builder')
       return exitBy(await checkGame(path.resolve(args[0] ?? '.')))
+    }
+    case 'test': {
+      const { testGame } = require('./gametest')
+      const result = await testGame(path.resolve(args[0] ?? '.'), { update: !!flags.update })
+      if (flags.json || result.error) return exitBy(result)
+      for (const r of result.results) {
+        console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.name}${r.file ? `（${r.file}）` : ''}${r.hash ? `  tick ${r.tick}  hash ${r.hash}` : ''}`)
+        for (const f of r.failures) console.log(`     ${f}`)
+      }
+      console.log(result.ok ? `全部通过（${result.results.length}）` : '有失败')
+      process.exitCode = result.ok ? 0 : 1
+      return
+    }
+    case 'record': {
+      const [action = 'status', file] = args
+      if (action === 'start' && flags.reset) {
+        const r = await api.call({ type: 'restart', reset: true })
+        if (!r.ok) return exitBy(r)
+        await new Promise((res) => setTimeout(res, 1500))
+      }
+      const res = await api.call({ type: 'record', action })
+      if (action !== 'stop' || !res.ok) return exitBy(res)
+      if (!file) return exitBy({ ok: false, error: '用法：pot record stop <文件.json> [--name 名字]' })
+      const script = { name: flags.name ?? path.basename(file, '.json'), steps: res.data.steps, input: res.data.input, expect: res.data.expect }
+      const out = path.resolve(file)
+      fs.mkdirSync(path.dirname(out), { recursive: true })
+      fs.writeFileSync(out, JSON.stringify(script, null, 2) + '\n', 'utf8')
+      return print({ ok: true, file: out, steps: script.steps, inputs: script.input.length })
     }
     case 'types': {
       const { generateGameTypes } = require('./builder')

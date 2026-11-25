@@ -84,6 +84,16 @@ export interface Cmd {
   pressed(action: string): boolean
 }
 
+/** 一步的指令（16.10）：轴、按下的动作、界面事件。录制与 pot test 都用这个形状 */
+export interface StepCommand {
+  axes: Record<string, { x: number; y: number }>
+  down: Record<string, boolean>
+  events: { name: string; payload?: any }[]
+}
+
+/** 接管第 1 步的指令采样：每个固定步调用一次（叠加状态下也调用），tick 为当前 World 的步数；返回 null 时照常从 ctx.input 采样 */
+export type CommandSource = (tick: number) => StepCommand | null
+
 export interface Controls {
   /** 指令轴名到 ctx.input.axis 的名字 */
   axes?: Record<string, string>
@@ -194,6 +204,10 @@ export class WorldService extends Service {
   private _results = new Map<string, TreeResult>()
   /** 挂载 id → 运行期补丁（pot world set），只在内存里 */
   private _patches = new Map<string, Record<string, any>>()
+  /** 指令源（pot test）；不设时从 ctx.input 采样 */
+  private _source: CommandSource | null = null
+  /** 录制：每一步的指令 */
+  private _recording: { start: number; steps: StepCommand[] } | null = null
 
   constructor(ctx: Context) {
     super(ctx, 'world')
@@ -732,6 +746,30 @@ export class WorldService extends Service {
     this._uiEvents.push({ name, args: [value] })
   }
 
+  /** 接管指令采样（pot test），返回撤销函数 */
+  setCommandSource(source: CommandSource | null) {
+    this._source = source
+    return () => {
+      if (this._source === source) this._source = null
+    }
+  }
+
+  /** 开始录制：从下一个固定步起记下每一步的指令（叠加状态下的步也记） */
+  startRecording() {
+    this._recording = { start: this.data.tick, steps: [] }
+  }
+
+  /** 停止录制，返回起始步号与每一步的指令；没有在录时返回 null */
+  stopRecording() {
+    const rec = this._recording
+    this._recording = null
+    return rec
+  }
+
+  get recording() {
+    return !!this._recording
+  }
+
   /** 界面有焦点控件时屏蔽指令里的键盘与轴（按单元记） */
   setUICapture(unit: string, captured: boolean) {
     if (captured) this._captures.add(unit)
@@ -740,7 +778,7 @@ export class WorldService extends Service {
 
   cmd(_e?: EntityData): Cmd {
     return {
-      axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
+      axis: (name) => this._axes[name] ?? (this._source ? { x: 0, y: 0 } : this._root.input.axis(this._controls.axes[name] ?? name)),
       down: (action) => !!this._down[action],
       pressed: (action) => !!this._down[action] && !this._prevDown[action],
     }
@@ -827,14 +865,30 @@ export class WorldService extends Service {
       this._prevDown = this._down
       this._down = {}
       this._axes = {}
-      const input = this._root.input
-      const captured = this._captures.size > 0
-      for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name])
-      for (const action of Object.keys(this._controls.actions)) {
-        const keys = this._controls.actions[action]
-        this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
+      const injected = this._source?.(data.tick) ?? null
+      if (injected) {
+        for (const name of Object.keys(this._controls.axes)) this._axes[name] = { x: 0, y: 0 }
+        for (const [name, v] of Object.entries(injected.axes ?? {})) this._axes[name] = { x: Number(v?.x) || 0, y: Number(v?.y) || 0 }
+        for (const [action, on] of Object.entries(injected.down ?? {})) this._down[action] = !!on
+        this._uiEvents = []
+        this._cmdEvents = (injected.events ?? []).map((e) => ({ name: e.name, args: [e.payload] }))
+      } else {
+        const input = this._root.input
+        const captured = this._captures.size > 0
+        for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name])
+        for (const action of Object.keys(this._controls.actions)) {
+          const keys = this._controls.actions[action]
+          this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k))
+        }
+        this._cmdEvents = this._uiEvents.splice(0)
       }
-      this._cmdEvents = this._uiEvents.splice(0)
+      if (this._recording) {
+        this._recording.steps.push({
+          axes: clone(this._axes),
+          down: Object.fromEntries(Object.entries(this._down).filter(([, on]) => on)),
+          events: this._cmdEvents.map((e) => (e.args[0] === undefined ? { name: e.name } : { name: e.name, payload: clone(e.args[0]) })),
+        })
+      }
       // 叠加状态：只处理事件与延迟销毁，tick 不走；插值的上一步等于当前
       if (this._overlay()) {
         this.prev.clear()

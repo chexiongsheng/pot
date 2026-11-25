@@ -1317,3 +1317,9 @@ M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，
   - `w.vars` 的类型为 `VarsOf`：生成过 `GameVars` 时就是它（新变量要先写进 `defineGame` 的 `vars` 再跑 `pot check`），没生成过时放行任意字段。生成文件 `import type { Over, Vec3 }`。游戏的 `tsconfig.json` 的 `include` 要加 `.pot/*.d.ts`（hello-tsx 已加，模板在第 7 步加）。
   - 生成的类型只含游戏自写的积木（与系统积木同名的覆盖不生成，类型沿用系统的）；实体标签的索引签名保留，所以拼错的积木名 tsc 仍不报，靠求值校验报“未知的积木”。
   - `definePrefab` 的定义里可写 `about`（保留字段，不当积木名）。`pot blocks` 的层只有 `system`、`game`；不在用 `defineGame` 的游戏目录下时只列系统级。
+- `pot test` 与录制（第 6 步）：
+  - 脚本的步号按“固定步”计，叠加状态（暂停）下 World 的 `tick` 不走，但仍算一步，否则脚本没法在暂停中发 `resume`。指令源因此不用 `tick`，每个固定步调用一次。录制同样逐固定步记录，两边一致。
+  - 指令源接管后，没给值的轴为 0、没按的动作为假，键盘、鼠标与界面事件队列都不读；脚本的 `emit` 直接成为那一步的指令事件。
+  - `expect.vars` 按子集比较（只比写出来的字段）；运行中任何 error 日志都算失败。
+  - 录制结果的 `expect` 填停止时的 `vars`（整份）、`flow` 和 `hash`。回放要与录制一致，录制必须从空存档开始：`pot record start --reset` 先冷重启清档。Runner 帧率低时一帧会补多步，指令仍是逐步记的，回放不受影响。
+  - 新增 `world/script.ts`（脚本展开、录制压缩）；`pot test` 只支持用 `defineGame` 的游戏。

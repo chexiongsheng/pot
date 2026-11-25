@@ -88,6 +88,7 @@ var pot = (() => {
     c256: () => c256,
     compileModule: () => compileModule,
     composeError: () => composeError,
+    compressRecording: () => compressRecording,
     createCallable: () => createCallable,
     createElement: () => createElement,
     createRuntime: () => createRuntime,
@@ -107,6 +108,7 @@ var pot = (() => {
     estimateSize: () => estimateSize,
     eulerToQuaternion: () => eulerToQuaternion,
     evaluate: () => evaluate,
+    expandScript: () => expandScript,
     fontFamilies: () => fontFamilies,
     fontFlags: () => fontFlags,
     formatSource: () => formatSource,
@@ -8240,6 +8242,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_results", /* @__PURE__ */ new Map());
       /** 挂载 id → 运行期补丁（pot world set），只在内存里 */
       __publicField(this, "_patches", /* @__PURE__ */ new Map());
+      /** 指令源（pot test）；不设时从 ctx.input 采样 */
+      __publicField(this, "_source", null);
+      /** 录制：每一步的指令 */
+      __publicField(this, "_recording", null);
       this._root = ctx;
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
@@ -8725,6 +8731,26 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       this._uiEvents.push({ name, args: [value] });
     }
+    /** 接管指令采样（pot test），返回撤销函数 */
+    setCommandSource(source) {
+      this._source = source;
+      return () => {
+        if (this._source === source) this._source = null;
+      };
+    }
+    /** 开始录制：从下一个固定步起记下每一步的指令（叠加状态下的步也记） */
+    startRecording() {
+      this._recording = { start: this.data.tick, steps: [] };
+    }
+    /** 停止录制，返回起始步号与每一步的指令；没有在录时返回 null */
+    stopRecording() {
+      const rec = this._recording;
+      this._recording = null;
+      return rec;
+    }
+    get recording() {
+      return !!this._recording;
+    }
     /** 界面有焦点控件时屏蔽指令里的键盘与轴（按单元记） */
     setUICapture(unit, captured) {
       if (captured) this._captures.add(unit);
@@ -8732,7 +8758,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
     cmd(_e) {
       return {
-        axis: (name) => this._axes[name] ?? this._root.input.axis(this._controls.axes[name] ?? name),
+        axis: (name) => this._axes[name] ?? (this._source ? { x: 0, y: 0 } : this._root.input.axis(this._controls.axes[name] ?? name)),
         down: (action) => !!this._down[action],
         pressed: (action) => !!this._down[action] && !this._prevDown[action]
       };
@@ -8808,14 +8834,30 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         this._prevDown = this._down;
         this._down = {};
         this._axes = {};
-        const input = this._root.input;
-        const captured = this._captures.size > 0;
-        for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name]);
-        for (const action of Object.keys(this._controls.actions)) {
-          const keys = this._controls.actions[action];
-          this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
+        const injected = this._source?.(data.tick) ?? null;
+        if (injected) {
+          for (const name of Object.keys(this._controls.axes)) this._axes[name] = { x: 0, y: 0 };
+          for (const [name, v] of Object.entries(injected.axes ?? {})) this._axes[name] = { x: Number(v?.x) || 0, y: Number(v?.y) || 0 };
+          for (const [action, on] of Object.entries(injected.down ?? {})) this._down[action] = !!on;
+          this._uiEvents = [];
+          this._cmdEvents = (injected.events ?? []).map((e) => ({ name: e.name, args: [e.payload] }));
+        } else {
+          const input = this._root.input;
+          const captured = this._captures.size > 0;
+          for (const name of Object.keys(this._controls.axes)) this._axes[name] = captured ? { x: 0, y: 0 } : input.axis(this._controls.axes[name]);
+          for (const action of Object.keys(this._controls.actions)) {
+            const keys = this._controls.actions[action];
+            this._down[action] = !captured && (Array.isArray(keys) ? keys : [keys]).some((k) => input.key(k));
+          }
+          this._cmdEvents = this._uiEvents.splice(0);
         }
-        this._cmdEvents = this._uiEvents.splice(0);
+        if (this._recording) {
+          this._recording.steps.push({
+            axes: clone(this._axes),
+            down: Object.fromEntries(Object.entries(this._down).filter(([, on]) => on)),
+            events: this._cmdEvents.map((e) => e.args[0] === void 0 ? { name: e.name } : { name: e.name, payload: clone(e.args[0]) })
+          });
+        }
         if (this._overlay()) {
           this.prev.clear();
           this._queue.unshift(...this._cmdEvents);
@@ -9591,6 +9633,57 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       };
       placed.forEach(draw);
     };
+  }
+
+  // runtime/src/world/script.ts
+  function expandScript(script) {
+    const input = [...script.input ?? []].sort((a, b) => a.at - b.at);
+    for (const item of input) {
+      if (!Number.isInteger(item.at) || item.at < 0) throw new Error(`测试脚本的 input.at 必须是非负整数，收到 ${JSON.stringify(item.at)}`);
+    }
+    const axes = {};
+    const down = /* @__PURE__ */ new Set();
+    let next = 0;
+    let last = -1;
+    return (step) => {
+      if (step < last) throw new Error("测试脚本只能按步号递增推进");
+      last = step;
+      const events = [];
+      while (next < input.length && input[next].at <= step) {
+        const item = input[next++];
+        for (const [name, v] of Object.entries(item.axis ?? {})) axes[name] = { x: Number(v?.[0]) || 0, y: Number(v?.[1]) || 0 };
+        for (const a of item.down ?? []) down.add(a);
+        for (const a of item.up ?? []) down.delete(a);
+        if (item.emit !== void 0 && item.at === step) events.push(typeof item.emit === "string" ? { name: item.emit } : { name: item.emit.name, payload: item.emit.payload });
+      }
+      return { axes: { ...axes }, down: Object.fromEntries([...down].map((a) => [a, true])), events };
+    };
+  }
+  var sameAxis = (a, b) => (a?.x ?? 0) === (b?.x ?? 0) && (a?.y ?? 0) === (b?.y ?? 0);
+  var round = (v) => Math.round(v * 1e3) / 1e3;
+  function compressRecording(steps) {
+    const out = [];
+    let axes = {};
+    let down = /* @__PURE__ */ new Set();
+    steps.forEach((cmd, at) => {
+      const item = { at };
+      const axisChange = {};
+      for (const name of /* @__PURE__ */ new Set([...Object.keys(axes), ...Object.keys(cmd.axes)])) {
+        if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [round(cmd.axes[name]?.x ?? 0), round(cmd.axes[name]?.y ?? 0)];
+      }
+      if (Object.keys(axisChange).length) item.axis = axisChange;
+      const now = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));
+      const pressed = [...now].filter((a) => !down.has(a));
+      const released = [...down].filter((a) => !now.has(a));
+      if (pressed.length) item.down = pressed;
+      if (released.length) item.up = released;
+      const changed = Object.keys(item).length > 1;
+      if (changed) out.push(item);
+      for (const e of cmd.events) out.push({ at, emit: e.payload === void 0 ? e.name : { name: e.name, payload: e.payload } });
+      axes = { ...cmd.axes };
+      down = now;
+    });
+    return out;
   }
 
   // runtime/src/world/game.ts

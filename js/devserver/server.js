@@ -10,7 +10,7 @@ const path = require('path')
 const { WebSocketServer } = require('ws')
 
 /** 由 Runner 的 JS 运行时处理 */
-const JS_SIDE = new Set(['reload', 'changed', 'eval', 'state', 'leaks', 'plugins', 'query', 'time', 'world'])
+const JS_SIDE = new Set(['reload', 'changed', 'eval', 'state', 'leaks', 'plugins', 'query', 'time', 'world', 'record'])
 /** 由 Runner 的 C# 侧处理 */
 const RUNNER_SIDE = new Set(['open', 'restart', 'home', 'screenshot', 'input'])
 
