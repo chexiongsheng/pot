@@ -10201,6 +10201,10 @@ TS：${r.layout.text}
       send: (message) => H.Send(message),
       frames: true,
       loading: (progress, text) => H.OnLoading(progress, text),
+      // 原生积木（004 第 18.4 节）：C# 侧见 com.pot.core/Runtime/Native
+      nativeBlocks: () => Pot.PotNative.Blocks(),
+      nativeStep: (name, buf) => Pot.PotNative.Step(name, buf),
+      nativeBodies: (buf) => Pot.PotNative.Bodies(buf),
       engine: {
         spawn: (shape2, name, parent) => S.Spawn(shape2, name, parent),
         destroy: (id) => S.Destroy(id),

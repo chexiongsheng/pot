@@ -1905,3 +1905,10 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - 出错回退：解包前先校验全部实体的 id，校验失败或 C# 抛错时什么都不写回，本步由 TS 执行，之后这个积木一直用 TS，直到 `w.nativeBlocks.reset()`。
 - 层号表放在 World：`w.layerMask(名字数组)`、`w.layerBit(名字)` 按出现顺序分配位号，超过 32 层告警。
 - 测试 `world-native.test.js` 6 个用例，用 JS 写的假原生 `moveTopdown`：结果与 TS 逐位相同、`off`、布局不同、来源不对（套件不符、游戏覆盖）、出错与格式不对时回退、宿主没有原生实现。
+
+第 4 步（C# 桥与 moveTopdown）：
+
+- C# 接口与 18.4 的示意有出入：`IPotNativeBlock` 的成员是 `Layout`（布局字符串属性）、`UsesCollision`、`Bind(PotBatch)`（首次使用时取字段偏移，`b.Offset("speed")`）、`Step(PotBatch)`（对整批实体执行，原地写 `b.Data`）。`PotBlockAttribute` 继承普通 `Attribute`，实现类另加 `[Preserve]`（IL2CPP 裁剪）。文件在 `packages/com.pot.core/Runtime/Native/`：`PotBlock.cs`（特性、接口、`PotBatch`）、`PotNative.cs`（反射收集、`Blocks`、`Step`、`Bodies`）、`PotCollide.cs`（第 4 步只存缓冲区）、`Blocks/MoveTopdown.cs`（命名空间 `Pot.Blocks`）。
+- `PotBatch` 自己解析布局字符串算偏移（类型的槽数与 `layout.ts` 相同），每块积木一个，`Data` 数组按长度复用。返回时新建 `byte[]` 交给 Puerts（拷贝），与 18.2 测的“往返”一致。
+- `moveTopdown` 的 C# 实现照 TS 的 `if (!x && !y)`：0、-0、NaN 都算没有输入。
+- 实机：Runner 启动 hello-tsx 后 `PotNative.Blocks()` 返回 `moveTopdown`，`w.inspect().native` 为 `['moveTopdown']`，注入 move 轴后玩家由 C# 实现移动，没有告警。两种实现的逐步比对在第 5 步用 verify 做。
