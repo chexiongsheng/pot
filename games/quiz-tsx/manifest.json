@@ -1,0 +1,7 @@
+{
+  "id": "pot.quiz-tsx",
+  "name": "Quiz (TSX)",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "plugins": ["game"]
+}

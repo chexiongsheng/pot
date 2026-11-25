@@ -1,0 +1,86 @@
+{
+  "name": "答完六题：四对两错，结算后可再来",
+  "steps": 40,
+  "input": [
+    {
+      "at": 0,
+      "emit": {
+        "name": "start",
+        "payload": {
+          "name": "小明"
+        }
+      }
+    },
+    {
+      "at": 3,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 1
+        }
+      }
+    },
+    {
+      "at": 6,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 1
+        }
+      }
+    },
+    {
+      "at": 9,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 0
+        }
+      }
+    },
+    {
+      "at": 12,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 2
+        }
+      }
+    },
+    {
+      "at": 15,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 3
+        }
+      }
+    },
+    {
+      "at": 18,
+      "emit": {
+        "name": "answer",
+        "payload": {
+          "choice": 1
+        }
+      }
+    }
+  ],
+  "expect": {
+    "vars": {
+      "name": "小明",
+      "index": 6,
+      "answers": [
+        1,
+        1,
+        0,
+        2,
+        3,
+        1
+      ],
+      "best": 4
+    },
+    "flow": "result",
+    "hash": "6b418f1a"
+  }
+}
