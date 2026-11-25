@@ -9677,7 +9677,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     };
   }
   var sameAxis = (a, b) => (a?.x ?? 0) === (b?.x ?? 0) && (a?.y ?? 0) === (b?.y ?? 0);
-  var round = (v) => Math.round(v * 1e3) / 1e3;
   function compressRecording(steps) {
     const out = [];
     let axes = {};
@@ -9686,7 +9685,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const item = { at };
       const axisChange = {};
       for (const name of /* @__PURE__ */ new Set([...Object.keys(axes), ...Object.keys(cmd.axes)])) {
-        if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [round(cmd.axes[name]?.x ?? 0), round(cmd.axes[name]?.y ?? 0)];
+        if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [cmd.axes[name]?.x ?? 0, cmd.axes[name]?.y ?? 0];
       }
       if (Object.keys(axisChange).length) item.axis = axisChange;
       const now = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));

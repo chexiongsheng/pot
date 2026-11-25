@@ -51,9 +51,8 @@ export function expandScript(script: TestScript): (step: number) => StepCommand 
 }
 
 const sameAxis = (a?: { x: number; y: number }, b?: { x: number; y: number }) => (a?.x ?? 0) === (b?.x ?? 0) && (a?.y ?? 0) === (b?.y ?? 0)
-const round = (v: number) => Math.round(v * 1000) / 1000
 
-/** 录制的逐步指令压成变化点（输入格式） */
+/** 录制的逐步指令压成变化点（输入格式）。轴值不舍入：舍入会让回放的位置与录制不一致 */
 export function compressRecording(steps: StepCommand[]): ScriptInput[] {
   const out: ScriptInput[] = []
   let axes: Record<string, { x: number; y: number }> = {}
@@ -62,7 +61,7 @@ export function compressRecording(steps: StepCommand[]): ScriptInput[] {
     const item: ScriptInput = { at }
     const axisChange: Record<string, [number, number]> = {}
     for (const name of new Set([...Object.keys(axes), ...Object.keys(cmd.axes)])) {
-      if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [round(cmd.axes[name]?.x ?? 0), round(cmd.axes[name]?.y ?? 0)]
+      if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [cmd.axes[name]?.x ?? 0, cmd.axes[name]?.y ?? 0]
     }
     if (Object.keys(axisChange).length) item.axis = axisChange
     const now = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]))

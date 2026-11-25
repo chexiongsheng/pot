@@ -61,7 +61,7 @@ test('录制：World 记下每一步的指令（含界面事件与叠加状态�
   const w = runtime.root.world
   const start = await pot.devtools.handle({ id: 1, type: 'record', action: 'start' })
   assert.equal(start.ok, true, start.error)
-  engine.axes.move = [1, 0]
+  engine.axes.move = [0.8320502943378437, 0.5547001962252291]
   frames(runtime, 10)
   w.emitUI('pause')
   frames(runtime, 3)
@@ -71,9 +71,17 @@ test('录制：World 记下每一步的指令（含界面事件与叠加状态�
   const stop = await pot.devtools.handle({ id: 2, type: 'record', action: 'stop' })
   assert.equal(stop.ok, true, stop.error)
   assert.equal(stop.data.steps, 15)
-  assert.deepEqual(stop.data.input.map((i) => [i.at, i.axis ?? i.emit]), [[0, { move: [1, 0] }], [10, 'pause'], [13, { move: [0, 0] }], [13, 'resume']])
+  assert.deepEqual(stop.data.input.map((i) => [i.at, i.axis ?? i.emit]), [[0, { move: [0.8320502943378437, 0.5547001962252291] }], [10, 'pause'], [13, { move: [0, 0] }], [13, 'resume']])
   assert.equal(stop.data.expect.flow, 'play')
   assert.match(stop.data.expect.hash, /^[0-9a-f]{8}$/)
+  const { testGame } = require('../devserver/gametest')
+  const dir = gameDir({ 'rec.json': stop.data })
+  try {
+    const replay = await testGame(dir)
+    assert.equal(replay.ok, true, JSON.stringify(replay.results))
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('pot test：脚本按步注入指令，检查 vars、count、flow、hash；--update 写回哈希；改坏后失败', async () => {
