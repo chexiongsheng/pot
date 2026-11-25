@@ -26,7 +26,8 @@ export default defineGame({
 - `defineBlock({ name, about, props, state, order, init, step, view })`：`props` 是来自标签的属性及缺省值（只读），`state` 是积木自己的可写状态。`step(me, e, w)` 每个固定步调用，`me` 是属性与状态合在一起的对象，`e` 是实体数据（`e.pos`、`e.rot`、`e.tags`、`e.b`）。`step` 只读写实体数据和 `w`，不碰 `ctx.scene`，随机数用 `w.rand`，不用 `Math.random`、`Date`。
 - `definePrefab('coin', { is, tags, about, ...积木 })`：一组积木的组合，返回值可直接当大写标签 `<Coin />`，也可写进 `rule` 的 `a`、`b` 和 `w.spawn`。`is` 继承另一个预制件，积木字段深合并，写 `false` 去掉继承来的积木。
 - 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。
-- 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`moveTopdown`、`trigger`、`lifetime`、`projectile`、`cameraFollow`、`light`）。游戏同名定义会覆盖系统的。
+- 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`）。游戏同名定义会覆盖系统的。
+- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
 
 ## 场景树
 

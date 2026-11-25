@@ -1,10 +1,12 @@
 import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 // 预制件：一组积木的组合，可直接当大写标签用。新积木用 defineBlock 定义后写进 defineGame 的 blocks
 const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube', color: '#4fc3f7' }, moveTopdown: true, trigger: { radius: 0 } })
 const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5, color: '#ffd54f' }, trigger: { radius: 0.8 }, spin: true })
 
 export default defineGame({
+  kits: [topdown],
   // 运行状态只放这里（和积木状态里）；新变量先写进来再跑 pot check，w.vars 才有类型
   vars: { score: 0 },
   flow: {

@@ -8190,17 +8190,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       e.rot[1] = (e.rot[1] + me.speed * w.dt) % 360;
     }
   });
-  var moveTopdown = defineBlock({
-    name: "moveTopdown",
-    about: "俯视角移动：读指令轴 move，按 speed（米每秒）改 pos 的 x、z",
-    props: { speed: 5 },
-    step(me, e, w) {
-      const { x, y } = w.cmd(e).axis("move");
-      if (!x && !y) return;
-      e.pos[0] += x * me.speed * w.dt;
-      e.pos[2] += y * me.speed * w.dt;
-    }
-  });
   var trigger = defineBlock({
     name: "trigger",
     about: "触发区：radius 为球半径（米，0 表示中心点），box 给了 [x, y, z] 时按轴对齐盒判定；两个触发区开始重叠时发 touch",
@@ -8230,22 +8219,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       e.pos[2] += z * k;
     }
   });
-  var cameraFollow = defineBlock({
-    name: "cameraFollow",
-    about: "相机跟随：相机放在实体位置加 offset 处并看向实体（每帧，按插值后的位置）",
-    props: { offset: [0, 12, -10] },
-    view: {
-      update(me, e, _objs, ctx, w) {
-        const prev = w.prev.get(e.id)?.pos ?? e.pos;
-        const a = ctx.clock.fixedAlpha;
-        const p = [prev[0] + (e.pos[0] - prev[0]) * a, prev[1] + (e.pos[1] - prev[1]) * a, prev[2] + (e.pos[2] - prev[2]) * a];
-        const o = me.offset;
-        const cam = ctx.scene.camera;
-        cam.position = [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
-        cam.lookAt(p);
-      }
-    }
-  });
   var light = defineBlock({
     name: "light",
     about: "点光源：color 颜色，intensity 强度，range 照射范围（米）",
@@ -8256,7 +8229,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
     }
   });
-  var BUILTIN_BLOCKS = [shape, spin, moveTopdown, trigger, lifetime, projectile, cameraFollow, light];
+  var BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light];
 
   // runtime/src/world/prefabs.ts
   var entity = definePrefab("entity", {});

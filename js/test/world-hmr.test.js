@@ -8,11 +8,13 @@ const COINS = 'data/coins.json'
 /** 与 004 第 5.1 节同构的游戏；inc 是吃一个金币加的分，extra 插在场景树末尾 */
 function gameSource({ inc = 1, extra = '' } = {}) {
   return `import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube', color: '#4fc3f7' }, moveTopdown: true, trigger: { radius: 0 } })
 const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5, color: '#ffd54f' }, trigger: { radius: 0.8 }, spin: true })
 
 export default defineGame({
+  kits: [topdown],
   vars: { score: 0 },
   scene: (s) => <>
     <stage background="#1e2230" sun={{ rot: [50, -30, 0], intensity: 1.1 }} camera={{ at: [0, 12, -10], look: [0, 0, 0] }} />

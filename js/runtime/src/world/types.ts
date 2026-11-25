@@ -25,11 +25,9 @@ export type VarsOf = keyof GameVars extends never ? Record<string, any> : GameVa
 export interface BuiltinBlockProps {
   shape?: Over<{ kind: Shape; color: Color; scale: number | Vec3 }>
   spin?: Over<{ speed: number }>
-  moveTopdown?: Over<{ speed: number }>
   trigger?: Over<{ radius: number; box: Vec3 | null }>
   lifetime?: Over<{ seconds: number }>
   projectile?: Over<{ speed: number; dir: Vec3 }>
-  cameraFollow?: Over<{ offset: Vec3 }>
   light?: Over<{ color: Color; intensity: number; range: number }>
 }
 

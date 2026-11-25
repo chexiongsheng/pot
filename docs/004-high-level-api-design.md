@@ -1479,3 +1479,11 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - `.pot/types.d.ts` 只为来源是 `game`、不与系统同名、且不属于任何套件的积木生成类型；套件积木的类型靠套件自己的声明合并。
 - `pot eject --kit` 只改写本套件的 import（`'@pot/kit/<名字>'` 与 `'@pot/kit/<名字>/子路径'`，前缀相同的别的套件如 `<名字>-two` 不动）；副本里对其他套件的 `@pot/kit/*` 引用保持不变。目标目录已存在时报错，不覆盖。MCP 对应工具 `pot_eject`（`kit`、`dir`）。测试见 `eject.test.js`。
 - 仓库在第 1 步还没有真实套件，17.10 里 `devserver.test.js` 的增补（套件层、`pot build` 打进套件）放到第 2 步，用 `topdown` 做。
+
+第 2 步（topdown 套件）：
+
+- 套件文件是 `kits/topdown/index.ts` 一个文件，含两个积木、对 `GameBlockProps` 的声明合并与 `defineKit`。
+- 所有游戏与两个模板的 `tsconfig.json` 都加了 `"@pot/kit/*": ["../../kits/*"]`（不只 hello-tsx），这样以后引入套件不用再改配置。`game` 模板与 hello-tsx 一样引入 `topdown`。
+- hello-tsx 两个用例的哈希不变（`3af39306`、`308d9a76`）。
+- `devserver.test.js` 补了：`pot build` 把套件打进 bundle（bundle 里没有 `require("@pot/kit/...")`）；`pot blocks` 的 `moveTopdown` 层为 `topdown`、套件项 `imported`；不在游戏目录时套件 `imported: false`、积木 `available: true`。
+- Skill 的 `references/world.md` 先改了系统积木列表并加一句套件用法，完整的 Skill 同步仍在第 8 步。

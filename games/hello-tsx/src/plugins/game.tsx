@@ -1,4 +1,5 @@
 import { defineBlock, defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube', color: '#4fc3f7' }, moveTopdown: true, trigger: { radius: 0 } })
 const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5, color: '#ffd54f' }, trigger: { radius: 0.8 }, spin: true })
@@ -11,6 +12,7 @@ const Menu = (p: { title: string; children?: any }) =>
   </panel>
 
 export default defineGame({
+  kits: [topdown],
   vars: { score: 0, best: 0 },
   blocks: [pauseKey],
   controls: { actions: { pause: 'escape' } },

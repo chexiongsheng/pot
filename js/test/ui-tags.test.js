@@ -6,10 +6,12 @@ const { startGame, frames, run } = require('./helpers')
 //   Go 按钮 (100, 100) 51.2×36.8；No 按钮 y 146.8；输入框 y 193.6 200×32.8；scroll y 236.4 100×50；bar y 296.4
 const GAME = 'src/plugins/game.tsx'
 const SOURCE = `import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Mover = definePrefab('mover', { moveTopdown: true })
 
 export default defineGame({
+  kits: [topdown],
   vars: { named: '' },
   flow: { start: 'title', states: { title: { on: { start: 'play' } }, play: {} } },
   scene: () => <>

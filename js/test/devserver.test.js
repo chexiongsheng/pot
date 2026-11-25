@@ -264,6 +264,8 @@ test('发布构建：hello-tsx（TSX + defineGame）打包后在 Node 宿主上�
     assert.equal(result.units, 1)
     const bundle = fs.readFileSync(path.join(out, 'bundle.cjs'), 'utf8')
     assert.match(bundle, /require\("@pot\/core\/jsx-runtime"\)/)
+    assert.doesNotMatch(bundle, /require\("@pot\/kit/, '套件打进 bundle，不在运行时 require')
+    assert.match(bundle, /name: "moveTopdown"/)
     const files = new Map()
     for (const f of ['manifest.json', 'bundle.cjs', 'data/coins.json']) files.set(f, fs.readFileSync(path.join(out, f), 'utf8'))
     const { runtime, engine } = await startGame(files, { loader: false })
@@ -325,7 +327,8 @@ function copyHelloTsx(prefix) {
     .replace('"../../js/tsconfig.json"', JSON.stringify(path.resolve(__dirname, '../tsconfig.json').replace(/\\/g, '/')))
     .replace(/"[^"]*js\/runtime\/src\/index\.ts"/, abs('index.ts'))
     .replace(/"[^"]*js\/runtime\/src\/jsx-runtime\.ts"/, abs('jsx-runtime.ts'))
-    .replace(/"[^"]*js\/runtime\/src\/jsx-dev-runtime\.ts"/, abs('jsx-dev-runtime.ts')))
+    .replace(/"[^"]*js\/runtime\/src\/jsx-dev-runtime\.ts"/, abs('jsx-dev-runtime.ts'))
+    .replace('"../../kits/*"', JSON.stringify(path.resolve(__dirname, '../../kits').replace(/\\/g, '/') + '/*')))
   return dir
 }
 
@@ -365,9 +368,14 @@ test('pot check（defineGame 游戏）：求值报错带行号、列表缺 key �
     assert.deepEqual([jumpsItem.kind, jumpsItem.layer, jumpsItem.about, jumpsItem.props], ['block', 'game', '跳', { height: 1, at: [0, 0, 0] }])
     assert.deepEqual(items.find((i) => i.name === 'coin').blocks.trigger, { radius: 0.8 })
     assert.equal(items.find((i) => i.name === 'shape').layer, 'system')
+    assert.equal(items.find((i) => i.name === 'moveTopdown').layer, 'topdown')
+    const kit = items.find((i) => i.kind === 'kit' && i.name === 'topdown')
+    assert.deepEqual([kit.imported, kit.blocks, kit.usage], [true, ['moveTopdown', 'cameraFollow'], "import topdown from '@pot/kit/topdown'，并写进 defineGame 的 kits"])
     assert.ok(items.some((i) => i.kind === 'ui' && i.name === 'button'))
     const sys = await listBlocks(null)
-    assert.ok(!sys.items.some((i) => i.name === 'coin'), '不在游戏目录时只列系统级')
+    assert.ok(!sys.items.some((i) => i.name === 'coin'), '不在游戏目录时只列系统级与套件')
+    assert.equal(sys.items.find((i) => i.kind === 'kit' && i.name === 'topdown').imported, false)
+    assert.equal(sys.items.find((i) => i.name === 'moveTopdown').available, true)
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

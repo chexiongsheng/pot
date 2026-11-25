@@ -33,7 +33,7 @@ export default defineGame({ scene: () => <>${scene}</> })
 test('系统积木与预制件在 WorldService 构造时登记；系统预制件只有 entity', async () => {
   const { runtime } = await start(game(''))
   const registry = w(runtime).registry
-  for (const name of ['shape', 'spin', 'moveTopdown', 'trigger', 'lifetime', 'projectile', 'cameraFollow', 'light']) assert.ok(registry.block(name), name)
+  for (const name of ['shape', 'spin', 'trigger', 'lifetime', 'projectile', 'light']) assert.ok(registry.block(name), name)
   assert.ok(registry.prefab('entity'))
   for (const name of ['player', 'coin', 'ground', 'wall', 'bullet']) assert.equal(registry.prefab(name), undefined, name)
 })
@@ -74,7 +74,7 @@ test('bullet：projectile 沿 dir 匀速飞，lifetime 到时销毁并发 death'
 })
 
 test('cameraFollow 每帧把相机放到实体加 offset 处并看向它；light 生成跟随实体的点光源', async () => {
-  const { runtime, engine } = await start(game('<entity key="p" name="player" tags={["player"]} shape={{ kind: "cube" }} moveTopdown at={[1, 0.5, 0]} cameraFollow={{ offset: [0, 5, -5] }} light={{ intensity: 2 }} />'))
+  const { runtime, engine } = await start(game('<entity key="p" name="player" tags={["player"]} shape={{ kind: "cube" }} moveTopdown at={[1, 0.5, 0]} cameraFollow={{ offset: [0, 5, -5] }} light={{ intensity: 2 }} />').replace("from '@pot/core'", "from '@pot/core'\nimport topdown from '@pot/kit/topdown'").replace('defineGame({', 'defineGame({ kits: [topdown],'))
   engine.axes.move = [1, 0]
   steps(runtime, 12)
   engine.axes.move = [0, 0]

@@ -5,7 +5,8 @@
     "paths": {
       "@pot/core": ["../../js/runtime/src/index.ts"],
       "@pot/core/jsx-runtime": ["../../js/runtime/src/jsx-runtime.ts"],
-      "@pot/core/jsx-dev-runtime": ["../../js/runtime/src/jsx-dev-runtime.ts"]
+      "@pot/core/jsx-dev-runtime": ["../../js/runtime/src/jsx-dev-runtime.ts"],
+      "@pot/kit/*": ["../../kits/*"]
     }
   },
   "include": ["src"]

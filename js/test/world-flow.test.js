@@ -13,11 +13,13 @@ const STATES = `{
 
 function source(states = STATES) {
   return `import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Player = definePrefab('player', { tags: ['player'], moveTopdown: true, trigger: { radius: 0 } })
 const Coin = definePrefab('coin', { tags: ['coin'], trigger: { radius: 0.5 } })
 
 export default defineGame({
+  kits: [topdown],
   vars: { score: 0, enters: 0 },
   flow: { start: 'title', states: ${states} },
   scene: (s) => <>

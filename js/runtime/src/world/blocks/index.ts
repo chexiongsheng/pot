@@ -1,5 +1,6 @@
 /**
  * 系统积木（004 第 6.12、15.11 节）。写法与游戏自写的积木完全相同，只用公开的低层 API。
+ * moveTopdown、cameraFollow 在 M3 迁到了 kits/topdown（17.3）。
  * 在 WorldService 构造时登记；游戏登记同名积木时覆盖这里的，撤销后露出这里的。
  */
 import { defineBlock } from '../registry'
@@ -25,19 +26,6 @@ export const spin = defineBlock({
   props: { speed: 90 },
   step(me, e, w) {
     e.rot[1] = (e.rot[1] + me.speed * w.dt) % 360
-  },
-})
-
-/** 俯视角移动：读 move 轴，x 轴对应世界 x，y 轴对应世界 z。M3 迁入 topdown 套件（004 第 6.12 节） */
-export const moveTopdown = defineBlock({
-  name: 'moveTopdown',
-  about: '俯视角移动：读指令轴 move，按 speed（米每秒）改 pos 的 x、z',
-  props: { speed: 5 },
-  step(me, e, w) {
-    const { x, y } = w.cmd(e).axis('move')
-    if (!x && !y) return
-    e.pos[0] += x * me.speed * w.dt
-    e.pos[2] += y * me.speed * w.dt
   },
 })
 
@@ -76,24 +64,6 @@ export const projectile = defineBlock({
   },
 })
 
-/** 相机跟随：每帧把相机放到实体插值位置加 offset，并看向实体。M3 迁入 topdown 套件（004 第 6.12 节） */
-export const cameraFollow = defineBlock({
-  name: 'cameraFollow',
-  about: '相机跟随：相机放在实体位置加 offset 处并看向实体（每帧，按插值后的位置）',
-  props: { offset: [0, 12, -10] as Vec3 },
-  view: {
-    update(me, e, _objs, ctx, w) {
-      const prev = w.prev.get(e.id)?.pos ?? e.pos
-      const a = ctx.clock.fixedAlpha
-      const p: Vec3 = [prev[0] + (e.pos[0] - prev[0]) * a, prev[1] + (e.pos[1] - prev[1]) * a, prev[2] + (e.pos[2] - prev[2]) * a]
-      const o = me.offset
-      const cam = ctx.scene.camera
-      cam.position = [p[0] + o[0], p[1] + o[1], p[2] + o[2]]
-      cam.lookAt(p)
-    },
-  },
-})
-
 /** 点光源，跟随实体 */
 export const light = defineBlock({
   name: 'light',
@@ -106,4 +76,4 @@ export const light = defineBlock({
   },
 })
 
-export const BUILTIN_BLOCKS = [shape, spin, moveTopdown, trigger, lifetime, projectile, cameraFollow, light]
+export const BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light]

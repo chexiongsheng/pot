@@ -6,11 +6,13 @@ const path = require('path')
 const { startGame, frames, loadPot } = require('./helpers')
 
 const GAME = `import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Player = definePrefab('player', { tags: ['player'], moveTopdown: true, trigger: { radius: 0 } })
 const Coin = definePrefab('coin', { tags: ['coin'], trigger: { radius: 0.5 } })
 
 export default defineGame({
+  kits: [topdown],
   vars: { score: 0, fired: 0 },
   flow: { start: 'play', states: { play: { on: { pause: 'paused' } }, paused: { pause: true, on: { resume: 'play' } } } },
   scene: () => <>

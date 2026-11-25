@@ -7,11 +7,13 @@ const { startGame, frames, run } = require('./helpers')
 
 const GAME = 'src/plugins/game.tsx'
 const SOURCE = `import { defineGame, definePrefab } from '@pot/core'
+import topdown from '@pot/kit/topdown'
 
 const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube' }, moveTopdown: true })
 const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', color: '#ffd54f' }, spin: true })
 
 export default defineGame({
+  kits: [topdown],
   scene: () => <>
     <stage background="#1e2230" />
     <Player key="p" at={[0, 0.5, 0]} />
@@ -40,7 +42,7 @@ test('树视图：实体、规则、stage 各一条，带 key 路径、属性与
   const ctx = await start()
   const view = w(ctx.runtime).treeView('game')
   assert.deepEqual(view.entities.map((e) => e.path), ['player:p', 'coin:0', 'coin:1'])
-  assert.match(view.entities[0].source, /^src\/plugins\/game\.tsx:9$/)
+  assert.match(view.entities[0].source, /^src\/plugins\/game\.tsx:11$/)
   assert.equal(view.entities[1].blocks.shape.kind, 'sphere')
   assert.deepEqual(view.rules.map((r) => [r.path, r.on, r.a, r.b, r.do]), [['rule#0', 'touch', 'player', 'coin', '[function]']])
   assert.equal(view.stage.background, '#1e2230')
