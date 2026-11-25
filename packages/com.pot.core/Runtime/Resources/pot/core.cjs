@@ -92,6 +92,7 @@ var pot = (() => {
     buildOuterStack: () => buildOuterStack,
     c16: () => c16,
     c256: () => c256,
+    compileLayout: () => compileLayout,
     compileModule: () => compileModule,
     composeError: () => composeError,
     compressRecording: () => compressRecording,
@@ -8880,7 +8881,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     out[1] = layout2.stride;
     out[2] = dt;
     out[3] = tick;
-    for (let i = 0; i < list.length; i++) packEntity(layout2, list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout2.stride);
+    const { pack } = compileLayout(layout2);
+    for (let i = 0; i < list.length; i++) pack(list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout2.stride);
     return out;
   }
   function unpackBatch(layout2, list, buf) {
@@ -8891,7 +8893,119 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const o = BUFFER_HEAD + i * layout2.stride;
       if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`);
     }
-    for (let i = 0; i < list.length; i++) unpackEntity(layout2, list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout2.stride);
+    const { unpack } = compileLayout(layout2);
+    for (let i = 0; i < list.length; i++) unpack(list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout2.stride);
+  }
+  var compiled = /* @__PURE__ */ new WeakMap();
+  function access(keys) {
+    let expr = "me";
+    for (const k of keys) expr = `(${expr} == null ? undefined : ${expr}[${JSON.stringify(k)}])`;
+    return expr;
+  }
+  function compileLayout(layout2) {
+    const hit = compiled.get(layout2);
+    if (hit) return hit;
+    let result;
+    try {
+      result = { pack: compilePack(layout2), unpack: compileUnpack(layout2) };
+    } catch {
+      result = { pack: (e, me, env, buf, o) => packEntity(layout2, e, me, env, buf, o), unpack: (e, me, buf, o) => unpackEntity(layout2, e, me, buf, o) };
+    }
+    compiled.set(layout2, result);
+    return result;
+  }
+  function compilePack(layout2) {
+    const lines = [
+      "buf[o] = e.id",
+      "const p = e.pos, r = e.rot",
+      "buf[o + 1] = p[0]; buf[o + 2] = p[1]; buf[o + 3] = p[2]",
+      "buf[o + 4] = r[0]; buf[o + 5] = r[1]; buf[o + 6] = r[2]",
+      "let c = null"
+    ];
+    const groups = [];
+    let n2 = 0;
+    for (const f of layout2.fields) {
+      while (groups.length && !f.path.startsWith(groups[groups.length - 1][0])) groups.pop();
+      const cond = groups.map((g) => g[1]).join(" && ");
+      const at = `o + ${f.offset}`;
+      const v = `v${n2++}`;
+      const zeros = Array.from({ length: f.slots }, (_, i) => `buf[${at} + ${i}] = 0`).join("; ");
+      const body2 = [];
+      if (f.input !== void 0) body2.push(`const ${v} = ${JSON.stringify(f.input)}`);
+      else body2.push(`const ${v} = ${access(f.keys)}`);
+      switch (f.type) {
+        case "f":
+          body2.push(`buf[${at}] = typeof ${v} === 'number' ? ${v} : NaN`);
+          break;
+        case "b":
+          body2.push(`buf[${at}] = ${v} ? 1 : 0`);
+          break;
+        case "f?":
+          body2.push(`if (typeof ${v} === 'number') { buf[${at}] = 1; buf[${at} + 1] = ${v} } else { buf[${at}] = 0; buf[${at} + 1] = 0 }`);
+          break;
+        case "layers":
+          body2.push(`buf[${at}] = Array.isArray(${v}) ? env.layerMask(${v}) : 4294967295`);
+          break;
+        case "axis":
+          body2.push(`if (!c) c = env.cmd(e)`, `const a${n2} = c.axis(String(${v}))`, `buf[${at}] = a${n2}.x; buf[${at} + 1] = a${n2}.y`);
+          break;
+        case "action":
+          body2.push(`if (!c) c = env.cmd(e)`, `buf[${at}] = c.down(String(${v})) ? 1 : 0; buf[${at} + 1] = c.pressed(String(${v})) ? 1 : 0`);
+          break;
+        case "?": {
+          const ok = `g${n2}`;
+          lines.push(`let ${ok} = false`);
+          body2.push(`${ok} = isPlainObject(${v})`, `buf[${at}] = ${ok} ? 1 : 0`);
+          groups.push([f.path + ".", ok]);
+          break;
+        }
+        default: {
+          const parts = [];
+          for (let i = 0; i < f.slots; i++) parts.push(`buf[${at} + ${i}] = arr && typeof ${v}[${i}] === 'number' ? ${v}[${i}] : NaN`);
+          body2.push(`{ const arr = Array.isArray(${v}); ${parts.join("; ")} }`);
+        }
+      }
+      if (cond) lines.push(`if (${cond}) { ${body2.join("; ")} } else { ${zeros} }`);
+      else lines.push(`{ ${body2.join("; ")} }`);
+    }
+    return new Function("isPlainObject", `return function pack(e, me, env, buf, o) {
+${lines.join("\n")}
+}`)(isPlainObject2);
+  }
+  function compileUnpack(layout2) {
+    const writable = layout2.fields.filter((f) => f.writable);
+    if (writable.some((f) => f.type === "?" || f.keys.length !== 1)) return (e, me, buf, o) => unpackEntity(layout2, e, me, buf, o);
+    const lines = [
+      "const p = e.pos, r = e.rot",
+      "p[0] = buf[o + 1]; p[1] = buf[o + 2]; p[2] = buf[o + 3]",
+      "r[0] = buf[o + 4]; r[1] = buf[o + 5]; r[2] = buf[o + 6]"
+    ];
+    for (const f of writable) {
+      const at = `o + ${f.offset}`;
+      const key = JSON.stringify(f.keys[0]);
+      switch (f.type) {
+        case "f":
+          lines.push(`me[${key}] = buf[${at}]`);
+          break;
+        case "b":
+          lines.push(`me[${key}] = buf[${at}] !== 0`);
+          break;
+        case "f?":
+          lines.push(`me[${key}] = buf[${at}] !== 0 ? buf[${at} + 1] : null`);
+          break;
+        case "layers":
+        case "axis":
+        case "action":
+          break;
+        default: {
+          const sets = Array.from({ length: f.slots }, (_, i) => `t[${i}] = buf[${at} + ${i}]`).join("; ");
+          lines.push(`{ let t = me[${key}]; if (!Array.isArray(t) || t.length !== ${f.slots}) { t = new Array(${f.slots}); me[${key}] = t } ${sets} }`);
+        }
+      }
+    }
+    return new Function(`return function unpack(e, me, buf, o) {
+${lines.join("\n")}
+}`)();
   }
 
   // runtime/src/world/native.ts
@@ -9327,8 +9441,24 @@ TS：${r.layout.text}
       __publicField(this, "_native");
       /** 碰撞层名到位号（18.3 的 layers、18.6 的碰撞体缓冲区），最多 32 层 */
       __publicField(this, "_layerBits", /* @__PURE__ */ new Map());
+      /**
+       * 模拟步内的缓存（18.14 第 7 步）：步内 World 数据与步长不会变，`w.data`、`w.dt` 不再每次经 cordis 的上下文代理取 state、clock
+       * （每次取都要几微秒，w.move 一次要取好几回）。步外（界面、热重载、verify 换数据）照旧每次重新取
+       */
+      __publicField(this, "_stepData", null);
+      __publicField(this, "_stepDt", 0);
+      /**
+       * 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动）。
+       * 在构造时绑定原始实例：经 ctx.world（cordis 的代理）调用方法时 this 是代理，World 内部的每次属性访问都要过代理，慢一个数量级
+       */
+      __publicField(this, "stepNow");
+      /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管。同 stepNow，绑定原始实例 */
+      __publicField(this, "verifyNative");
       __publicField(this, "_nativeBodies", { table: -1, pending: "" });
       this._root = ctx;
+      const self = this;
+      this.stepNow = () => self._step();
+      this.verifyNative = (block, options = {}) => verifyNative(self, self._root.state, block, options);
       this._native = new NativeBlocks({
         registry: this.registry,
         warn: (m) => this._warnOnce(m),
@@ -9349,8 +9479,9 @@ TS：${r.layout.text}
         this.view.frame();
       });
     }
-    /** 当前的 World 数据（每次重新取，不缓存） */
+    /** 当前的 World 数据（步外每次重新取，不缓存） */
     get data() {
+      if (this._stepData) return this._stepData;
       const state = this._root.state;
       let data = state.get("world");
       if (!data) {
@@ -9360,7 +9491,7 @@ TS：${r.layout.text}
       return data;
     }
     get dt() {
-      return this._root.clock.fixedStep;
+      return this._stepData ? this._stepDt : this._root.clock.fixedStep;
     }
     get tick() {
       return this.data.tick;
@@ -9618,10 +9749,6 @@ TS：${r.layout.text}
       }
       return bit;
     }
-    /** 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动） */
-    stepNow() {
-      this._step();
-    }
     /** 当前的指令来源（录像回放、pot test、verify 设置的）；没有时为 null */
     get commandSource() {
       return this._source;
@@ -9629,10 +9756,6 @@ TS：${r.layout.text}
     /** 是否处于叠加状态（模拟不走） */
     get overlayActive() {
       return !!this._overlay();
-    }
-    /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管 */
-    verifyNative(block, options = {}) {
-      return verifyNative(this, this._root.state, block, options);
     }
     /** 碰撞表或等待销毁的集合变了就发给原生侧（18.6）；与 TS 的 w.move 用同一时刻的碰撞表 */
     _syncNativeBodies() {
@@ -10044,6 +10167,8 @@ TS：${r.layout.text}
         this._sweep();
         this._applyGoto();
         const data = this.data;
+        this._stepDt = this._root.clock.fixedStep;
+        this._stepData = data;
         this._prevDown = this._down;
         this._down = {};
         this._axes = {};
@@ -10129,6 +10254,7 @@ TS：${r.layout.text}
         this._applyGoto();
       } finally {
         this._stepping = false;
+        this._stepData = null;
       }
     }
     _drain(data) {

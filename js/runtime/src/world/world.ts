@@ -248,6 +248,10 @@ export class WorldService extends Service {
   constructor(ctx: Context, private _host?: Host) {
     super(ctx, 'world')
     this._root = ctx
+    // 构造函数里的 this 是原始实例（cordis 的 Service 构造返回它自己）
+    const self = this
+    this.stepNow = () => self._step()
+    this.verifyNative = (block, options = {}) => verifyNative(self, self._root.state, block, options)
     this._native = new NativeBlocks({
       registry: this.registry,
       warn: (m) => this._warnOnce(m),
@@ -271,8 +275,16 @@ export class WorldService extends Service {
     })
   }
 
-  /** 当前的 World 数据（每次重新取，不缓存） */
+  /**
+   * 模拟步内的缓存（18.14 第 7 步）：步内 World 数据与步长不会变，`w.data`、`w.dt` 不再每次经 cordis 的上下文代理取 state、clock
+   * （每次取都要几微秒，w.move 一次要取好几回）。步外（界面、热重载、verify 换数据）照旧每次重新取
+   */
+  private _stepData: WorldData | null = null
+  private _stepDt = 0
+
+  /** 当前的 World 数据（步外每次重新取，不缓存） */
   get data(): WorldData {
+    if (this._stepData) return this._stepData
     const state = this._root.state
     let data = state.get<WorldData>('world')
     if (!data) {
@@ -283,7 +295,7 @@ export class WorldService extends Service {
   }
 
   get dt() {
-    return this._root.clock.fixedStep
+    return this._stepData ? this._stepDt : this._root.clock.fixedStep
   }
 
   get tick() {
@@ -576,10 +588,11 @@ export class WorldService extends Service {
     return bit
   }
 
-  /** 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动） */
-  stepNow() {
-    this._step()
-  }
+  /**
+   * 立即执行一个模拟步（verify 用；平时由 fixed-update 驱动）。
+   * 在构造时绑定原始实例：经 ctx.world（cordis 的代理）调用方法时 this 是代理，World 内部的每次属性访问都要过代理，慢一个数量级
+   */
+  readonly stepNow: () => void
 
   /** 当前的指令来源（录像回放、pot test、verify 设置的）；没有时为 null */
   get commandSource(): CommandSource | null {
@@ -591,10 +604,8 @@ export class WorldService extends Service {
     return !!this._overlay()
   }
 
-  /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管 */
-  verifyNative(block: string, options: VerifyOptions = {}): VerifyResult {
-    return verifyNative(this, this._root.state, block, options)
-  }
+  /** 两种实现跑同一段输入并比较（18.8）；只恢复 World 数据，别的 state 不管。同 stepNow，绑定原始实例 */
+  readonly verifyNative: (block: string, options?: VerifyOptions) => VerifyResult
 
   private _nativeBodies = { table: -1, pending: '' }
 
@@ -1048,6 +1059,8 @@ export class WorldService extends Service {
       // 步外请求的流程切换在步开始时应用
       this._applyGoto()
       const data = this.data
+      this._stepDt = this._root.clock.fixedStep
+      this._stepData = data
       // 1. 采样指令
       this._prevDown = this._down
       this._down = {}
@@ -1142,6 +1155,7 @@ export class WorldService extends Service {
       this._applyGoto()
     } finally {
       this._stepping = false
+      this._stepData = null
     }
   }
 

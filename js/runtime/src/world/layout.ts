@@ -224,7 +224,8 @@ export function packBatch(layout: Layout, list: { e: any; me: any }[], env: Pack
   out[1] = layout.stride
   out[2] = dt
   out[3] = tick
-  for (let i = 0; i < list.length; i++) packEntity(layout, list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout.stride)
+  const { pack } = compileLayout(layout)
+  for (let i = 0; i < list.length; i++) pack(list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout.stride)
   return out
 }
 
@@ -237,5 +238,112 @@ export function unpackBatch(layout: Layout, list: { e: any; me: any }[], buf: Fl
     const o = BUFFER_HEAD + i * layout.stride
     if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`)
   }
-  for (let i = 0; i < list.length; i++) unpackEntity(layout, list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout.stride)
+  const { unpack } = compileLayout(layout)
+  for (let i = 0; i < list.length; i++) unpack(list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout.stride)
+}
+
+// ---------------------------------------------------------------- 代码生成（18.14 第 7 步）
+
+type PackFn = (e: any, me: any, env: PackEnv, buf: Float64Array, o: number) => void
+type UnpackFn = (e: any, me: any, buf: Float64Array, o: number) => void
+
+const compiled = new WeakMap<Layout, { pack: PackFn; unpack: UnpackFn }>()
+
+/** 属性访问表达式：me.a.b 写成逐级判空，避免中间是 null 时抛错 */
+function access(keys: string[]): string {
+  let expr = 'me'
+  for (const k of keys) expr = `(${expr} == null ? undefined : ${expr}[${JSON.stringify(k)}])`
+  return expr
+}
+
+/**
+ * 按布局生成专用的打包、解包函数（与 packEntity、unpackEntity 结果逐位相同，测试里比对）。
+ * 通用版每个字段都要按路径逐级取值、按类型字符串分支，1000 个实体、54 个字段时每步约 1.3 ms；生成的版本把这些都展开。
+ * 生成失败（宿主不允许 new Function）时退回通用版。
+ */
+export function compileLayout(layout: Layout): { pack: PackFn; unpack: UnpackFn } {
+  const hit = compiled.get(layout)
+  if (hit) return hit
+  let result: { pack: PackFn; unpack: UnpackFn }
+  try {
+    result = { pack: compilePack(layout), unpack: compileUnpack(layout) }
+  } catch {
+    result = { pack: (e, me, env, buf, o) => packEntity(layout, e, me, env, buf, o), unpack: (e, me, buf, o) => unpackEntity(layout, e, me, buf, o) }
+  }
+  compiled.set(layout, result)
+  return result
+}
+
+function compilePack(layout: Layout): PackFn {
+  const lines: string[] = [
+    'buf[o] = e.id',
+    'const p = e.pos, r = e.rot',
+    'buf[o + 1] = p[0]; buf[o + 2] = p[1]; buf[o + 3] = p[2]',
+    'buf[o + 4] = r[0]; buf[o + 5] = r[1]; buf[o + 6] = r[2]',
+    'let c = null',
+  ]
+  /** 外层可为 null 的对象：[路径前缀, 条件变量] */
+  const groups: [string, string][] = []
+  let n = 0
+  for (const f of layout.fields) {
+    while (groups.length && !f.path.startsWith(groups[groups.length - 1][0])) groups.pop()
+    const cond = groups.map((g) => g[1]).join(' && ')
+    const at = `o + ${f.offset}`
+    const v = `v${n++}`
+    const zeros = Array.from({ length: f.slots }, (_, i) => `buf[${at} + ${i}] = 0`).join('; ')
+    const body: string[] = []
+    if (f.input !== undefined) body.push(`const ${v} = ${JSON.stringify(f.input)}`)
+    else body.push(`const ${v} = ${access(f.keys)}`)
+    switch (f.type) {
+      case 'f': body.push(`buf[${at}] = typeof ${v} === 'number' ? ${v} : NaN`); break
+      case 'b': body.push(`buf[${at}] = ${v} ? 1 : 0`); break
+      case 'f?': body.push(`if (typeof ${v} === 'number') { buf[${at}] = 1; buf[${at} + 1] = ${v} } else { buf[${at}] = 0; buf[${at} + 1] = 0 }`); break
+      case 'layers': body.push(`buf[${at}] = Array.isArray(${v}) ? env.layerMask(${v}) : 4294967295`); break
+      case 'axis': body.push(`if (!c) c = env.cmd(e)`, `const a${n} = c.axis(String(${v}))`, `buf[${at}] = a${n}.x; buf[${at} + 1] = a${n}.y`); break
+      case 'action': body.push(`if (!c) c = env.cmd(e)`, `buf[${at}] = c.down(String(${v})) ? 1 : 0; buf[${at} + 1] = c.pressed(String(${v})) ? 1 : 0`); break
+      case '?': {
+        const ok = `g${n}`
+        lines.push(`let ${ok} = false`)
+        body.push(`${ok} = isPlainObject(${v})`, `buf[${at}] = ${ok} ? 1 : 0`)
+        groups.push([f.path + '.', ok])
+        break
+      }
+      default: {
+        const parts: string[] = []
+        for (let i = 0; i < f.slots; i++) parts.push(`buf[${at} + ${i}] = arr && typeof ${v}[${i}] === 'number' ? ${v}[${i}] : NaN`)
+        body.push(`{ const arr = Array.isArray(${v}); ${parts.join('; ')} }`)
+      }
+    }
+    if (cond) lines.push(`if (${cond}) { ${body.join('; ')} } else { ${zeros} }`)
+    else lines.push(`{ ${body.join('; ')} }`)
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function('isPlainObject', `return function pack(e, me, env, buf, o) {\n${lines.join('\n')}\n}`)(isPlainObject) as PackFn
+}
+
+function compileUnpack(layout: Layout): UnpackFn {
+  const writable = layout.fields.filter((f) => f.writable)
+  // 状态里有可为 null 的对象或嵌套路径时用通用版（实际的积木都没有）
+  if (writable.some((f) => f.type === '?' || f.keys.length !== 1)) return (e, me, buf, o) => unpackEntity(layout, e, me, buf, o)
+  const lines: string[] = [
+    'const p = e.pos, r = e.rot',
+    'p[0] = buf[o + 1]; p[1] = buf[o + 2]; p[2] = buf[o + 3]',
+    'r[0] = buf[o + 4]; r[1] = buf[o + 5]; r[2] = buf[o + 6]',
+  ]
+  for (const f of writable) {
+    const at = `o + ${f.offset}`
+    const key = JSON.stringify(f.keys[0])
+    switch (f.type) {
+      case 'f': lines.push(`me[${key}] = buf[${at}]`); break
+      case 'b': lines.push(`me[${key}] = buf[${at}] !== 0`); break
+      case 'f?': lines.push(`me[${key}] = buf[${at}] !== 0 ? buf[${at} + 1] : null`); break
+      case 'layers': case 'axis': case 'action': break
+      default: {
+        const sets = Array.from({ length: f.slots }, (_, i) => `t[${i}] = buf[${at} + ${i}]`).join('; ')
+        lines.push(`{ let t = me[${key}]; if (!Array.isArray(t) || t.length !== ${f.slots}) { t = new Array(${f.slots}); me[${key}] = t } ${sets} }`)
+      }
+    }
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function(`return function unpack(e, me, buf, o) {\n${lines.join('\n')}\n}`)() as UnpackFn
 }

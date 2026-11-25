@@ -129,3 +129,38 @@ test('布局：@ 开头的提示是写死名字的输入，排在字段前面', 
   assert.match(reason({ '@move': 'f' }), /是输入，类型只能是 axis 或 action/)
   assert.match(reason({ '@1x': 'axis' }), /不是合法的指令名/)
 })
+
+test('布局：生成的打包、解包与通用版逐位相同（含 null 对象、缺字段、非数值、输入）', () => {
+  const def = pot.defineBlock({
+    name: 'g',
+    props: { speed: 4, flag: true, stride: { walk: 1, run: 2 }, layers: null, ground: { y: 0 }, bounds: null, fallY: null, actions: { move: 'move', jump: 'jump' } },
+    state: { vel: [0, 0, 0], hp: 3, on: false, opt: null },
+    native: { '@look': 'axis', layers: 'layers', ground: { '?': { y: 'f', maxX: 'f?' } }, bounds: { '?': { min: 'f2', max: 'f2' } }, fallY: 'f?', actions: { move: 'axis', jump: 'action' }, opt: 'f?' },
+    step() {},
+  })
+  const { layout } = pot.deriveLayout(def)
+  const { pack, unpack } = pot.compileLayout(layout)
+  const e0 = env({ axes: { move: { x: 0.3, y: -1 }, look: { x: 2, y: 0 }, walk: { x: 1, y: 1 } }, down: { jump: true, hop: true }, pressed: { hop: true } })
+  const cases = [
+    { speed: 4, flag: true, stride: { walk: 1, run: 2 }, layers: null, ground: { y: 0 }, bounds: null, fallY: null, actions: { move: 'move', jump: 'jump' }, vel: [1, 2, 3], hp: 3, on: false, opt: null },
+    { speed: 'x', flag: 0, stride: null, layers: ['bullet', 'default'], ground: { y: -1.6, maxX: 30 }, bounds: { min: [-1, -2], max: [3, 4] }, fallY: -10, actions: { move: 'walk', jump: 'hop' }, vel: [1, 'a'], hp: undefined, on: true, opt: 0.5 },
+    { speed: 1, flag: false, stride: { walk: 2 }, layers: [], ground: null, bounds: { min: [0, 0] }, fallY: 'no', actions: { move: 'none', jump: 'none' }, vel: null, hp: -0, on: 1, opt: 2 },
+  ]
+  const same = (a, b) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]))
+  for (const me of cases) {
+    const e = { id: 5, pos: [1, 2, 3], rot: [4, 5, 6] }
+    const a = new Float64Array(layout.stride), b = new Float64Array(layout.stride)
+    pot.packEntity(layout, e, me, e0, a, 0)
+    pack(e, me, e0, b, 0)
+    assert.ok(same(Array.from(a), Array.from(b)), JSON.stringify({ me, generic: Array.from(a), compiled: Array.from(b) }))
+    // 改一些槽再解包，两边结果相同
+    for (let i = 7; i < layout.stride; i++) a[i] = b[i] = (i * 0.37) % 2
+    const m1 = JSON.parse(JSON.stringify(me)), m2 = JSON.parse(JSON.stringify(me))
+    const e1 = { id: 5, pos: [0, 0, 0], rot: [0, 0, 0] }, e2 = { id: 5, pos: [0, 0, 0], rot: [0, 0, 0] }
+    pot.unpackEntity(layout, e1, m1, a, 0)
+    unpack(e2, m2, b, 0)
+    assert.deepEqual(m2, m1)
+    assert.deepEqual(e2, e1)
+  }
+})
+
