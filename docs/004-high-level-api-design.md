@@ -1,8 +1,8 @@
 # 004 pot：高层游戏编写方式（积木与 TSX）设计文档
 
-状态：草案，M1 待实施。方向已定：可序列化的实体数据内核，加 TSX 作为唯一的编写前端。第 14 节是远期的待决事项，M1 用到的部分已在第 15 节给出临时决定
+状态：M1 已完成，M2 实施中。方向已定：可序列化的实体数据内核，加 TSX 作为唯一的编写前端。第 14 节是远期的待决事项，M1、M2 用到的部分分别在第 15、16 节给出临时决定
 上级文档：`001-game-runner-design.md` 第 7 节（Game API 设计原则）、`002-hot-reload-design.md`
-修订：第 4 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节），第 4 版加入套件（6.12）：积木与预制件分系统、套件、游戏三层，系统级只留与玩法和风格无关的部分
+修订：第 4 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节），第 4 版加入套件（6.12）：积木与预制件分系统、套件、游戏三层，系统级只留与玩法和风格无关的部分；第 5 版补充 M2 实施规格（第 16 节）
 
 ## 0. 摘要
 
@@ -718,7 +718,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | M1 内核最小版加 TSX 接入 | jsx 运行时与两遍转译（5.8）；`defineGame`、树求值与 key 对比；World 服务、带模式的积木、固定步调度、帧末变换批量同步、事件与规则、指令层；约 10 个积木；最简的 `ui` 求值（文本） | 用 5.1 的写法重写 hello，对比字节数和 AI 生成所用的 token；热重载后吃掉的金币不回来；存档行为不变 |
-| M2 界面与工具 | 界面标签与布局、流程、`ui.local`；补界面的低层缺口；`pot blocks`、`pot check` 的求值校验、类型生成、`pot query world`、覆盖层、`pot test`；Skill 更新 | AI 只凭 Skill 和 `pot blocks` 写出一个新的小游戏和一个界面为主的小游戏 |
+| M2 界面与工具（施工说明见第 16 节） | 界面标签与布局、流程、`ui.local`；补界面的低层缺口；`pot blocks`、`pot check` 的求值校验、类型生成、`pot query world`、覆盖层、`pot test`；Skill 更新 | AI 只凭 Skill 和 `pot blocks` 写出一个新的小游戏和一个界面为主的小游戏 |
 | M3 混用验证与套件 | 模拟侧碰撞、`moveFps`、AI 积木；套件机制（6.12：`defineKit`、`kits`、`@pot/kit/*` 解析与打包、冲突报错）；从 saltline 整理出 `fps` 与写实两个套件，把它的玩家和敌人换成积木，渲染单元保留；`moveTopdown`、`cameraFollow` 迁入 `topdown` 套件 | 行为与现版本一致，代码量明显下降；hello-tsx 改为引入 `topdown` 后行为不变 |
 | M4 C# 积木 | 原生实现注册、列共享与跨语言开销实测、`pot block verify`；移植碰撞和一个移动积木；评估 wasm 物理库 | 同一录像两种实现结果一致，给出性能对比 |
 | M5 联机 | `ctx.net`、房间服务、本地回环驱动与录像回放、权威同步、帧同步、回合制，按此顺序 | 每种驱动各有一个示例游戏和 Node 上的自动化用例 |
@@ -746,8 +746,8 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 
 ## 14. 待决事项
 
-1. 界面运行时：M1 用自己写的极小求值器（6.8）；做界面重的游戏时再评估是否改用 Preact 加仿 DOM。
-2. 类型给法：`vars` 和游戏自写积木的类型由工具生成到 `.pot/types.d.ts`，还是让游戏手写声明合并（推荐生成）。
+1. 界面运行时：M1 用自己写的极小求值器（6.8），M2 在它上面加布局（16.1）；做界面重的游戏时再评估是否改用 Preact 加仿 DOM。
+2. 类型给法：已定为生成（16.9）。`vars` 和游戏自写积木的类型由 `pot check`、`pot types` 写到 `.pot/types.d.ts`。
 3. 存储模型：对象式、列式、列式加游标（推荐第三种）。
 4. 系统积木与套件的 TS 源码放在哪：已定方向（6.12）。系统积木打进 Runner 的 `core.cjs`；套件作为随 Runner 分发、可热重载、可弹出的源码模块，发布时打进游戏的 bundle。待定的是套件目录在 Runner 包里的位置和版本号规则，M3 实施时定。
 5. 刚体动力学：只在表现侧用宿主物理（非确定），还是在模拟侧接入 wasm 物理库（倾向后者，取决于 WebAssembly 可用性的实测）。
@@ -1082,3 +1082,211 @@ M1 验收：`npm test` 全部通过（含原有用例）；`pot check games/hell
 4. 表现与界面求值器，`world-view` 通过。
 5. 系统积木与预制件、`defineGame`，`world-hmr` 通过。
 6. `games/hello-tsx`、各 `tsconfig`、发布构建，跑全量 `npm test` 与 `pot check`。
+
+## 16. M2 实施规格
+
+本节是 M2 的施工说明。凡与前文不同的地方以本节为准。M2 分成两半：前一半让游戏能写流程和像样的界面（16.2 到 16.5），后一半给 AI 配齐不开 Runner 就能查、改、测的工具（16.6 到 16.10）。
+
+### 16.1 M2 的临时决定
+
+| 事项 | 决定 | 理由 |
+|---|---|---|
+| 界面运行时（待决 1） | 继续用自己写的求值器，加布局 | M1 的求值器已证明够用；布局是纯计算，不需要保留节点 |
+| 类型给法（待决 2） | 生成。`pot check`、`pot types` 在 Node 宿主上加载游戏后写 `.pot/types.d.ts` | 游戏不用手写声明；生成物不入库 |
+| 焦点导航 | 只做键盘：Tab、Shift+Tab、方向键、Enter、空格、Esc | 低层还没有手柄（第 10 节），手柄导航随手柄一起做 |
+| 输入框 | 只做桌面键盘（Unity `Input.inputString`）；手机软键盘不在 M2 | 软键盘要走 `TouchScreenKeyboard`，交互与桌面不同，单独做 |
+| 图片 | `<image src>` 的 `src` 是低层的 `Texture` 对象（画布、文字贴图、`scene.texture` 的结果） | 外部图片文件加载属于第 10 节的资源加载，不在 M2 |
+| `pot test` 的输入 | 测试脚本直接给指令（轴、动作、界面事件），不经过键位映射；也能从 Runner 录制 | 指令是 World 的输入（6.6），绕开键位才可复现 |
+| 无画面检查用的宿主 | 新增 `js/devserver/headless.js`，提供无画面的 `Engine` | `pot check`、`pot blocks`、`pot test`、`pot types` 共用；测试里的 `MockEngine` 不挪到产品代码 |
+| 验收方式 | 本次由实施者写两个示例游戏验证（16.11）；“AI 只凭 Skill 写出游戏”的盲测留给用户另开会话或授权子智能体做 | 实施者看过全部实现，自己写不算盲测 |
+
+### 16.2 流程
+
+```ts
+flow?: {
+  start: string
+  states: Record<string, {
+    on?: Record<string, string>      // 事件名 → 目标状态
+    pause?: boolean                  // 叠加状态：进出都不重建场景，模拟暂停
+    enter?: (w: World) => void       // 进入后调用（场景已重建），可在这里重置 vars
+  }>
+}
+```
+
+- World 数据加一项 `flow: { state, params, base }`，存在 `state` 里，热重载、冷重启都保留。`base` 是最近一个非叠加状态，`scene` 按它求值；不写 `flow` 时 `state` 与 `base` 都是 `'play'`，与 M1 相同。
+- `w.flow` 只读，给出 `state`、`params`、`base`。`w.goto(name, params?)` 请求切换；名字不在 `states` 里时报错。
+- 事件触发切换：自定义事件（`w.emit`、界面事件）在规则和 `w.on` 处理完之后，查当前状态的 `on`，有映射就 `goto`。事件的 `payload` 是普通对象时作为 `params`，否则不带 `params`。`touch`、`death`、`every` 不参与。
+- 切换在当前步的第 7 步之后统一应用；不在步内调用时（例如普通单元里）到下一步开始时应用。一步里多次 `goto` 以最后一次为准。
+- 应用规则：
+  - 目标是叠加状态：只改 `state`、`params`，不动场景。
+  - 当前是叠加状态、目标是 `base`、且没带 `params`：恢复，不动场景。
+  - 其他情况都是“进入”：`state`、`base` 设为目标，`params` 设为传入值（缺省 `{}`）；销毁 `w.spawn` 生成的实体，清空接触表；游戏挂载的 key 记录清空、实体销毁（不标 `dead`），再以新状态求值 `scene` 并挂载；最后调用 `enter`。其他单元用 `ctx.world.mount` 挂的子树不受影响。
+- 叠加状态下每一步只做第 1 步（采样指令）和第 6、7 步（事件、延迟销毁），积木 `step`、触发检测、`every` 都不跑，`tick` 不加一。表现照常画，插值的上一步变换等于当前值。
+- 热重载后 `flow` 定义变了、当前状态不存在时，记一条警告并进入 `start`。
+- `flow` 由 `defineGame` 交给 `WorldService.setFlow`，撤销规则与 `controls` 相同。一个 World 同时只能有一个 `flow`，第二个设置者报错。
+
+### 16.3 界面：参数、事件与本地状态
+
+`ui` 的签名改为 `(w, ui: GameUI) => 树`（M1 的第二个参数是 `ctx.ui`，改动不兼容，M1 示例没有用到它）：
+
+| 成员 | 说明 |
+|---|---|
+| `ui.width`、`ui.height` | 屏幕尺寸 |
+| `ui.local` | 界面本地状态，普通对象。存在 `state` 里（键 `ui:<单元名>`，归该单元），热重载与冷重启保留，不属于 World，不进录像 |
+| `ui.emit(name, payload?)` | 发界面事件。进入下一步的指令，在那一步的第 6 步按自定义事件分发，所以能被录制、回放 |
+| `ui.focused` | 当前焦点控件的 key 路径，没有时为 `null` |
+| `ui.draw` | 原始的 `ctx.ui`，逃生口：在树之后画任意即时模式内容 |
+
+界面里的回调（`onPress`、`onChange`、`onSubmit`）只应改 `ui.local` 或调 `ui.emit`，不直接改 World。M2 不强制，`pot check` 也不查，写进 Skill 的规矩里。
+
+界面树里节点的身份用与场景树相同的 key 路径（5.4），焦点、滚动位置、按下状态都按路径记。`map` 出来的列表要写 `key`。
+
+### 16.4 界面：标签与布局
+
+通用属性（所有界面标签）：
+
+| 属性 | 含义 |
+|---|---|
+| `at` | 只对顶层节点有效：九宫格位置名或 `[x, y]`，缺省 `top-left`；九宫格离屏幕边缘 16 像素 |
+| `w`、`h` | 像素，或 `'50%'` 这样相对父容器内容区的百分比；不写为内容尺寸 |
+| `grow` | 主轴上分剩余空间的权重，缺省 0 |
+| `pad` | 内边距，数或 `[上下, 左右]` 或 `[上, 右, 下, 左]` |
+| `hidden` | 为真时不占位、不绘制 |
+
+容器属性（`row`、`column`、`panel`、`scroll`）：`gap`（缺省 0，`panel` 为 8）、`align`（交叉轴 `start`、`center`、`end`、`stretch`，缺省 `start`）、`justify`（主轴 `start`、`center`、`end`、`between`，缺省 `start`）。
+
+| 标签 | 属性 | 说明 |
+|---|---|---|
+| `<column>`、`<row>` | 容器属性 | 纵向、横向排列，本身不画东西 |
+| `<panel>` | 容器属性；`bg`（缺省 `'#1a1d26e6'`）、`border`、`radius`（缺省 8） | 纵向排列，带底色，缺省 `pad` 12 |
+| `<text>` | `size`（16）、`color`、`bold`、`wrap`、`align`（`left`、`center`、`right`，在自身宽度内） | 子节点里的字符串和数字拼起来；`wrap` 需要确定的宽度（`w` 或父容器 `stretch`） |
+| `<button>` | `emit`、`payload`、`onPress`、`disabled`、`size`、`color`、`bg`、`w`、`h` | 点击或焦点上按 Enter、空格时：有 `emit` 就 `ui.emit(emit, payload)`，再调 `onPress`。子节点是文字 |
+| `<bar>` | `value`、`max`（1）、`color`、`bg`、`w`（120）、`h`（10）、`radius` | 进度条 |
+| `<image>` | `src`（`Texture`）、`w`、`h`、`fit`（`fill`、`contain`、`cover`）、`tint`、`radius` | 不写宽高时用贴图尺寸 |
+| `<scroll>` | 容器属性；`h` 必填 | 纵向滚动，内容超出时裁剪；滚轮和拖动滚动；位置按路径记在 `ui.local` |
+| `<input>` | `value`、`onChange`、`onSubmit`、`placeholder`、`w`（200）、`size`、`max` | 单行输入框，受控：显示 `value`，键入时以新值调 `onChange`；Enter 调 `onSubmit` |
+
+布局是弹性布局的子集，每帧两遍：自底向上量内容尺寸，自顶向下分配位置。顶层节点各自独立排布在屏幕上。没有换行、绝对定位子节点、`z` 序（后画的在上）。
+
+交互：命中检测用本帧布局。按钮在“按下与抬起都在它上面”时触发；`disabled` 的不响应、画成半透明。焦点控件是按钮和输入框，按树的顺序排；Tab、方向键移动焦点，点击输入框获得焦点，Esc 取消焦点。没有焦点时，Enter 和方向键不被界面占用，照常进入指令。
+
+界面标签和场景标签的名字不重叠。界面树里出现实体标签、`rule`、`stage`，或场景树里出现界面标签，都报错并指出放错了树。
+
+### 16.5 低层补齐
+
+| 能力 | JS | 宿主命令与 C# |
+|---|---|---|
+| 裁剪 | `ui.clip(x, y, w, h)`、`ui.unclip()`，可嵌套，取交集 | 新命令 `c`（压栈）与 `C`（出栈）；`PotUI.cs` 用 `GUI.BeginClip` 加平移矩阵，保持坐标为屏幕坐标 |
+| 图片 | `ui.image(tex, x, y, w, h, { tint, radius, uv })` | 新命令 `i`：贴图 id、颜色、圆角、uv 矩形；`PotUI.cs` 按 id 取贴图（与材质贴图同一张表） |
+| 文字输入 | `ctx.input.text()`：本帧键入的字符串，退格为 `\b`，回车为 `\n` | `Engine.textInput()`，C# 读 `Input.inputString` |
+
+`MockEngine` 同步加这三项，测试能断言裁剪和图片命令、注入键入的文字。
+
+### 16.6 树视图与 `pot query world`
+
+- `WorldService` 记下每个挂载最近一次求值的树视图：每个实体、规则、`stage` 一条，含 key 路径、标签名、属性（函数显示为 `"[function]"`）、源位置。只在开发工具查询时生成 JSON，平时只保存求值结果的引用。
+- devtools 新增查询：`query world` 返回 `tick`、`flow`、`vars`、实体列表（id、预制件、路径、位置、积木数据）；`query world <筛选>` 按标签或预制件筛选；`query tree [挂载]` 返回树视图。CLI 为 `pot query world [筛选]`、`pot query tree [挂载]`，MCP 加同名参数。
+
+### 16.7 运行期补丁与覆盖层
+
+- 覆盖层文件 `data/overrides.json`：`{ "<挂载 id>": { "<key 路径>": { 属性补丁 } } }`。补丁的写法与标签属性相同：`at`、`rot`、`scale`、`name`、`tags` 整体替换，积木名对应的对象按字段合并，`false` 去掉积木。
+- `defineGame` 挂载时读覆盖层（经 `ctx.data`，改文件即热重载），`WorldService.mount` 在求值之后、对比之前把补丁叠到对应路径的实体描述上。对不上的路径记一条警告（只记一次）。
+- `pot world set <key 路径> <补丁 JSON> [--mount game] [--save]`：不带 `--save` 时只在运行期叠加（存在内存表里，下一次挂载时一并叠加，冷重启后丢失），立即触发一次重新挂载；带 `--save` 时由 Dev Server 写进游戏目录的 `data/overrides.json`（与已有内容深合并），再由文件变化触发热重载。游戏来自 `.potg` 或网址时 `--save` 报错。
+- `pot world clear [--save]` 清掉运行期补丁（`--save` 同时清空文件里该挂载的部分）。
+
+### 16.8 `pot blocks`
+
+- 在无画面宿主上加载游戏（不需要 Runner），从登记表列出积木和预制件，再加上静态的界面标签表和内置节点（`stage`、`rule`）。
+- 每项给出：名字、层（`system`、`game`，M3 起有套件名）、一句话说明、属性及缺省值；积木另给 `state` 字段，预制件另给继承链、标签和积木组合。`definePrefab` 的定义里新增可选的 `about` 字段。
+- `pot blocks` 列出全部（每项一行）；`pot blocks <关键字>` 按名字和说明过滤；`pot blocks --name <名字>` 输出单项的完整 JSON。MCP 工具 `pot_blocks` 参数相同。
+- 不在游戏目录下运行时只列系统级的。
+
+### 16.9 `pot check` 的求值校验与类型生成
+
+`pot check` 在 tsc 之后加一步：在无画面宿主上加载游戏的源码，启动，推进 2 个固定步并画一帧界面，收集：
+
+- 启动失败的单元（`runtime.failures`）；
+- `world` 记录器的错误（树求值、规则、积木、界面求值），带 `文件:行号`；
+- 告警：`map` 产生的实体或界面节点没写 `key`（求值时数组里的节点缺 `key` 即记，路径仍用序号）；覆盖层里对不上的路径。
+
+错误使 `ok` 为假，告警放在 `warnings` 里不影响 `ok`。之后写 `.pot/types.d.ts`：
+
+```ts
+// 由 pot check 生成，不要手改
+import type { Over } from '@pot/core'
+declare module '@pot/core' {
+  interface GameBlockProps {
+    jumps?: Over<{ height: number }>
+  }
+  interface GameVars {
+    score: number
+  }
+}
+export {}
+```
+
+- 积木属性的类型由 `props` 缺省值推出：数、字符串、布尔照搬；三个数的数组为 `Vec3`，其他数组为元素类型的数组；普通对象递归；`null` 为 `any`。
+- `vars` 的类型由合并后的 `w.vars` 推出，规则写法同上。
+- `@pot/core` 里新增空接口 `GameBlockProps`、`GameVars` 和类型 `Over`；`EntityProps` 继承 `GameBlockProps`，`World` 的 `vars` 类型为 `GameVars & Record<string, any>`。实体标签的索引签名在 M2 保留，等套件的类型方案（6.12）一起收紧。
+- 游戏模板和示例的 `tsconfig.json` 的 `include` 加 `.pot/*.d.ts`。`.pot/` 不入库。
+- `pot types <游戏目录>` 只做生成这一步。
+
+### 16.10 `pot test` 与录制
+
+测试脚本放在游戏的 `tests/*.json`：
+
+```json
+{
+  "name": "吃到第一个金币",
+  "steps": 120,
+  "input": [
+    { "at": 0, "axis": { "move": [0.83, 0.55] } },
+    { "at": 45, "axis": { "move": [0, 0] } },
+    { "at": 50, "emit": "pause" },
+    { "at": 51, "down": ["fire"] },
+    { "at": 52, "up": ["fire"] }
+  ],
+  "expect": { "vars": { "score": 1 }, "count": { "coin": 4 }, "flow": "play", "hash": "可选" }
+}
+```
+
+- `pot test [游戏目录] [--update]`：在无画面宿主上从空存档启动游戏，按脚本逐步推进。`input` 里 `at` 是步号，`axis` 设置并保持轴的值，`down`、`up` 设置动作，`emit` 发界面事件。运行中出现任何错误日志、`expect` 不符、启动失败，该脚本失败。
+- `hash` 是 World 数据（去掉 `contacts`）规范化 JSON 的 FNV-1a 值；`--update` 把当前值写回脚本。
+- 没有 `tests/` 时跑一个冒烟脚本：无输入推进 300 步，没有错误即通过。
+- 指令注入：`WorldService.setCommandSource(fn)` 接管第 1 步的采样，`fn(tick)` 返回 `{ axes, down, events }`；不设时照常从 `ctx.input` 采样。
+- 录制：`pot record start`、`pot record stop <文件>`。Runner 侧从开始那一步起记下每一步的指令，停止时只保留变化点，写成上面的格式（`steps` 为录制的步数，`expect` 填停止时的 `vars`、`flow` 和 `hash`）。录制从 `pot restart --reset` 之后开始才可复现，`pot record start --reset` 会先做这一步。
+
+### 16.11 Skill、模板与示例
+
+- Skill 主文件加一节“高层写法”：五条规矩、界面回调的规矩、查询顺序（`pot blocks` → 写 → `pot check` → `pot test` → Runner）。标签与流程的细节放 `references/world.md`，主文件不罗列积木。
+- 游戏模板改为高层写法：`src/plugins/game.tsx`、`tests/smoke.json`、`AGENTS.md`（五条规矩和命令，指向 Skill）。原来的低层模板保留为 `templates/game-lowlevel/`。
+- `games/hello-tsx` 加流程：标题（开始按钮）、进行中（Esc 暂停）、暂停（继续、回标题）、全部吃完进入结算（得分、再来一局）。`tests/` 放一个吃金币的脚本。
+- 新增 `games/quiz-tsx`，以界面为主：标题页输入名字，问题来自 `data/questions.json`，每题四个按钮、进度条，答完显示成绩和可滚动的答题回顾。场景只有背景。覆盖 `panel`、`row`、`column`、`button`、`bar`、`scroll`、`input`、`text wrap` 和焦点导航。
+
+### 16.12 文件清单
+
+新增：`js/runtime/src/world/flow.ts`（流程定义校验与应用）、`world/ui-layout.ts`（量尺寸与排布）、`world/ui-tags.ts`（各界面标签的量、画、交互，以及 `pot blocks` 用的界面标签表）、`world/inspect.ts`（树视图、登记表导出、类型生成、World 哈希）、`js/devserver/headless.js`（无画面宿主与“加载游戏”）、`js/devserver/gametest.js`（`pot test`）、`games/quiz-tsx/`、`skills/pot-game-dev/references/world.md`、`templates/game-lowlevel/`。
+
+修改：`world/world.ts`（流程、界面事件、指令源、覆盖层、运行期补丁、树视图）、`world/game.ts`（`flow`、`GameUI`、覆盖层）、`world/ui-eval.ts`（改为布局版）、`world/tree.ts`（`map` 缺 `key` 告警、放错树的报错）、`world/types.ts`（界面标签类型、`GameBlockProps`、`GameVars`、`Over`）、`registry.ts`（`definePrefab` 的 `about`）、`ui.ts`、`input.ts`、`host.ts`、`PotUI.cs`、`PotInput.cs`（或 `PotHost` 的引擎接口所在处）、`js/devtools/src/agent.ts`（`query world`、`query tree`、`world`、`record`）、`js/devserver/cli.js`、`mcp.js`、`server.js`（`--save` 写文件）、`builder.js`（`checkGame` 加求值校验与类型生成）、`js/test/helpers.js`（`MockEngine` 加三项）、`games/hello-tsx/`、Skill 与模板。
+
+### 16.13 测试
+
+| 文件 | 覆盖 |
+|---|---|
+| `world-flow.test.js` | 进入状态时场景重建、`spawn` 的实体被清、`enter` 被调用；叠加状态不重建、模拟暂停、`tick` 不走；恢复与“带参数进入”的区别；事件映射切换；一步多次 `goto` 取最后一次；热重载与冷重启保留流程状态；当前状态被删掉时回到 `start` |
+| `ui-layout.test.js` | 行列的内容尺寸、`gap`、`pad`、`grow`、`align`、`justify`、百分比、`hidden`；九宫格顶层定位；`wrap` 文字的高度 |
+| `ui-tags.test.js` | 各标签的绘制命令；按钮的按下抬起判定、`disabled`、`emit` 进入下一步并触发流程切换；焦点导航；输入框键入、退格、回车；滚动的裁剪与滚轮；`ui.local` 热重载后保留；放错树的报错 |
+| `world-tools.test.js` | 树视图；覆盖层与运行期补丁；对不上的路径告警；`map` 缺 `key` 告警；类型生成的内容；World 哈希对同一输入稳定 |
+| `devserver.test.js` 增补 | `pot check` 报出树求值错误与告警并生成类型文件；`pot blocks` 列出系统与游戏的积木；`pot test` 跑通 hello-tsx 的脚本、改坏后失败、`--update` 写回哈希；`world set --save` 写文件 |
+
+M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，它在 M1 之前就失败）；`pot check`、`pot test` 对 hello-tsx 和 quiz-tsx 通过；两个游戏在 Runner 里实机可玩，焦点导航和输入框可用；报告两个游戏的源码字节数。
+
+### 16.14 实施顺序
+
+1. 流程（16.2），`world-flow` 通过。
+2. 低层补齐（16.5）：JS、`MockEngine`、C#，重建 Runner 实测三条新命令。
+3. 界面参数、布局与标签（16.3、16.4），`ui-layout`、`ui-tags` 通过。
+4. 树视图、覆盖层、运行期补丁、`pot query world`、`pot world set`（16.6、16.7）。
+5. 无画面宿主、`pot blocks`、`pot check` 的求值校验与类型生成（16.8、16.9）。
+6. `pot test` 与录制（16.10）。
+7. hello-tsx 的流程、quiz-tsx、Skill 与模板（16.11），Runner 实测，跑全量测试。
