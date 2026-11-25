@@ -1,5 +1,5 @@
 /**
- * 官方积木（004 第 15.11 节）。写法与游戏自写的积木完全相同，只用公开的低层 API。
+ * 系统积木（004 第 6.12、15.11 节）。写法与游戏自写的积木完全相同，只用公开的低层 API。
  * 在 WorldService 构造时登记；游戏登记同名积木时覆盖这里的，撤销后露出这里的。
  */
 import { defineBlock } from '../registry'
@@ -28,7 +28,7 @@ export const spin = defineBlock({
   },
 })
 
-/** 俯视角移动：读 move 轴，x 轴对应世界 x，y 轴对应世界 z */
+/** 俯视角移动：读 move 轴，x 轴对应世界 x，y 轴对应世界 z。M3 迁入 topdown 套件（004 第 6.12 节） */
 export const moveTopdown = defineBlock({
   name: 'moveTopdown',
   about: '俯视角移动：读指令轴 move，按 speed（米每秒）改 pos 的 x、z',
@@ -76,7 +76,7 @@ export const projectile = defineBlock({
   },
 })
 
-/** 相机跟随：每帧把相机放到实体插值位置加 offset，并看向实体 */
+/** 相机跟随：每帧把相机放到实体插值位置加 offset，并看向实体。M3 迁入 topdown 套件（004 第 6.12 节） */
 export const cameraFollow = defineBlock({
   name: 'cameraFollow',
   about: '相机跟随：相机放在实体位置加 offset 处并看向实体（每帧，按插值后的位置）',

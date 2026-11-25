@@ -7596,28 +7596,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
 
   // runtime/src/world/prefabs.ts
   var entity = definePrefab("entity", {});
-  var player = definePrefab("player", {
-    tags: ["player"],
-    shape: { kind: "cube", color: "#4fc3f7" },
-    moveTopdown: true,
-    trigger: { radius: 0 }
-  });
-  var coin = definePrefab("coin", {
-    tags: ["coin"],
-    shape: { kind: "sphere", scale: 0.5, color: "#ffd54f" },
-    trigger: { radius: 0.8 },
-    spin: { speed: 90 }
-  });
-  var ground = definePrefab("ground", { shape: { kind: "plane" } });
-  var wall = definePrefab("wall", { shape: { kind: "cube" } });
-  var bullet = definePrefab("bullet", {
-    tags: ["bullet"],
-    shape: { kind: "sphere", scale: 0.2, color: "#ffffff" },
-    projectile: { speed: 20 },
-    lifetime: { seconds: 2 },
-    trigger: { radius: 0.1 }
-  });
-  var BUILTIN_PREFABS = [entity, player, coin, ground, wall, bullet];
+  var BUILTIN_PREFABS = [entity];
 
   // runtime/src/world/world.ts
   var DEFAULT_CONTROLS = {

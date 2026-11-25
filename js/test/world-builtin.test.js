@@ -30,15 +30,17 @@ ${rest}
 export default defineGame({ scene: () => <>${scene}</> })
 `
 
-test('官方积木与预制件在 WorldService 构造时登记', async () => {
+test('系统积木与预制件在 WorldService 构造时登记；系统预制件只有 entity', async () => {
   const { runtime } = await start(game(''))
   const registry = w(runtime).registry
   for (const name of ['shape', 'spin', 'moveTopdown', 'trigger', 'lifetime', 'projectile', 'cameraFollow', 'light']) assert.ok(registry.block(name), name)
-  for (const name of ['entity', 'player', 'coin', 'ground', 'wall', 'bullet']) assert.ok(registry.prefab(name), name)
+  assert.ok(registry.prefab('entity'))
+  for (const name of ['player', 'coin', 'ground', 'wall', 'bullet']) assert.equal(registry.prefab(name), undefined, name)
 })
 
 test('shape、spin：形状与颜色、缩放乘到实体上；spin 每秒转 speed 度', async () => {
-  const { runtime, engine } = await start(game('<coin key="c" at={[1, 0.5, 2]} scale={2} /><wall key="w" shape={{ kind: "cylinder", color: "#ff0000" }} />'))
+  const def = "const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5 }, spin: { speed: 90 } })"
+  const { runtime, engine } = await start(game('<Coin key="c" at={[1, 0.5, 2]} scale={2} /><entity key="w" name="wall" shape={{ kind: "cylinder", color: "#ff0000" }} />', def))
   steps(runtime, 30)
   frames(runtime, 1, 1e-9)
   const coin = engine.byName('coin')[0]
@@ -52,9 +54,10 @@ test('shape、spin：形状与颜色、缩放乘到实体上；spin 每秒转 sp
 })
 
 test('bullet：projectile 沿 dir 匀速飞，lifetime 到时销毁并发 death', async () => {
+  const bullet = "const Bullet = definePrefab('bullet', { tags: ['bullet'], shape: { kind: 'sphere', scale: 0.2 }, projectile: { speed: 20 }, lifetime: { seconds: 2 } })"
   const { runtime, engine } = await start(game(`
     <rule on="every" seconds={0.5} do={(w) => { if (!w.vars.fired) { w.vars.fired = 1; w.spawn('bullet', { at: [0, 1, 0], projectile: { dir: [3, 0, 4], speed: 10 }, lifetime: { seconds: 1 } }) } }} />
-    <rule on="death" a="bullet" do={(w, e) => { w.vars.died = e.pos }} />`))
+    <rule on="death" a="bullet" do={(w, e) => { w.vars.died = e.pos }} />`, bullet).replace('defineGame({', 'defineGame({ prefabs: [Bullet],'))
   const dt = w(runtime).dt
   const n0 = Math.round(0.5 / dt)
   steps(runtime, n0)
@@ -71,7 +74,7 @@ test('bullet：projectile 沿 dir 匀速飞，lifetime 到时销毁并发 death'
 })
 
 test('cameraFollow 每帧把相机放到实体加 offset 处并看向它；light 生成跟随实体的点光源', async () => {
-  const { runtime, engine } = await start(game('<player key="p" at={[1, 0.5, 0]} cameraFollow={{ offset: [0, 5, -5] }} light={{ intensity: 2 }} />'))
+  const { runtime, engine } = await start(game('<entity key="p" name="player" tags={["player"]} shape={{ kind: "cube" }} moveTopdown at={[1, 0.5, 0]} cameraFollow={{ offset: [0, 5, -5] }} light={{ intensity: 2 }} />'))
   engine.axes.move = [1, 0]
   steps(runtime, 12)
   engine.axes.move = [0, 0]
@@ -86,23 +89,23 @@ test('cameraFollow 每帧把相机放到实体加 offset 处并看向它；light
   near(lights[0].position, p, '跟随实体')
 })
 
-test('游戏的同名积木与预制件覆盖官方的；去掉后露出官方的', async () => {
-  const over = `const coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'cube', color: '#00ff00' } })
+test('游戏的同名积木与预制件覆盖系统的；去掉后露出系统的', async () => {
+  const over = `const entity = definePrefab('entity', { tags: ['c'], shape: { kind: 'cube', color: '#00ff00' } })
 const spin = defineBlock({ name: 'spin', about: '反着转', props: { speed: 90 }, step(me, e, w) { e.rot[1] -= me.speed * w.dt } })`
-  const source = game('<coin key="c" />', over).replace('defineGame({', 'defineGame({ prefabs: [coin], blocks: [spin],')
+  const source = game('<entity key="c" name="c" />', over).replace('defineGame({', 'defineGame({ prefabs: [entity], blocks: [spin],')
   const ctx = await startGame(files(source.replace("shape: { kind: 'cube', color: '#00ff00' } })", "shape: { kind: 'cube', color: '#00ff00' }, spin: true })")))
   const { runtime, engine } = ctx
   assert.deepEqual(runtime.failures, [])
   steps(runtime, 10)
   frames(runtime, 1, 1e-9)
-  assert.equal(engine.byName('coin')[0].shape, 'cube', '游戏的预制件')
-  assert.ok(w(runtime).query('coin')[0].rot[1] < 0, '游戏的积木')
+  assert.equal(engine.byName('c')[0].shape, 'cube', '游戏的预制件')
+  assert.ok(w(runtime).query('c')[0].rot[1] < 0, '游戏的积木')
 
-  ctx.files.set(GAME, game('<coin key="c" />'))
+  ctx.files.set(GAME, game('<entity key="c" name="c" />'))
   const reply = await run(runtime, ctx.pot.devtools.handle({ id: 1, type: 'changed', paths: [GAME] }))
   assert.equal(reply.data.ok, true, reply.data.error)
-  assert.equal(w(runtime).registry.block('spin').about.includes('反着转'), false, '露出官方 spin')
-  assert.equal(w(runtime).registry.prefab('coin').def.shape.kind, 'sphere', '露出官方 coin')
+  assert.equal(w(runtime).registry.block('spin').about.includes('反着转'), false, '露出系统 spin')
+  assert.equal(w(runtime).registry.prefab('entity').def.shape, undefined, '露出系统 entity')
 })
 
 test('controls：defineGame 的映射生效，单元撤销后恢复默认', async () => {

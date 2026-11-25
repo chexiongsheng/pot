@@ -1,6 +1,6 @@
 /**
- * 标签的类型（004 第 5.7 节）。实体标签的属性是六个保留属性，加每个官方积木名对应的可选覆盖。
- * M1：官方标签之外的名字也放行（索引签名），游戏自写的积木名、预制件名不报错；
+ * 标签的类型（004 第 5.7 节）。实体标签的属性是六个保留属性，加每个系统积木名对应的可选覆盖。
+ * M1：系统标签之外的名字也放行（索引签名），游戏自写的积木名、预制件名不报错；
  * M2 由 pot check 生成 .pot/types.d.ts 后去掉索引签名。
  */
 import type { Vec3 } from '../host'
@@ -61,11 +61,6 @@ export interface TextProps {
 
 export interface PotIntrinsicElements {
   entity: EntityProps
-  player: EntityProps
-  coin: EntityProps
-  ground: EntityProps
-  wall: EntityProps
-  bullet: EntityProps
   stage: StageProps
   rule: RuleProps
   text: TextProps

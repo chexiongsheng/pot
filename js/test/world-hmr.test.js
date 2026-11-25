@@ -7,16 +7,19 @@ const COINS = 'data/coins.json'
 
 /** 与 004 第 5.1 节同构的游戏；inc 是吃一个金币加的分，extra 插在场景树末尾 */
 function gameSource({ inc = 1, extra = '' } = {}) {
-  return `import { defineGame } from '@pot/core'
+  return `import { defineGame, definePrefab } from '@pot/core'
+
+const Player = definePrefab('player', { tags: ['player'], shape: { kind: 'cube', color: '#4fc3f7' }, moveTopdown: true, trigger: { radius: 0 } })
+const Coin = definePrefab('coin', { tags: ['coin'], shape: { kind: 'sphere', scale: 0.5, color: '#ffd54f' }, trigger: { radius: 0.8 }, spin: true })
 
 export default defineGame({
   vars: { score: 0 },
   scene: (s) => <>
     <stage background="#1e2230" sun={{ rot: [50, -30, 0], intensity: 1.1 }} camera={{ at: [0, 12, -10], look: [0, 0, 0] }} />
-    <ground scale={2} shape={{ color: '#3a4a3a' }} />
-    <player at={[0, 0.5, 0]} moveTopdown={{ speed: 5 }} />
-    {s.data.load('coins.json').coins.map((at: [number, number, number], i: number) => <coin key={i} at={at} />)}
-    <rule on="touch" a="player" b="coin" do={(w, p, c) => { w.destroy(c); w.vars.score += ${inc} }} />
+    <entity name="ground" scale={2} shape={{ kind: 'plane', color: '#3a4a3a' }} />
+    <Player at={[0, 0.5, 0]} moveTopdown={{ speed: 5 }} />
+    {s.data.load('coins.json').coins.map((at: [number, number, number], i: number) => <Coin key={i} at={at} />)}
+    <rule on="touch" a={Player} b={Coin} do={(w, p, c) => { w.destroy(c); w.vars.score += ${inc} }} />
     ${extra}
   </>,
   ui: (w) => <text at="top-left" size={28}>得分 {w.vars.score}</text>,
@@ -63,7 +66,7 @@ function walkTo(ctx, target) {
   frames(ctx.runtime, 1)
 }
 
-test('defineGame：场景挂载、官方预制件出形状、touch 规则加分、界面每帧画得分', async () => {
+test('defineGame：场景挂载、游戏预制件出形状、touch 规则加分、界面每帧画得分', async () => {
   const ctx = await start()
   const { runtime, engine } = ctx
   frames(runtime, 1)
@@ -126,7 +129,7 @@ test('改预制件属性（颜色）：表现重做 enter，对象换成新颜�
   const { runtime, engine } = ctx
   frames(runtime, 1)
   const before = byPath(runtime, 'coin:0')
-  ctx.files.set(GAME, gameSource().replace("<coin key={i} at={at} />", "<coin key={i} at={at} shape={{ color: '#ff0000' }} />"))
+  ctx.files.set(GAME, gameSource().replace("<Coin key={i} at={at} />", "<Coin key={i} at={at} shape={{ color: '#ff0000' }} />"))
   await changed(ctx, [GAME])
   frames(runtime, 1)
   assert.equal(byPath(runtime, 'coin:0').id, before.id)
