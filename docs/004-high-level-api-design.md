@@ -1136,6 +1136,7 @@ flow?: {
 | `ui.emit(name, payload?)` | 发界面事件。进入下一步的指令，在那一步的第 6 步按自定义事件分发，所以能被录制、回放 |
 | `ui.focused` | 当前焦点控件的 key 路径，没有时为 `null` |
 | `ui.draw` | 原始的 `ctx.ui`，逃生口：在树之后画任意即时模式内容 |
+| `ui.data` | 数据文件，与 `scene` 的 `s.data` 相同（第 7 步补充，16.15） |
 
 界面里的回调（`onPress`、`onChange`、`onSubmit`）只应改 `ui.local` 或调 `ui.emit`，不直接改 World。M2 不强制，`pot check` 也不查，写进 Skill 的规矩里。
 
@@ -1323,3 +1324,10 @@ M2 验收：`npm test` 全部通过（原有的 pot_gfx 一致性用例除外，
   - `expect.vars` 按子集比较（只比写出来的字段）；运行中任何 error 日志都算失败。
   - 录制结果的 `expect` 填停止时的 `vars`（整份）、`flow` 和 `hash`。回放要与录制一致，录制必须从空存档开始：`pot record start --reset` 先冷重启清档。Runner 帧率低时一帧会补多步，指令仍是逐步记的，回放不受影响。
   - 新增 `world/script.ts`（脚本展开、录制压缩）；`pot test` 只支持用 `defineGame` 的游戏。
+- 示例、Skill 与模板（第 7 步）：
+  - `pot check` 的求值校验在开始状态推进 2 步之后，再用 `w.goto` 逐个切到 `flow` 里其余的状态，各推进 2 步（16.9 只推进开始状态）。否则 `s.state === 'play' && ...` 这类分支里的错误、缺 `key` 告警查不出来；切换时抛出的错误记为“流程状态 <名字>：...”。类型仍按开始状态时的 `vars` 生成。`pot blocks` 同样逐个状态推进 1 步，只在后面状态里用到的预制件也能列出。为此 `WorldService` 加只读的 `flowStates`（`flow` 里的全部状态名）。
+  - `GameUI` 加 `data`（即 `ctx.data`），界面能读数据文件（quiz-tsx 的题目）。16.3 的表格补这一项。
+  - 函数组件把 `children` 转放进别的标签时（`<Menu>` 里的 `{p.children}`），那个数组到了新位置不带 `jsxs` 的静态标记，会被误判为 `map` 列表并告警缺 `key`。`makeNode` 在静态子节点数组上挂不可枚举的 `Symbol.for('pot.staticChildren')`，场景树与界面树判定“列表”时同时看这个标记。
+  - 布局：`column`（含 `panel`、`scroll`）里带 `wrap` 的 `text` 即使父容器不是 `align="stretch"`，也按父容器的内容宽度量（父容器宽度确定时），否则嵌套 `panel` 里的长文字不换行。16.4 里“`wrap` 需要确定的宽度”仍成立，只是来源多了这一种。
+  - 模板位于 Skill 目录下：新模板是 `skills/pot-game-dev/templates/game/`（`game.tsx`、`data/coins.json`、`tests/smoke.json`、`AGENTS.md`，`tsconfig.json` 的 `include` 加 `.pot/*.d.ts`），原低层模板改名为 `skills/pot-game-dev/templates/game-lowlevel/`。16.11、16.12 里的 `templates/game-lowlevel/` 指的就是它。
+  - hello-tsx 的暂停键用一个游戏积木 `pauseKey`（`w.cmd().pressed('pause')` 时 `w.goto('paused')`）挂在玩家上，`controls` 把动作 `pause` 映射到 Esc；暂停、结算等界面用一个函数组件 `Menu`。`devserver.test.js` 里改写 hello-tsx 源码的用例随之调整替换串。

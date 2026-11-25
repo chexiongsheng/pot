@@ -1,0 +1,12 @@
+{
+  "name": "冒烟：开始后进入 play，三个金币都在",
+  "steps": 60,
+  "input": [
+    { "at": 0, "emit": "start" }
+  ],
+  "expect": {
+    "vars": { "score": 0 },
+    "count": { "coin": 3 },
+    "flow": "play"
+  }
+}

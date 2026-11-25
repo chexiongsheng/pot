@@ -8,5 +8,5 @@
       "@pot/core/jsx-dev-runtime": ["../../js/runtime/src/jsx-dev-runtime.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", ".pot/*.d.ts"]
 }
