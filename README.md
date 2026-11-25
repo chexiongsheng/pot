@@ -9,6 +9,7 @@
 - [001 Game Runner 总体设计](docs/001-game-runner-design.md)
 - [002 热重载设计（基于 cordis）](docs/002-hot-reload-design.md)
 - [003 自动发布打包](docs/003-release.md)
+- [004 高层游戏编写方式（积木）设计](docs/004-high-level-api-design.md)
 - [pot-game-dev Skill](skills/pot-game-dev/SKILL.md)
 
 ## 目录
