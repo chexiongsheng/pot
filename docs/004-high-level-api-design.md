@@ -1896,3 +1896,12 @@ M4 验收：`npm test` 通过（pot_gfx 一致性用例除外）；两个原生�
 - `layers` 位掩码按无符号 32 位存进 double，null 为 `0xFFFFFFFF`。
 - `pot blocks` 的积木项：有 `step` 的积木带 `layout`（规范字符串）或 `layoutError`（原因）。`moveFps` 加了提示（`layers`、`ground`、`bounds`、`fallY`、`actions`），布局共 54 个字段。
 - 测试 `world-layout.test.js` 5 个用例。
+
+第 3 步（原生实现的选择与批量执行）：
+
+- 18.3 补一种提示：以 `@` 开头的键不是字段，而是写死名字的输入，类型只能是 `axis` 或 `action`，排在全部字段之前。`moveTopdown` 的 `step` 直接读 `w.cmd(e).axis('move')`，没有对应字段，加了 `native: { '@move': 'axis' }`，布局为 `moveTopdown|@move:axis;speed:f`。提示只在定义上，不进 World 数据，hello-tsx 的哈希不变。
+- 调度在 `js/runtime/src/world/native.ts`（`NativeBlocks`）。`WorldService` 改为绑定宿主安装（构造参数多一个 `host`）。`w.native` 只接受 `auto`、`off`；`w.nativeBlocks.reason(名字)` 给出不能用原生实现的原因；`pot query world` 的结果多一项 `native`（当前走原生实现的积木）。
+- 选择结果按登记表的 `version` 缓存，热重载改了积木后重新计算。布局不同的告警按内容去重，只出现一次。
+- 出错回退：解包前先校验全部实体的 id，校验失败或 C# 抛错时什么都不写回，本步由 TS 执行，之后这个积木一直用 TS，直到 `w.nativeBlocks.reset()`。
+- 层号表放在 World：`w.layerMask(名字数组)`、`w.layerBit(名字)` 按出现顺序分配位号，超过 32 层告警。
+- 测试 `world-native.test.js` 6 个用例，用 JS 写的假原生 `moveTopdown`：结果与 TS 逐位相同、`off`、布局不同、来源不对（套件不符、游戏覆盖）、出错与格式不对时回退、宿主没有原生实现。

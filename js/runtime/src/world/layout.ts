@@ -6,6 +6,7 @@
  * 两边逐字比较。类型：f（数）、b（布尔）、f<n>（定长数组）、f?（可为 null 的数：有无、值）、
  * layers（碰撞层名数组或 null，换成位掩码）、axis / action（值是指令名，传本步的输入，只读）、
  * ?（可为 null 的对象的有无槽，子字段紧随其后，路径以它为前缀）。
+ * 提示里以 @ 开头的键不是字段，而是写死名字的输入：'@move': 'axis' 传本步 move 轴（step 里直接写 w.cmd(e).axis('move') 的积木用）。
  *
  * 推导：先 props 后 state，各按声明顺序；数、布尔、数字数组、普通对象自动推出，其余靠 def.native 提示。
  * 每个实体的记录为 [id, pos×3, rot×3, 布局字段…]；缓冲区头部为 [数量, 每实体槽数, dt, tick]。
@@ -26,6 +27,8 @@ export interface LayoutField {
   offset: number
   /** 属于 state，解包时写回 */
   writable: boolean
+  /** @ 开头的输入：指令名（不读字段） */
+  input?: string
 }
 
 export interface Layout {
@@ -69,7 +72,16 @@ function derive(def: BlockDef): LayoutResult {
   const hints = (def as any).native as Record<string, NativeHint> | undefined
   if (hints !== undefined && !isPlainObject(hints)) return { ok: false, reason: 'native 提示必须是普通对象' }
   const known = new Set([...Object.keys(def.props ?? {}), ...Object.keys(def.state ?? {})])
-  for (const key of Object.keys(hints ?? {})) if (!known.has(key)) return { ok: false, reason: `native 提示里的 ${key} 不是 props 或 state 的字段` }
+  for (const key of Object.keys(hints ?? {})) {
+    if (key.startsWith('@')) {
+      const type = hints![key]
+      if (type !== 'axis' && type !== 'action') return { ok: false, reason: `native 提示里的 ${key} 是输入，类型只能是 axis 或 action` }
+      if (!/^@[A-Za-z][A-Za-z0-9]*$/.test(key)) return { ok: false, reason: `native 提示里的 ${key} 不是合法的指令名` }
+      fields.push({ path: key, keys: [], type, slots: 2, writable: false, input: key.slice(1) })
+      continue
+    }
+    if (!known.has(key)) return { ok: false, reason: `native 提示里的 ${key} 不是 props 或 state 的字段` }
+  }
 
   const add = (keys: string[], value: any, hint: NativeHint | undefined, writable: boolean): string | null => {
     const path = keys.join('.')
@@ -161,7 +173,7 @@ export function packEntity(layout: Layout, e: any, me: any, env: PackEnv, buf: F
     const at = o + f.offset
     if (absent !== null && f.path.startsWith(absent)) { for (let i = 0; i < f.slots; i++) buf[at + i] = 0; continue }
     absent = null
-    const v = read(me, f.keys)
+    const v = f.input !== undefined ? f.input : read(me, f.keys)
     switch (f.type) {
       case 'f': buf[at] = typeof v === 'number' ? v : NaN; break
       case 'b': buf[at] = v ? 1 : 0; break
@@ -224,6 +236,6 @@ export function unpackBatch(layout: Layout, list: { e: any; me: any }[], buf: Fl
   for (let i = 0; i < list.length; i++) {
     const o = BUFFER_HEAD + i * layout.stride
     if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`)
-    unpackEntity(layout, list[i].e, list[i].me, buf, o)
   }
+  for (let i = 0; i < list.length; i++) unpackEntity(layout, list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout.stride)
 }

@@ -31,6 +31,8 @@ export type { World, EntityData, WorldData, MountData, SpawnProps, Handler, Cmd,
 export { overlap, overlappingPairs, BodyTable, bodyEntry } from './world/collide'
 export { deriveLayout, packBatch, unpackBatch, packEntity, unpackEntity, ENTITY_HEAD, BUFFER_HEAD } from './world/layout'
 export type { Layout, LayoutField, LayoutResult, NativeHint, PackEnv } from './world/layout'
+export { NativeBlocks } from './world/native'
+export type { NativeImpl, NativeMode } from './world/native'
 export type { Collider, BodyEntry, BodyShape, Mover, MoveOptions, MoveResult, OverlapShape } from './world/collide'
 export { WorldView } from './world/view'
 export { createUIRenderer, ANCHORS, UI_MARGIN } from './world/ui-eval'

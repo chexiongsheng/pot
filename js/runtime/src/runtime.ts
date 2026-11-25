@@ -121,7 +121,7 @@ export class Runtime {
     await install(bind(AudioService, host))
     await install(bind(GfxService, host))
     await install(bind(LoadingService, host))
-    await install(WorldService)
+    await install(bind(WorldService, host))
     await install(bind(PluginsService, host, modules, this.options.loader))
     if (this.options.state) this.root.state.importJSON(this.options.state)
     return this

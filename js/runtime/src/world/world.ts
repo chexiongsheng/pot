@@ -22,6 +22,9 @@ import type { BodyEntry, Collider, Mover, MoveOptions, MoveResult, OverlapShape 
 import { WorldView } from './view'
 import { BUILTIN_BLOCKS } from './blocks'
 import { BUILTIN_PREFABS } from './prefabs'
+import { NativeBlocks } from './native'
+import type { NativeMode } from './native'
+import type { Host } from '../host'
 import { initialFlow } from './flow'
 import type { FlowData, FlowDef } from './flow'
 
@@ -235,9 +238,23 @@ export class WorldService extends Service {
   private _bodyVer = 0
   private _bodySync: { tick: number; ver: number; data: WorldData | null } = { tick: -1, ver: -1, data: null }
 
-  constructor(ctx: Context) {
+  /** 原生积木（18.4、18.5） */
+  private _native: NativeBlocks
+  /** 碰撞层名到位号（18.3 的 layers、18.6 的碰撞体缓冲区），最多 32 层 */
+  private _layerBits = new Map<string, number>()
+
+  constructor(ctx: Context, host?: Host) {
     super(ctx, 'world')
     this._root = ctx
+    this._native = new NativeBlocks({
+      registry: this.registry,
+      warn: (m) => this._warnOnce(m),
+      dt: () => this.dt,
+      tick: () => this.data.tick,
+      cmd: (e) => this.cmd(e),
+      layerMask: (names) => this.layerMask(names),
+      syncBodies: () => this._syncNativeBodies(),
+    }, host)
     // 官方积木与预制件垫在栈底，游戏的同名登记覆盖它们
     for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, 'system')
     for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, 'system')
@@ -511,11 +528,54 @@ export class WorldService extends Service {
     return out
   }
 
-  /** World 数据的检视：tick、流程、vars、（筛选后的）实体 */
+  /** World 数据的检视：tick、流程、vars、使用原生实现的积木、（筛选后的）实体 */
   inspect(filter?: string) {
     const data = this.data
-    return { tick: data.tick, flow: this.flow, vars: clone(data.vars), entities: this.query(filter).map((e) => clone(e)) }
+    return { tick: data.tick, flow: this.flow, vars: clone(data.vars), native: this._native.activeNames(), entities: this.query(filter).map((e) => clone(e)) }
   }
+
+  /** 原生积木的开关（18.4）：auto 有就用，off 一律用 TS */
+  get native(): NativeMode {
+    return this._native.mode
+  }
+
+  set native(mode: NativeMode) {
+    if (mode !== 'auto' && mode !== 'off') throw new Error(`w.native 只能是 auto 或 off，收到 ${JSON.stringify(mode)}`)
+    this._native.mode = mode
+  }
+
+  /** 原生积木调度器（verify 与工具用） */
+  get nativeBlocks(): NativeBlocks {
+    return this._native
+  }
+
+  /** 层名数组换成位掩码；null 为全部层。新层名按出现顺序分配位号，超过 32 层的告警并忽略 */
+  layerMask(names: string[] | null): number {
+    if (!names) return 0xffffffff
+    let mask = 0
+    for (const name of names) {
+      const bit = this.layerBit(name)
+      if (bit >= 0) mask |= 1 << bit
+    }
+    return mask >>> 0
+  }
+
+  /** 层名的位号；超过 32 层返回 -1 */
+  layerBit(name: string): number {
+    let bit = this._layerBits.get(name)
+    if (bit === undefined) {
+      if (this._layerBits.size >= 32) {
+        this._warnOnce(`碰撞层超过 32 个，${name} 在原生积木里不参与碰撞`)
+        return -1
+      }
+      bit = this._layerBits.size
+      this._layerBits.set(name, bit)
+    }
+    return bit
+  }
+
+  /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
+  private _syncNativeBodies() {}
 
   /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
   setPatch(mount: string, path: string, patch: Record<string, any>) {
@@ -1020,8 +1080,10 @@ export class WorldService extends Service {
       }
       // 3. 积木 step（本步开始时存活的实体；本步生成的下一步起参加）
       const alive = Object.values(data.entities)
+      const isAlive = (e: EntityData) => this._alive(e)
       for (const block of this.registry.ordered()) {
         if (!block.step) continue
+        if (this._native.run(block, alive, isAlive)) continue
         for (const e of alive) {
           const me = e.b[block.name]
           if (!me || !this._alive(e)) continue

@@ -59,6 +59,7 @@ var pot = (() => {
     LoggerService: () => LoggerService,
     MAX_EVENT_ROUNDS: () => MAX_EVENT_ROUNDS,
     MAX_VERTEX_INPUTS: () => MAX_VERTEX_INPUTS,
+    NativeBlocks: () => NativeBlocks,
     PREFAB: () => PREFAB,
     PluginsService: () => PluginsService,
     PostChain: () => PostChain,
@@ -2222,8 +2223,8 @@ var pot = (() => {
         callback(...args);
       };
       return this._schedule("ctx.throttle()", (args, isDisposed) => {
-        const now = clock.time * 1e3;
-        const remaining = delay - now + lastCall;
+        const now2 = clock.time * 1e3;
+        const remaining = delay - now2 + lastCall;
         if (remaining <= 0) {
           execute(...args);
         } else if (!isDisposed) {
@@ -8637,6 +8638,360 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   var entity = definePrefab("entity", {});
   var BUILTIN_PREFABS = [entity];
 
+  // runtime/src/world/layout.ts
+  var ENTITY_HEAD = 7;
+  var BUFFER_HEAD = 4;
+  var SIMPLE = { f: 1, b: 1, "f?": 2, layers: 1, axis: 2, action: 2 };
+  function slotsOf(type) {
+    if (type in SIMPLE) return SIMPLE[type];
+    const m = /^f([1-9][0-9]*)$/.exec(type);
+    return m ? Number(m[1]) : 0;
+  }
+  var isNullableGroup = (h) => isPlainObject2(h) && Object.keys(h).length === 1 && isPlainObject2(h["?"]);
+  var cache = /* @__PURE__ */ new WeakMap();
+  function deriveLayout(def) {
+    const hit = cache.get(def);
+    if (hit) return hit;
+    const result = derive(def);
+    cache.set(def, result);
+    return result;
+  }
+  function derive(def) {
+    const fields = [];
+    const hints = def.native;
+    if (hints !== void 0 && !isPlainObject2(hints)) return { ok: false, reason: "native 提示必须是普通对象" };
+    const known = /* @__PURE__ */ new Set([...Object.keys(def.props ?? {}), ...Object.keys(def.state ?? {})]);
+    for (const key of Object.keys(hints ?? {})) {
+      if (key.startsWith("@")) {
+        const type = hints[key];
+        if (type !== "axis" && type !== "action") return { ok: false, reason: `native 提示里的 ${key} 是输入，类型只能是 axis 或 action` };
+        if (!/^@[A-Za-z][A-Za-z0-9]*$/.test(key)) return { ok: false, reason: `native 提示里的 ${key} 不是合法的指令名` };
+        fields.push({ path: key, keys: [], type, slots: 2, writable: false, input: key.slice(1) });
+        continue;
+      }
+      if (!known.has(key)) return { ok: false, reason: `native 提示里的 ${key} 不是 props 或 state 的字段` };
+    }
+    const add = (keys, value, hint, writable) => {
+      const path = keys.join(".");
+      if (typeof hint === "string") {
+        const slots = slotsOf(hint);
+        if (!slots || hint === "?") return `${path} 的提示 ${JSON.stringify(hint)} 不是已知类型（f、b、f<n>、f?、layers、axis、action）`;
+        if ((hint === "axis" || hint === "action") && typeof value !== "string") return `${path} 标为 ${hint}，缺省值应是指令名字符串`;
+        if (hint === "layers" && value !== null && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) return `${path} 标为 layers，缺省值应是字符串数组或 null`;
+        if ((hint === "axis" || hint === "action") && writable) return `${path} 是 state，不能标为 ${hint}（输入只读）`;
+        fields.push({ path, keys, type: hint, slots, writable });
+        return null;
+      }
+      if (hint !== void 0 && isNullableGroup(hint)) {
+        if (value !== null && !isPlainObject2(value)) return `${path} 标为可为 null 的对象，缺省值应是对象或 null`;
+        fields.push({ path, keys, type: "?", slots: 1, writable });
+        for (const sub of Object.keys(hint["?"])) {
+          const err = add([...keys, sub], value?.[sub] ?? null, hint["?"][sub], writable);
+          if (err) return err;
+        }
+        return null;
+      }
+      if (typeof value === "number") {
+        fields.push({ path, keys, type: "f", slots: 1, writable });
+        return null;
+      }
+      if (typeof value === "boolean") {
+        fields.push({ path, keys, type: "b", slots: 1, writable });
+        return null;
+      }
+      if (Array.isArray(value)) {
+        if (value.length && value.every((v) => typeof v === "number")) {
+          fields.push({ path, keys, type: `f${value.length}`, slots: value.length, writable });
+          return null;
+        }
+        return `${path} 的缺省值是${value.length ? "非数字" : "空"}数组，需要在 native 里给出类型`;
+      }
+      if (isPlainObject2(value)) {
+        if (hint !== void 0 && !isPlainObject2(hint)) return `${path} 的提示应是对象`;
+        for (const sub of Object.keys(value)) {
+          const err = add([...keys, sub], value[sub], hint?.[sub], writable);
+          if (err) return err;
+        }
+        return null;
+      }
+      return `${path} 的缺省值是 ${value === null ? "null" : typeof value}，需要在 native 里给出类型`;
+    };
+    for (const [group, writable] of [[def.props ?? {}, false], [def.state ?? {}, true]]) {
+      for (const key of Object.keys(group)) {
+        const err = add([key], group[key], hints?.[key], writable);
+        if (err) return { ok: false, reason: err };
+      }
+    }
+    let offset = ENTITY_HEAD;
+    const laid = fields.map((f) => {
+      const out = { ...f, offset };
+      offset += f.slots;
+      return out;
+    });
+    const text = `${def.name}|${laid.map((f) => `${f.path}:${f.type}`).join(";")}`;
+    return { ok: true, layout: { block: def.name, text, fields: laid, stride: offset } };
+  }
+  var ALL_LAYERS = 4294967295;
+  function read(me, keys) {
+    let v = me;
+    for (const k of keys) {
+      if (v === null || v === void 0) return void 0;
+      v = v[k];
+    }
+    return v;
+  }
+  function write(me, keys, value) {
+    let o = me;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!isPlainObject2(o[keys[i]])) o[keys[i]] = {};
+      o = o[keys[i]];
+    }
+    o[keys[keys.length - 1]] = value;
+  }
+  function packEntity(layout2, e, me, env, buf, o) {
+    buf[o] = e.id;
+    buf[o + 1] = e.pos[0];
+    buf[o + 2] = e.pos[1];
+    buf[o + 3] = e.pos[2];
+    buf[o + 4] = e.rot[0];
+    buf[o + 5] = e.rot[1];
+    buf[o + 6] = e.rot[2];
+    let absent = null;
+    for (const f of layout2.fields) {
+      const at = o + f.offset;
+      if (absent !== null && f.path.startsWith(absent)) {
+        for (let i = 0; i < f.slots; i++) buf[at + i] = 0;
+        continue;
+      }
+      absent = null;
+      const v = f.input !== void 0 ? f.input : read(me, f.keys);
+      switch (f.type) {
+        case "f":
+          buf[at] = typeof v === "number" ? v : NaN;
+          break;
+        case "b":
+          buf[at] = v ? 1 : 0;
+          break;
+        case "f?":
+          buf[at] = typeof v === "number" ? 1 : 0;
+          buf[at + 1] = typeof v === "number" ? v : 0;
+          break;
+        case "layers":
+          buf[at] = Array.isArray(v) ? env.layerMask(v) : ALL_LAYERS;
+          break;
+        case "axis": {
+          const a = env.cmd(e).axis(String(v));
+          buf[at] = a.x;
+          buf[at + 1] = a.y;
+          break;
+        }
+        case "action": {
+          const c = env.cmd(e);
+          buf[at] = c.down(String(v)) ? 1 : 0;
+          buf[at + 1] = c.pressed(String(v)) ? 1 : 0;
+          break;
+        }
+        case "?":
+          buf[at] = isPlainObject2(v) ? 1 : 0;
+          if (!isPlainObject2(v)) absent = f.path + ".";
+          break;
+        default:
+          for (let i = 0; i < f.slots; i++) buf[at + i] = Array.isArray(v) && typeof v[i] === "number" ? v[i] : NaN;
+      }
+    }
+  }
+  function unpackEntity(layout2, e, me, buf, o) {
+    e.pos[0] = buf[o + 1];
+    e.pos[1] = buf[o + 2];
+    e.pos[2] = buf[o + 3];
+    e.rot[0] = buf[o + 4];
+    e.rot[1] = buf[o + 5];
+    e.rot[2] = buf[o + 6];
+    let absent = null;
+    for (const f of layout2.fields) {
+      if (!f.writable) continue;
+      if (absent !== null && f.path.startsWith(absent)) continue;
+      absent = null;
+      const at = o + f.offset;
+      switch (f.type) {
+        case "f":
+          write(me, f.keys, buf[at]);
+          break;
+        case "b":
+          write(me, f.keys, buf[at] !== 0);
+          break;
+        case "f?":
+          write(me, f.keys, buf[at] !== 0 ? buf[at + 1] : null);
+          break;
+        case "?":
+          if (buf[at] === 0) {
+            write(me, f.keys, null);
+            absent = f.path + ".";
+          } else if (!isPlainObject2(read(me, f.keys))) write(me, f.keys, {});
+          break;
+        case "layers":
+        case "axis":
+        case "action":
+          break;
+        default: {
+          const cur = read(me, f.keys);
+          const arr = Array.isArray(cur) && cur.length === f.slots ? cur : new Array(f.slots);
+          for (let i = 0; i < f.slots; i++) arr[i] = buf[at + i];
+          if (arr !== cur) write(me, f.keys, arr);
+        }
+      }
+    }
+  }
+  function packBatch(layout2, list, env, dt, tick, buf) {
+    const size = BUFFER_HEAD + list.length * layout2.stride;
+    const out = buf && buf.length === size ? buf : new Float64Array(size);
+    out[0] = list.length;
+    out[1] = layout2.stride;
+    out[2] = dt;
+    out[3] = tick;
+    for (let i = 0; i < list.length; i++) packEntity(layout2, list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout2.stride);
+    return out;
+  }
+  function unpackBatch(layout2, list, buf) {
+    if (buf.length !== BUFFER_HEAD + list.length * layout2.stride || buf[0] !== list.length || buf[1] !== layout2.stride) {
+      throw new Error(`原生实现返回的缓冲区格式不对（长度 ${buf.length}，应为 ${BUFFER_HEAD + list.length * layout2.stride}）`);
+    }
+    for (let i = 0; i < list.length; i++) {
+      const o = BUFFER_HEAD + i * layout2.stride;
+      if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`);
+    }
+    for (let i = 0; i < list.length; i++) unpackEntity(layout2, list[i].e, list[i].me, buf, BUFFER_HEAD + i * layout2.stride);
+  }
+
+  // runtime/src/world/native.ts
+  var NativeBlocks = class {
+    constructor(_env, _host) {
+      __publicField(this, "_env", _env);
+      __publicField(this, "_host", _host);
+      __publicField(this, "mode", "auto");
+      __publicField(this, "_impls", null);
+      __publicField(this, "_version", -1);
+      __publicField(this, "_active", /* @__PURE__ */ new Map());
+      __publicField(this, "_reasons", /* @__PURE__ */ new Map());
+      __publicField(this, "_failed", /* @__PURE__ */ new Set());
+      __publicField(this, "_warned", /* @__PURE__ */ new Set());
+      __publicField(this, "_bufs", /* @__PURE__ */ new Map());
+      /** 每个原生积木累计的耗时（毫秒），verify 用；为 null 时不计时 */
+      __publicField(this, "timing", null);
+    }
+    /** 宿主提供的全部原生实现 */
+    impls() {
+      if (this._impls) return this._impls;
+      const map = /* @__PURE__ */ new Map();
+      const text = this._host?.nativeBlocks?.();
+      if (text) {
+        try {
+          for (const item of JSON.parse(text)) {
+            if (!item || typeof item.name !== "string") continue;
+            map.set(item.name, { name: item.name, kit: String(item.kit ?? ""), layout: String(item.layout ?? ""), collision: !!item.collision });
+          }
+        } catch (err) {
+          this._env.warn(`原生积木列表解析失败：${err.message}`);
+        }
+      }
+      this._impls = map;
+      return map;
+    }
+    _refresh() {
+      const reg = this._env.registry;
+      if (this._version === reg.version) return;
+      this._version = reg.version;
+      this._active.clear();
+      this._reasons.clear();
+      for (const impl of this.impls().values()) {
+        const def = reg.block(impl.name);
+        if (!def) {
+          this._reasons.set(impl.name, `积木 ${impl.name} 没有登记`);
+          continue;
+        }
+        const source = reg.sourceOf("block", impl.name);
+        const expected = impl.kit ? `kit:${impl.kit}` : "system";
+        if (source !== expected) {
+          this._reasons.set(impl.name, `积木 ${impl.name} 的来源是 ${source}，原生实现对应 ${expected}（被游戏覆盖或 eject 了）`);
+          continue;
+        }
+        if (!def.step) {
+          this._reasons.set(impl.name, `积木 ${impl.name} 没有 step`);
+          continue;
+        }
+        const r = deriveLayout(def);
+        if (!r.ok) {
+          this._reasons.set(impl.name, `积木 ${impl.name} 没有布局：${r.reason}`);
+          continue;
+        }
+        if (r.layout.text !== impl.layout) {
+          const reason = `积木 ${impl.name} 的原生实现与 TS 布局不同，改用 TS。
+TS：${r.layout.text}
+原生：${impl.layout}`;
+          this._reasons.set(impl.name, reason);
+          if (!this._warned.has(reason)) {
+            this._warned.add(reason);
+            this._env.warn(reason);
+          }
+          continue;
+        }
+        this._active.set(impl.name, { impl, layout: r.layout });
+      }
+    }
+    /** 当前会走原生实现的积木名（不含 mode 为 off 与出错回退的） */
+    activeNames() {
+      this._refresh();
+      if (this.mode === "off") return [];
+      return [...this._active.keys()].filter((n2) => !this._failed.has(n2));
+    }
+    /** 积木不能用原生实现的原因；能用时为 null */
+    reason(name) {
+      this._refresh();
+      if (this._active.has(name)) return this._failed.has(name) ? `积木 ${name} 的原生实现出过错，已改用 TS` : null;
+      return this._reasons.get(name) ?? (this._host?.nativeStep ? `积木 ${name} 没有原生实现` : "当前宿主没有原生实现");
+    }
+    /** 清掉出错回退的记录（verify、热重载后重试） */
+    reset() {
+      this._failed.clear();
+    }
+    /**
+     * 原生执行一个积木的 step。返回 true 表示已处理（含没有实体的情况），false 表示应由 TS 执行。
+     * alive 为本步开始时的实体，isAlive 过滤掉本步中途已销毁的。
+     */
+    run(block, alive, isAlive) {
+      if (this.mode === "off" || !this._host?.nativeStep) return false;
+      this._refresh();
+      const active = this._active.get(block.name);
+      if (!active || this._failed.has(block.name)) return false;
+      const list = [];
+      for (const e of alive) {
+        const me = e.b[block.name];
+        if (me && isAlive(e)) list.push({ e, me });
+      }
+      if (!list.length) return true;
+      const t0 = this.timing ? now() : 0;
+      try {
+        if (active.impl.collision) this._env.syncBodies();
+        const buf = packBatch(active.layout, list, this._env, this._env.dt(), this._env.tick(), this._bufs.get(block.name));
+        this._bufs.set(block.name, buf);
+        const ret = this._host.nativeStep(block.name, buf);
+        const out = ret instanceof Float64Array ? ret : new Float64Array(ret);
+        unpackBatch(active.layout, list, out);
+      } catch (err) {
+        this._failed.add(block.name);
+        this._env.warn(`积木 ${block.name} 的原生实现出错，改用 TS：${err?.message ?? err}`);
+        return false;
+      } finally {
+        if (this.timing) this.timing.set(block.name, (this.timing.get(block.name) ?? 0) + now() - t0);
+      }
+      return true;
+    }
+  };
+  function now() {
+    const p = globalThis.performance;
+    return p && typeof p.now === "function" ? p.now() : Date.now();
+  }
+
   // runtime/src/world/flow.ts
   var NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
   function checkFlow(flow) {
@@ -8682,7 +9037,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
   var same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   var WorldService = class extends Service {
-    constructor(ctx) {
+    constructor(ctx, host) {
       super(ctx, "world");
       __publicField(this, "registry", new Registry());
       /** 表现（15.10） */
@@ -8747,7 +9102,20 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       /** 实体增删、挂载对比改动时加一，碰撞表据此在同一步内也刷新 */
       __publicField(this, "_bodyVer", 0);
       __publicField(this, "_bodySync", { tick: -1, ver: -1, data: null });
+      /** 原生积木（18.4、18.5） */
+      __publicField(this, "_native");
+      /** 碰撞层名到位号（18.3 的 layers、18.6 的碰撞体缓冲区），最多 32 层 */
+      __publicField(this, "_layerBits", /* @__PURE__ */ new Map());
       this._root = ctx;
+      this._native = new NativeBlocks({
+        registry: this.registry,
+        warn: (m) => this._warnOnce(m),
+        dt: () => this.dt,
+        tick: () => this.data.tick,
+        cmd: (e) => this.cmd(e),
+        layerMask: (names) => this.layerMask(names),
+        syncBodies: () => this._syncNativeBodies()
+      }, host);
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block, "system");
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab, "system");
       ctx.state.define("world", { init: initData });
@@ -8988,10 +9356,48 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       for (const [key, result] of this._results) out[key] = treeView(result);
       return out;
     }
-    /** World 数据的检视：tick、流程、vars、（筛选后的）实体 */
+    /** World 数据的检视：tick、流程、vars、使用原生实现的积木、（筛选后的）实体 */
     inspect(filter) {
       const data = this.data;
-      return { tick: data.tick, flow: this.flow, vars: clone(data.vars), entities: this.query(filter).map((e) => clone(e)) };
+      return { tick: data.tick, flow: this.flow, vars: clone(data.vars), native: this._native.activeNames(), entities: this.query(filter).map((e) => clone(e)) };
+    }
+    /** 原生积木的开关（18.4）：auto 有就用，off 一律用 TS */
+    get native() {
+      return this._native.mode;
+    }
+    set native(mode) {
+      if (mode !== "auto" && mode !== "off") throw new Error(`w.native 只能是 auto 或 off，收到 ${JSON.stringify(mode)}`);
+      this._native.mode = mode;
+    }
+    /** 原生积木调度器（verify 与工具用） */
+    get nativeBlocks() {
+      return this._native;
+    }
+    /** 层名数组换成位掩码；null 为全部层。新层名按出现顺序分配位号，超过 32 层的告警并忽略 */
+    layerMask(names) {
+      if (!names) return 4294967295;
+      let mask = 0;
+      for (const name of names) {
+        const bit = this.layerBit(name);
+        if (bit >= 0) mask |= 1 << bit;
+      }
+      return mask >>> 0;
+    }
+    /** 层名的位号；超过 32 层返回 -1 */
+    layerBit(name) {
+      let bit = this._layerBits.get(name);
+      if (bit === void 0) {
+        if (this._layerBits.size >= 32) {
+          this._warnOnce(`碰撞层超过 32 个，${name} 在原生积木里不参与碰撞`);
+          return -1;
+        }
+        bit = this._layerBits.size;
+        this._layerBits.set(name, bit);
+      }
+      return bit;
+    }
+    /** 碰撞表变了就发给原生侧（18.6，第 6 步实现） */
+    _syncNativeBodies() {
     }
     /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
     setPatch(mount, path, patch) {
@@ -9452,8 +9858,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           this.prev.set(e.id, { pos: [...e.pos], rot: [...e.rot] });
         }
         const alive = Object.values(data.entities);
+        const isAlive = (e) => this._alive(e);
         for (const block of this.registry.ordered()) {
           if (!block.step) continue;
+          if (this._native.run(block, alive, isAlive)) continue;
           for (const e of alive) {
             const me = e.b[block.name];
             if (!me || !this._alive(e)) continue;
@@ -9515,18 +9923,18 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         const box = Array.isArray(t.box) ? [t.box[0] * sx, t.box[1] * sy, t.box[2] * sz] : null;
         colliders.push({ id: e.id, x: e.pos[0], y: e.pos[1], z: e.pos[2], r: (Number(t.radius) || 0) * Math.max(sx, sy, sz), box });
       }
-      const now = /* @__PURE__ */ new Set();
+      const now2 = /* @__PURE__ */ new Set();
       const events = [];
       for (const [a, b] of overlappingPairs(colliders)) {
         const key = `${a.id}:${b.id}`;
-        now.add(key);
+        now2.add(key);
         if (!data.contacts[key]) {
           data.contacts[key] = true;
           events.push({ name: "touch", args: [data.entities[a.id], data.entities[b.id]] });
         }
       }
       for (const key of Object.keys(data.contacts)) {
-        if (!now.has(key)) delete data.contacts[key];
+        if (!now2.has(key)) delete data.contacts[key];
       }
       return events;
     }
@@ -9661,7 +10069,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       await install(bind(AudioService, host));
       await install(bind(GfxService, host));
       await install(bind(LoadingService, host));
-      await install(WorldService);
+      await install(bind(WorldService, host));
       await install(bind(PluginsService, host, modules, this.options.loader));
       if (this.options.state) this.root.state.importJSON(this.options.state);
       return this;
@@ -9953,222 +10361,6 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
   bindUnity();
 
-  // runtime/src/world/layout.ts
-  var ENTITY_HEAD = 7;
-  var BUFFER_HEAD = 4;
-  var SIMPLE = { f: 1, b: 1, "f?": 2, layers: 1, axis: 2, action: 2 };
-  function slotsOf(type) {
-    if (type in SIMPLE) return SIMPLE[type];
-    const m = /^f([1-9][0-9]*)$/.exec(type);
-    return m ? Number(m[1]) : 0;
-  }
-  var isNullableGroup = (h) => isPlainObject2(h) && Object.keys(h).length === 1 && isPlainObject2(h["?"]);
-  var cache = /* @__PURE__ */ new WeakMap();
-  function deriveLayout(def) {
-    const hit = cache.get(def);
-    if (hit) return hit;
-    const result = derive(def);
-    cache.set(def, result);
-    return result;
-  }
-  function derive(def) {
-    const fields = [];
-    const hints = def.native;
-    if (hints !== void 0 && !isPlainObject2(hints)) return { ok: false, reason: "native 提示必须是普通对象" };
-    const known = /* @__PURE__ */ new Set([...Object.keys(def.props ?? {}), ...Object.keys(def.state ?? {})]);
-    for (const key of Object.keys(hints ?? {})) if (!known.has(key)) return { ok: false, reason: `native 提示里的 ${key} 不是 props 或 state 的字段` };
-    const add = (keys, value, hint, writable) => {
-      const path = keys.join(".");
-      if (typeof hint === "string") {
-        const slots = slotsOf(hint);
-        if (!slots || hint === "?") return `${path} 的提示 ${JSON.stringify(hint)} 不是已知类型（f、b、f<n>、f?、layers、axis、action）`;
-        if ((hint === "axis" || hint === "action") && typeof value !== "string") return `${path} 标为 ${hint}，缺省值应是指令名字符串`;
-        if (hint === "layers" && value !== null && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) return `${path} 标为 layers，缺省值应是字符串数组或 null`;
-        if ((hint === "axis" || hint === "action") && writable) return `${path} 是 state，不能标为 ${hint}（输入只读）`;
-        fields.push({ path, keys, type: hint, slots, writable });
-        return null;
-      }
-      if (hint !== void 0 && isNullableGroup(hint)) {
-        if (value !== null && !isPlainObject2(value)) return `${path} 标为可为 null 的对象，缺省值应是对象或 null`;
-        fields.push({ path, keys, type: "?", slots: 1, writable });
-        for (const sub of Object.keys(hint["?"])) {
-          const err = add([...keys, sub], value?.[sub] ?? null, hint["?"][sub], writable);
-          if (err) return err;
-        }
-        return null;
-      }
-      if (typeof value === "number") {
-        fields.push({ path, keys, type: "f", slots: 1, writable });
-        return null;
-      }
-      if (typeof value === "boolean") {
-        fields.push({ path, keys, type: "b", slots: 1, writable });
-        return null;
-      }
-      if (Array.isArray(value)) {
-        if (value.length && value.every((v) => typeof v === "number")) {
-          fields.push({ path, keys, type: `f${value.length}`, slots: value.length, writable });
-          return null;
-        }
-        return `${path} 的缺省值是${value.length ? "非数字" : "空"}数组，需要在 native 里给出类型`;
-      }
-      if (isPlainObject2(value)) {
-        if (hint !== void 0 && !isPlainObject2(hint)) return `${path} 的提示应是对象`;
-        for (const sub of Object.keys(value)) {
-          const err = add([...keys, sub], value[sub], hint?.[sub], writable);
-          if (err) return err;
-        }
-        return null;
-      }
-      return `${path} 的缺省值是 ${value === null ? "null" : typeof value}，需要在 native 里给出类型`;
-    };
-    for (const [group, writable] of [[def.props ?? {}, false], [def.state ?? {}, true]]) {
-      for (const key of Object.keys(group)) {
-        const err = add([key], group[key], hints?.[key], writable);
-        if (err) return { ok: false, reason: err };
-      }
-    }
-    let offset = ENTITY_HEAD;
-    const laid = fields.map((f) => {
-      const out = { ...f, offset };
-      offset += f.slots;
-      return out;
-    });
-    const text = `${def.name}|${laid.map((f) => `${f.path}:${f.type}`).join(";")}`;
-    return { ok: true, layout: { block: def.name, text, fields: laid, stride: offset } };
-  }
-  var ALL_LAYERS = 4294967295;
-  function read(me, keys) {
-    let v = me;
-    for (const k of keys) {
-      if (v === null || v === void 0) return void 0;
-      v = v[k];
-    }
-    return v;
-  }
-  function write(me, keys, value) {
-    let o = me;
-    for (let i = 0; i < keys.length - 1; i++) {
-      if (!isPlainObject2(o[keys[i]])) o[keys[i]] = {};
-      o = o[keys[i]];
-    }
-    o[keys[keys.length - 1]] = value;
-  }
-  function packEntity(layout2, e, me, env, buf, o) {
-    buf[o] = e.id;
-    buf[o + 1] = e.pos[0];
-    buf[o + 2] = e.pos[1];
-    buf[o + 3] = e.pos[2];
-    buf[o + 4] = e.rot[0];
-    buf[o + 5] = e.rot[1];
-    buf[o + 6] = e.rot[2];
-    let absent = null;
-    for (const f of layout2.fields) {
-      const at = o + f.offset;
-      if (absent !== null && f.path.startsWith(absent)) {
-        for (let i = 0; i < f.slots; i++) buf[at + i] = 0;
-        continue;
-      }
-      absent = null;
-      const v = read(me, f.keys);
-      switch (f.type) {
-        case "f":
-          buf[at] = typeof v === "number" ? v : NaN;
-          break;
-        case "b":
-          buf[at] = v ? 1 : 0;
-          break;
-        case "f?":
-          buf[at] = typeof v === "number" ? 1 : 0;
-          buf[at + 1] = typeof v === "number" ? v : 0;
-          break;
-        case "layers":
-          buf[at] = Array.isArray(v) ? env.layerMask(v) : ALL_LAYERS;
-          break;
-        case "axis": {
-          const a = env.cmd(e).axis(String(v));
-          buf[at] = a.x;
-          buf[at + 1] = a.y;
-          break;
-        }
-        case "action": {
-          const c = env.cmd(e);
-          buf[at] = c.down(String(v)) ? 1 : 0;
-          buf[at + 1] = c.pressed(String(v)) ? 1 : 0;
-          break;
-        }
-        case "?":
-          buf[at] = isPlainObject2(v) ? 1 : 0;
-          if (!isPlainObject2(v)) absent = f.path + ".";
-          break;
-        default:
-          for (let i = 0; i < f.slots; i++) buf[at + i] = Array.isArray(v) && typeof v[i] === "number" ? v[i] : NaN;
-      }
-    }
-  }
-  function unpackEntity(layout2, e, me, buf, o) {
-    e.pos[0] = buf[o + 1];
-    e.pos[1] = buf[o + 2];
-    e.pos[2] = buf[o + 3];
-    e.rot[0] = buf[o + 4];
-    e.rot[1] = buf[o + 5];
-    e.rot[2] = buf[o + 6];
-    let absent = null;
-    for (const f of layout2.fields) {
-      if (!f.writable) continue;
-      if (absent !== null && f.path.startsWith(absent)) continue;
-      absent = null;
-      const at = o + f.offset;
-      switch (f.type) {
-        case "f":
-          write(me, f.keys, buf[at]);
-          break;
-        case "b":
-          write(me, f.keys, buf[at] !== 0);
-          break;
-        case "f?":
-          write(me, f.keys, buf[at] !== 0 ? buf[at + 1] : null);
-          break;
-        case "?":
-          if (buf[at] === 0) {
-            write(me, f.keys, null);
-            absent = f.path + ".";
-          } else if (!isPlainObject2(read(me, f.keys))) write(me, f.keys, {});
-          break;
-        case "layers":
-        case "axis":
-        case "action":
-          break;
-        default: {
-          const cur = read(me, f.keys);
-          const arr = Array.isArray(cur) && cur.length === f.slots ? cur : new Array(f.slots);
-          for (let i = 0; i < f.slots; i++) arr[i] = buf[at + i];
-          if (arr !== cur) write(me, f.keys, arr);
-        }
-      }
-    }
-  }
-  function packBatch(layout2, list, env, dt, tick, buf) {
-    const size = BUFFER_HEAD + list.length * layout2.stride;
-    const out = buf && buf.length === size ? buf : new Float64Array(size);
-    out[0] = list.length;
-    out[1] = layout2.stride;
-    out[2] = dt;
-    out[3] = tick;
-    for (let i = 0; i < list.length; i++) packEntity(layout2, list[i].e, list[i].me, env, out, BUFFER_HEAD + i * layout2.stride);
-    return out;
-  }
-  function unpackBatch(layout2, list, buf) {
-    if (buf.length !== BUFFER_HEAD + list.length * layout2.stride || buf[0] !== list.length || buf[1] !== layout2.stride) {
-      throw new Error(`原生实现返回的缓冲区格式不对（长度 ${buf.length}，应为 ${BUFFER_HEAD + list.length * layout2.stride}）`);
-    }
-    for (let i = 0; i < list.length; i++) {
-      const o = BUFFER_HEAD + i * layout2.stride;
-      if (buf[o] !== list[i].e.id) throw new Error(`原生实现返回的第 ${i} 个实体 id 不符（${buf[o]}，应为 ${list[i].e.id}）`);
-      unpackEntity(layout2, list[i].e, list[i].me, buf, o);
-    }
-  }
-
   // runtime/src/world/ui-eval.ts
   var WORLD_TAGS = /* @__PURE__ */ new Set(["entity", "rule", "stage"]);
   var MAX_DEPTH = 64;
@@ -10379,9 +10571,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
         const edge = {};
         for (const k of keyEdges) {
-          const now = input.key(k);
-          edge[k] = now && !prevKeys[k];
-          prevKeys[k] = now;
+          const now2 = input.key(k);
+          edge[k] = now2 && !prevKeys[k];
+          prevKeys[k] = now2;
         }
         let focus = local.$focus ? byPath.get(local.$focus) : void 0;
         if (local.$focus && (!focus || !focusables.includes(focus))) {
@@ -10487,16 +10679,16 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (!sameAxis(axes[name], cmd.axes[name])) axisChange[name] = [cmd.axes[name]?.x ?? 0, cmd.axes[name]?.y ?? 0];
       }
       if (Object.keys(axisChange).length) item.axis = axisChange;
-      const now = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));
-      const pressed = [...now].filter((a) => !down.has(a));
-      const released = [...down].filter((a) => !now.has(a));
+      const now2 = new Set(Object.keys(cmd.down).filter((k) => cmd.down[k]));
+      const pressed = [...now2].filter((a) => !down.has(a));
+      const released = [...down].filter((a) => !now2.has(a));
       if (pressed.length) item.down = pressed;
       if (released.length) item.up = released;
       const changed = Object.keys(item).length > 1;
       if (changed) out.push(item);
       for (const e of cmd.events) out.push({ at, emit: e.payload === void 0 ? e.name : { name: e.name, payload: e.payload } });
       axes = { ...cmd.axes };
-      down = now;
+      down = now2;
     });
     return out;
   }

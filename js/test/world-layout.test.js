@@ -117,3 +117,15 @@ test('布局：没有 state 的积木（moveTopdown 的形状）', () => {
   assert.equal(r.layout.text, 'moveTopdown|speed:f')
   assert.equal(r.layout.stride, 8)
 })
+
+test('布局：@ 开头的提示是写死名字的输入，排在字段前面', () => {
+  const def = pot.defineBlock({ name: 'td', props: { speed: 5 }, native: { '@move': 'axis', '@fire': 'action' }, step() {} })
+  const r = pot.deriveLayout(def)
+  assert.equal(r.layout.text, 'td|@move:axis;@fire:action;speed:f')
+  const e = { id: 1, pos: [0, 0, 0], rot: [0, 0, 0] }
+  const buf = pot.packBatch(r.layout, [{ e, me: { speed: 5 } }], env({ axes: { move: { x: 1, y: -0.5 } }, down: { fire: true } }), 0.1, 0)
+  assert.deepEqual([...buf.slice(11, 16)], [1, -0.5, 1, 0, 5])
+  const reason = (native) => pot.deriveLayout(pot.defineBlock({ name: 'x', props: { a: 1 }, native, step() {} })).reason
+  assert.match(reason({ '@move': 'f' }), /是输入，类型只能是 axis 或 action/)
+  assert.match(reason({ '@1x': 'axis' }), /不是合法的指令名/)
+})

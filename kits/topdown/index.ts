@@ -13,6 +13,8 @@ export const moveTopdown = defineBlock({
   name: 'moveTopdown',
   about: '俯视角移动：读指令轴 move，按 speed（米每秒）改 pos 的 x、z',
   props: { speed: 5 },
+  // 原生实现的布局提示（004 第 18.3 节）：step 读的 move 轴
+  native: { '@move': 'axis' },
   step(me, e, w) {
     const { x, y } = w.cmd(e).axis('move')
     if (!x && !y) return

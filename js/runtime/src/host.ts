@@ -187,5 +187,14 @@ export interface Host {
   frames?: boolean
   /** 加载进度回报给外壳（显示加载界面）：progress 0..1，小于 0 表示未知；text 为当前阶段 */
   loading?(progress: number, text: string): void
+  /**
+   * 原生积木（004 第 18.4 节）：返回 JSON [{ name, kit, layout, collision }]，kit 为空表示系统积木。
+   * 不实现时没有原生积木（Node、发布到没有 C# 实现的平台）
+   */
+  nativeBlocks?(): string
+  /** 执行一个原生积木的 step：传入打包好的缓冲区（18.5），返回同样格式的结果 */
+  nativeStep?(name: string, buf: Float64Array): ArrayBuffer | Float64Array
+  /** 把碰撞体表发给原生侧（18.6）；只在碰撞表变化后、用到碰撞的原生积木执行前调用 */
+  nativeBodies?(buf: Float64Array): void
   engine: Engine
 }
