@@ -25,7 +25,7 @@ export async function apply(ctx: Context) {
 
   // 分阶段加载：逐个 await 子单元，期间让帧并回报进度（Runner 显示加载界面）
   const stages: [string, string, number][] = [
-    ['world', '加载场景', 0], ['player', '加载角色', 0.76], ['weapon', '加载武器', 0.8],
+    ['world', '加载场景', 0], ['collision', '加载碰撞', 0.75], ['player', '加载角色', 0.76], ['weapon', '加载武器', 0.8],
     ['enemies', '加载敌人', 0.9], ['hud', '加载界面', 0.97], ['menu', '加载菜单', 0.99],
   ]
   for (const [unit, text, progress] of stages) {

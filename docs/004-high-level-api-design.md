@@ -1444,13 +1444,15 @@ export default defineGame({ kits: [topdown], ... })
   - 状态（与属性不能同名）：`vel`、`yaw`、`pitch`、`grounded`、`crouched`、`coyoteT`（土狼时间余量）、`buffer`、`lastSafe`、`curHeight`、`curEye`、`bob`（步伐相位，整数部分变化即一步，游戏据此放脚步声）、`speed`（水平速度）、`sprinting`、`landed`（本步落地时的下落速度，否则 0）、`aim`（瞄准程度 0 到 1，由武器等别的积木写入，影响速度、视角灵敏度、能否冲刺与相机 fov）。
   - `init` 时 `yaw` 取 `e.rot[1]`，`lastSafe` 取 `e.pos`；每步把 `e.rot` 写成 `[0, yaw, 0]`。
   - 蹲伏起身前用 `w.overlap` 检查头顶（只看 `solid` 碰撞体），挡住则保持蹲伏。
+  - 状态 `active`（缺省 true）：为 false 时整步跳过（不移动、不转视角、不更新步伐），由游戏按自己的阶段（菜单、暂停、死亡）写入。指令照常按步采样，所以重新启用时不会把停用期间的按键当成新按下。
   - 落地音效、脚步声、落水救援、扣血这类游戏专属的反馈不在积木里，游戏读状态自己做。
 - `cameraFps`：读同一实体的 `moveFps` 状态，每帧把相机放在插值后的位置加眼高处，带 fov（`fov`、`fovAds`、`fovSprint`）、步伐摆动（`bobX`、`bobY`）与震动。
   - 状态 `shake`（0 到 1，别的积木写入，每步按 `shakeDecay` 衰减）与 `kick`（`[pitch, yaw]` 附加角度，武器后坐力写入）。
   - 震动的抖动由 `w.tick` 推出的伪随机给出：表现层不能调 `w.rand`（会改动 World 的随机序列，表现帧数又因机器而异，结果就不可复现了），也不用 `Math.random`。
   - `lockCursor`（缺省 true）：进入时锁定鼠标，退出时释放。
+  - 状态 `active`（缺省 true）：为 false 时不动相机（标题画面、结算画面由游戏自己摆相机），震动照常衰减。
   - 视角角度直接取状态（随固定步更新），位置按插值。刷新率高于固定步频率时视角会有阶梯感，记为后续事项。
-- `health`：属性 `{ max: 100, regen: 0, regenDelay: 4 }`，状态 `hp`（`init` 时为 `max`）、`lastHit`（最近受伤的 `w.time`，初值 -1e9；不用 -Infinity，它存档后会变成 null）。每步在 `hp > 0`、距 `lastHit` 超过 `regenDelay` 时按 `regen` 每秒回血。
+- `health`：属性 `{ max: 100, regen: 0, regenDelay: 4 }`，状态 `hp`（`init` 时为 `max`）、`lastHit`（最近受伤的 `w.time`，初值 -1e9；不用 -Infinity，它存档后会变成 null）。每步在 `hp > 0`、距 `lastHit` 超过 `regenDelay` 时按 `regen` 每秒回血。`order` 为 5，排在移动与游戏的一般积木之后：同一步里先受伤（比如落水救援扣血）再判断回血。
 - `damage(w, e, n, from?)`：套件导出的函数，不是 `w.damage`（系统层不依赖套件积木）。实体没有 `health` 或已经 `hp <= 0` 时什么也不做，返回 false；否则扣血、记 `lastHit`，发 `damaged` 事件，`hp` 到 0 时再发 `died` 事件。两个事件的 payload 都是 `{ entity, amount, from }`（`from` 为实体 id 或 null）。自定义事件不经过 `a`/`b` 过滤，处理函数自己看 `payload.entity`。`died` 不销毁实体，销毁与否由游戏决定。
 - `aiChase`：追击 `target`（标签或预制件名）里 `range` 内最近的一个；`sight` 为 true 时从眼高向目标眼高打 `w.raycast`（只看 `solid`），被挡住就不算看见。看见时朝目标水平移动到 `stopAt` 以内并转身；看丢后走到最后看见的位置再停下。移动用 `w.move`（带重力）。状态 `vel`、`grounded`、`seen`、`lastSeen`（`[x, y, z]` 或 null）、`targetId`。
 - `aiPatrol`：按 `points` 顺序巡逻，到点停 `wait` 秒，`loop` 为 false 时到头折返。同一实体有 `aiChase` 且在追（`seen` 或 `lastSeen` 不为空）时让出，不移动。
@@ -1464,8 +1466,8 @@ World 的配套改动：
 
 ### 17.6 saltline 玩家迁移
 
-- 迁移前先录金标准：在旧版上用固定的输入脚本（走、跑、跳、蹲、上台阶、贴墙、落水）跑 600 步，逐步记下位置、`grounded`、`crouched`；迁移后同一脚本比对，位置误差不超过 1e-4。这需要 saltline 的玩家改为固定步推进（旧版用 `update` 的可变 `dt`），所以先做一个只改步长的提交，再录金标准。
-- 关卡的盒改为带 `body` 的实体（静态、按层），由 world 单元从 `level` 数据生成；渲染不变。
+- 迁移前先录金标准：在旧版上用固定的输入脚本（走、跑、跳、蹲、上台阶、贴墙、落水）跑 840 步（最初写 600 步，为覆盖贴墙滑行和跨长凳加到 840），逐步记下位置、`grounded`、`crouched`、生命与 `yaw`；迁移后同一脚本比对，位置误差不超过 1e-4。这需要 saltline 的玩家改为固定步推进（旧版用 `update` 的可变 `dt`），所以先做一个只改步长的提交，再录金标准。
+- 关卡的盒改为带 `body` 的实体（静态、按层），由新的 collision 单元从 `level` 数据生成（不放在 world 单元里：world 单元负责渲染，金标准用例在无画面宿主里只加载 collision 与 player）；渲染不变。
 - 玩家改为实体 `<entity key="player" moveFps={...} cameraFps={...} health={...} />`；落地音效、脚步声、落水救援、回血等 saltline 专属逻辑写成游戏积木。
 - 其他单元（weapon、enemies、hud）读写的 `player()` 状态改由适配函数 `player(ctx)` 从实体上取，签名不变，避免一次改动所有单元。
 
@@ -1575,3 +1577,19 @@ M3 验收：`npm test` 通过（pot_gfx 一致性用例除外）；hello-tsx 引
 - `aiChase` 与 `aiPatrol` 各自有 `vel`、`grounded`；同一实体两个都有时，追击中由 `aiChase` 移动，闲着时由 `aiPatrol` 移动，任何一步只调用一次 `w.move`。
 - `cameraFps` 的 `lockCursor`：`enter` 时锁定，`exit` 时释放。`moveFps` 不检查鼠标是否锁定（saltline 只在锁定时读 `look`），菜单等场合由流程或界面捕获屏蔽输入。
 - 测试 `kit-fps.test.js` 11 个用例：增量输入（一帧半步、一帧两步、界面捕获）、走跑与瞄准的速度、视角、跳跃顶点（约 0.95，半隐式欧拉比 `jumpApex` 低约 `v0·dt/2`）、土狼时间、跳跃缓冲、低顶蹲伏、`fallY`/`bounds` 拉回、相机与光标、`health`/`damage`、`aiChase` 视线、`aiPatrol` 与让出。
+
+第 5 步（saltline 玩家迁移）：
+
+17.5、17.6 在动手前改过一遍：17.5 加了 `moveFps`、`cameraFps` 的 `active` 与 `health` 的 `order`；17.6 的金标准步数改为 840，并写明 collision 单元单独成立的理由。
+
+实施时的细节：
+
+- collision 单元在 `games/saltline/src/plugins/collision.tsx`，加载阶段排在 world 之后（“加载碰撞”）。盒由 `physics.ts` 新增的 `levelBoxes(level)` 给出：先是 `buildSolids` 的盒（层 `default`），再是 `origlevel` 的盒，`bulletOnly` 为 `bullet` 层、`playerOnly` 为 `playerWall` 层、其余为 `default`。旧的 `levelCollision(level, who)` 改为基于同一份 `levelBoxes` 过滤，敌人迁移前仍由 enemies 使用，两边的盒保证一致。
+- 玩家的 `moveFps` 用 `layers: ['default', 'playerWall']`，`ground` 为 `{ y: 0, maxX: 码头边 }`，`bounds` 取关卡边界。
+- 游戏积木两个：`slControl`（order -1）按阶段写 `moveFps.active`（intro 或 playing 且活着）、`cameraFps.active`（不是标题与结算）、`health.regen`（停用时为 0），并把武器的瞄准程度、设置里的灵敏度、反转、fov 写进去；鼠标未锁定时把 `sensitivity` 写成 0，代替旧版“只在锁定时读 look”。`slFeedback`（order 1）做受伤闪红的衰减、落地音效与震动、脚步声、落水救援（偏移 1.5 米、扣血）。
+- `defineGame` 的 `controls` 为空时不再调用 `setControls`：saltline 有多个 `defineGame` 单元，后加载的空映射会把套件的映射清掉。
+- 适配函数 `player(ctx)` 在 `types.ts`，返回 getter 对象，只有 `sprinting`（武器开火时打断冲刺）与 `shake` 可写，其余只读。实体 id 用模块级变量缓存：`ctx.world` 每次返回新的代理，不能当 WeakMap 的键，否则每次都全表 `query`（关卡有几百个碰撞实体），金标准用例从 2.5 秒变成 15.8 秒。缓存不是状态，失效时重新查询。
+- 金标准 840 步直接通过，位置误差在 1e-4 内，`grounded`、`crouched` 逐步相等，生命误差 1e-3 内，`yaw` 1e-6 内，没有放宽容差。
+- 相机位置改为插值（旧版取当前位置），刷新率高于 60Hz 时更平滑；视角角度仍取状态。
+- 实机验证：intro 与 playing 可动，走 3.8 m/s、冲刺 6.4 m/s、跳高约 0.93 米；受伤、回血到 100、死亡后停用、重试回到出生点、暂停不能动都正常。World 开销实测每个固定步约 0.52 毫秒、每帧 `view.frame` 约 0.41 毫秒，帧率不受迁移影响。
+- 源码字节数：迁移前 `player.ts` 8481、`physics.ts` 5906、`types.ts` 2654，合计 17041；迁移后 `player.tsx` 4675、`collision.tsx` 846、`physics.ts` 6574、`types.ts` 4363，合计 16458。玩家单元本身减少约 45%，增加的部分是适配函数与 `levelBoxes`，敌人迁移完成后适配函数可以删去。

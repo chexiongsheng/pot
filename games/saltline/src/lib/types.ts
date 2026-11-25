@@ -42,6 +42,10 @@ export interface GameState {
   seed: number
 }
 
+/**
+ * 玩家状态的视图：玩家是带 moveFps、cameraFps、health 的实体（player.tsx），这里把积木状态按旧字段名映射出来，
+ * 其他单元照旧读写。只有 sprinting（武器开火时打断冲刺）与 shake（爆炸震屏）可写。
+ */
 export interface PlayerState {
   pos: Vec3
   vel: Vec3
@@ -82,13 +86,51 @@ export interface WeaponState {
 }
 
 export const GAME = 'saltline/game'
-export const PLAYER = 'saltline/player'
 export const WEAPON = 'saltline/weapon'
 export const ENEMIES = 'saltline/enemies'
 
 export const game = (ctx: Context) => ctx.state.get<GameState>(GAME)
-export const player = (ctx: Context) => ctx.state.get<PlayerState>(PLAYER)
 export const weapon = (ctx: Context) => ctx.state.get<WeaponState>(WEAPON)
+
+/** 玩家实体（标签 player）；还没加载时为 undefined */
+export function playerEntity(ctx: Context): any {
+  const w: any = ctx.world
+  const e = cachedId < 0 ? undefined : w.get(cachedId)
+  if (e?.b.moveFps && e.tags.includes('player')) return e
+  const found = w.query('player')[0]
+  cachedId = found ? found.id : -1
+  return found
+}
+/** 只是查找缓存（不是状态）：关卡有几百个碰撞实体，不能每次都全表查询 */
+let cachedId = -1
+
+export function player(ctx: Context): PlayerState | undefined {
+  const e = playerEntity(ctx)
+  if (!e) return undefined
+  const b = e.b
+  return {
+    get pos() { return e.pos },
+    get vel() { return b.moveFps.vel },
+    get yaw() { return b.moveFps.yaw },
+    get pitch() { return b.moveFps.pitch },
+    get health() { return b.health.hp },
+    get crouching() { return b.moveFps.crouched },
+    get height() { return b.moveFps.curHeight },
+    get eye() { return b.moveFps.curEye },
+    get grounded() { return b.moveFps.grounded },
+    get coyote() { return b.moveFps.coyoteT },
+    get jumpBuffer() { return b.moveFps.buffer },
+    get lastHurt() { return b.health.lastHit },
+    get hurt() { return b.slFeedback.hurt },
+    get bob() { return b.moveFps.bob },
+    get speed() { return b.moveFps.speed },
+    get sprinting() { return b.moveFps.sprinting },
+    set sprinting(v) { b.moveFps.sprinting = v },
+    get lastSafe() { return b.moveFps.lastSafe },
+    get shake() { return b.cameraFps.shake },
+    set shake(v) { b.cameraFps.shake = v },
+  } as PlayerState
+}
 
 /** 玩家眼睛（相机）位置 */
 export function eyeOf(p: PlayerState): Vec3 {

@@ -10294,7 +10294,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
         for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, "game"), `world.block(${block.name})`);
         for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, "game"), `world.prefab(${prefab.prefab})`);
-        ctx.effect(() => {
+        if (controls) ctx.effect(() => {
           w.setControls(controls);
           const applied = w.controls;
           return () => {

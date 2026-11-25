@@ -112,7 +112,8 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
       }
       for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, 'game'), `world.block(${block.name})`)
       for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, 'game'), `world.prefab(${prefab.prefab})`)
-      ctx.effect(() => {
+      // 没有 kits 与 controls 的单元不碰映射：否则多个 defineGame 单元时后加载的会把前面的清掉
+      if (controls) ctx.effect(() => {
         w.setControls(controls)
         const applied = w.controls
         // 热重载时新旧单元的先后不定：只撤销自己设的

@@ -1,5 +1,5 @@
 /**
- * saltline 玩家金标准（004 第 17.6 节）：在真实关卡上用固定的输入脚本跑 600 步，
+ * saltline 玩家金标准（004 第 17.6 节）：在真实关卡上用固定的输入脚本跑 840 步，
  * 逐步比对位置、grounded、crouched（误差 1e-4）与生命值。
  *
  * 录制：POT_RECORD=1 node --test test/saltline-player.test.js（写 fixtures/saltline-player.json）
@@ -82,7 +82,7 @@ async function runScript() {
   return rows
 }
 
-test('saltline 玩家：600 步与金标准一致', async () => {
+test('saltline 玩家：840 步与金标准一致', async () => {
   const rows = await runScript()
   if (process.env.POT_RECORD) {
     fs.mkdirSync(path.dirname(FIXTURE), { recursive: true })

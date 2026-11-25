@@ -75,6 +75,7 @@ const MOVE_PROPS = {
 }
 
 const MOVE_STATE = {
+  active: true,
   vel: [0, 0, 0] as Vec3,
   yaw: 0,
   pitch: 0,
@@ -108,6 +109,7 @@ export const moveFps = defineBlock({
     me.curEye = me.eye
   },
   step(me, e, w) {
+    if (!me.active) return
     const dt = w.dt
     const cmd = w.cmd(e)
     const act = me.actions
@@ -208,7 +210,7 @@ export const cameraFps = defineBlock({
   name: 'cameraFps',
   about: '第一人称相机：放在 moveFps 实体的眼高处，带 fov（瞄准、冲刺）、步伐摆动与震动（shake、kick 由别的积木写入）',
   props: { fov: 74, fovAds: 52, fovSprint: 6, bobX: 0.013, bobY: 0.024, shakeDecay: 3, lockCursor: true },
-  state: { shake: 0, kick: [0, 0] as [number, number] },
+  state: { active: true, shake: 0, kick: [0, 0] as [number, number] },
   step(me, _e, w) {
     me.shake = Math.max(0, me.shake - w.dt * me.shakeDecay)
   },
@@ -218,7 +220,7 @@ export const cameraFps = defineBlock({
     },
     update(me, e, _objs, ctx, w) {
       const m = e.b.moveFps as (MoveFpsProps & MoveFpsState) | undefined
-      if (!m) return
+      if (!m || !me.active) return
       const prev = w.prev.get(e.id)?.pos ?? e.pos
       const a = ctx.clock.fixedAlpha
       const p = [prev[0] + (e.pos[0] - prev[0]) * a, prev[1] + (e.pos[1] - prev[1]) * a, prev[2] + (e.pos[2] - prev[2]) * a]
@@ -246,6 +248,7 @@ export const health = defineBlock({
   about: '生命：hp 初值为 max；距最近受伤超过 regenDelay 秒后按 regen 每秒回血。扣血用套件导出的 damage(w, e, n, from)',
   props: { max: 100, regen: 0, regenDelay: 4 },
   state: { hp: 0, lastHit: -1e9 },
+  order: 5,
   init(me) {
     me.hp = me.max
   },
