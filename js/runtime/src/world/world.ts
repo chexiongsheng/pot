@@ -11,10 +11,11 @@ import { Context, Service } from 'cordis'
 import { unitOf } from '../units'
 import { makeNode } from './node'
 import type { PotChild, Prefab, SourcePos } from './node'
-import { Registry, clone, isPlainObject } from './registry'
+import { Registry, clone, isPlainObject, merge } from './registry'
 import type { BlockDef } from './registry'
 import { evaluate } from './tree'
-import type { EntitySpec, RuleSpec, StageSpec } from './tree'
+import type { EntitySpec, RuleSpec, StageSpec, TreeResult } from './tree'
+import { applyPatches, mergePatches, treeView } from './inspect'
 import { overlappingPairs } from './collide'
 import type { Collider } from './collide'
 import { WorldView } from './view'
@@ -186,6 +187,12 @@ export class WorldService extends Service {
   private _cmdEvents: QueuedEvent[] = []
   /** 有焦点控件的单元：非空时不采样键盘与轴 */
   private _captures = new Set<string>()
+  /** 挂载 id → 最近一次挂载的树与覆盖层（运行期补丁重新求值用） */
+  private _inputs = new Map<string, { tree: PotChild; overrides?: Record<string, any> }>()
+  /** 挂载 id → 最近一次求值结果（树视图用） */
+  private _results = new Map<string, TreeResult>()
+  /** 挂载 id → 运行期补丁（pot world set），只在内存里 */
+  private _patches = new Map<string, Record<string, any>>()
 
   constructor(ctx: Context) {
     super(ctx, 'world')
@@ -390,7 +397,8 @@ export class WorldService extends Service {
 
   // ---------------------------------------------------------------- 挂载与对比（15.6）
 
-  mount(tree: PotChild, options: { id?: string } = {}) {
+  /** overrides：覆盖层（按 key 路径的属性补丁，16.7），叠在求值结果上再对比 */
+  mount(tree: PotChild, options: { id?: string; overrides?: Record<string, any> } = {}) {
     const unit = unitOf(this.ctx) ?? '(host)'
     const id = options.id ?? unit
     const current = this._attached.get(id)
@@ -401,11 +409,8 @@ export class WorldService extends Service {
     for (const prefab of result.prefabs) {
       if (this.registry.prefab(prefab.prefab) !== prefab) this.ctx.effect(() => this.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`)
     }
-    const data = this.data
-    this._diff(data, id, result.entities)
-    this._rules.set(id, result.rules)
-    if (result.stage) this._stages.set(id, result.stage)
-    else this._stages.delete(id)
+    this._inputs.set(id, { tree, overrides: options.overrides })
+    this._applyMount(id, result)
     this._detached.delete(id)
     this._mountedThisRun.add(id)
     const fiber = (this.ctx as any).fiber
@@ -418,6 +423,77 @@ export class WorldService extends Service {
       this._attached.delete(id)
       this._detached.add(id)
     }, `world.mount(${id})`)
+  }
+
+  private _applyMount(id: string, result: TreeResult) {
+    const input = this._inputs.get(id)
+    const patches = mergePatches(input?.overrides, this._patches.get(id))
+    const entities = patches ? applyPatches(result.entities, patches, this.registry, (m) => this._warnOnce(`挂载 ${id}：${m}`)) : result.entities
+    this._results.set(id, result)
+    this._diff(this.data, id, entities)
+    this._rules.set(id, result.rules)
+    if (result.stage) this._stages.set(id, result.stage)
+    else this._stages.delete(id)
+  }
+
+  private _remount(id: string) {
+    const input = this._inputs.get(id)
+    if (!input) return
+    this._applyMount(id, evaluate(input.tree, this.registry))
+  }
+
+  private _warnOnce(message: string) {
+    if (this._reported.has(message)) return
+    if (this._reported.size > 1000) this._reported.clear()
+    this._reported.add(message)
+    this._root.logger('world').warn(message)
+  }
+
+  // ---------------------------------------------------------------- 开发工具（16.6、16.7）
+
+  /** 树视图：给了挂载 id 只返回它的，否则按挂载 id 返回全部 */
+  treeView(id?: string) {
+    if (id !== undefined) {
+      const result = this._results.get(id)
+      if (!result) throw new Error(`没有挂载 "${id}"，现有 ${[...this._results.keys()].join('、') || '（无）'}`)
+      return treeView(result)
+    }
+    const out: Record<string, ReturnType<typeof treeView>> = {}
+    for (const [key, result] of this._results) out[key] = treeView(result)
+    return out
+  }
+
+  /** World 数据的检视：tick、流程、vars、（筛选后的）实体 */
+  inspect(filter?: string) {
+    const data = this.data
+    return { tick: data.tick, flow: this.flow, vars: clone(data.vars), entities: this.query(filter).map((e) => clone(e)) }
+  }
+
+  /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
+  setPatch(mount: string, path: string, patch: Record<string, any>) {
+    if (!this._inputs.has(mount)) throw new Error(`没有挂载 "${mount}"，现有 ${[...this._inputs.keys()].join('、') || '（无）'}`)
+    if (typeof path !== 'string' || !path) throw new Error('world set 需要 key 路径')
+    if (!isPlainObject(patch)) throw new Error('world set 的补丁必须是对象，写法与标签属性相同')
+    const all = this._patches.get(mount) ?? {}
+    all[path] = all[path] ? merge(all[path], patch) : clone(patch)
+    this._patches.set(mount, all)
+    this._remount(mount)
+  }
+
+  /** 清掉运行期补丁（不给挂载 id 时清全部） */
+  clearPatches(mount?: string) {
+    const ids = mount === undefined ? [...this._patches.keys()] : [mount]
+    for (const id of ids) {
+      if (!this._patches.delete(id)) continue
+      this._remount(id)
+    }
+  }
+
+  /** 当前的运行期补丁 */
+  patches() {
+    const out: Record<string, any> = {}
+    for (const [id, all] of this._patches) out[id] = clone(all)
+    return out
   }
 
   private _diff(data: WorldData, id: string, specs: EntitySpec[]) {
@@ -504,6 +580,8 @@ export class WorldService extends Service {
       }
       this._rules.delete(id)
       this._stages.delete(id)
+      this._inputs.delete(id)
+      this._results.delete(id)
     }
     this._detached.clear()
   }

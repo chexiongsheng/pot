@@ -54,6 +54,25 @@ export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   ui?: (w: GameWorld<V>, ui: GameUI) => PotChild
 }
 
+/** 覆盖层 data/overrides.json 里本单元挂载的部分（16.7）；读过它的单元在文件变化时热重载 */
+function readOverrides(ctx: Context, mount: string): Record<string, any> | undefined {
+  if (!ctx.data.exists('overrides.json')) return undefined
+  let all: any
+  try {
+    all = ctx.data.load('overrides.json')
+  } catch (error: any) {
+    ctx.logger('world').error(error?.message ?? String(error))
+    return undefined
+  }
+  const mine = all?.[mount]
+  if (mine === undefined) return undefined
+  if (!mine || typeof mine !== 'object' || Array.isArray(mine)) {
+    ctx.logger('world').error('data/overrides.json 的 "%s" 必须是 { key 路径: 属性补丁 }', mount)
+    return undefined
+  }
+  return mine
+}
+
 export interface GameUnit {
   apply(ctx: Context): void
 }
@@ -88,7 +107,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
       if (scene) {
         const mountScene = () => {
           const s = w.flowScene
-          w.mount(scene({ state: s.state, params: s.params, data: ctx.data }))
+          w.mount(scene({ state: s.state, params: s.params, data: ctx.data }), { overrides: readOverrides(ctx, unit) })
         }
         mountScene()
         if (flow) w.onFlowEnter(mountScene)

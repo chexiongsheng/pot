@@ -7502,14 +7502,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
       return chain;
     };
-    const apply = (acc, tags, values, reserved, where) => {
+    const apply = (acc, tags, values, reserved, where2) => {
       let ok = true;
       for (const key of Object.keys(values)) {
         if (key === "tags") {
           const list = values.tags;
           if (list === void 0) continue;
           if (!Array.isArray(list) || list.some((t) => typeof t !== "string")) {
-            errors.push(`${where}tags 必须是字符串数组`);
+            errors.push(`${where2}tags 必须是字符串数组`);
             ok = false;
           } else list.forEach((t) => tags.add(t));
           continue;
@@ -7517,7 +7517,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (reserved.has(key)) continue;
         const block = registry.block(key);
         if (!block) {
-          errors.push(`${where}未知的积木 ${key}${similar(key, registry.blockNames())}`);
+          errors.push(`${where2}未知的积木 ${key}${similar(key, registry.blockNames())}`);
           ok = false;
           continue;
         }
@@ -7529,14 +7529,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (value === void 0) continue;
         const over = value === true ? {} : value;
         if (!isPlainObject2(over)) {
-          errors.push(`${where}积木 ${key} 的值必须是对象（或 true 表示用默认值、false 表示去掉）`);
+          errors.push(`${where2}积木 ${key} 的值必须是对象（或 true 表示用默认值、false 表示去掉）`);
           ok = false;
           continue;
         }
         const fields = block.props ?? {};
         for (const field of Object.keys(over)) {
           if (!(field in fields)) {
-            errors.push(`${where}积木 ${key} 没有字段 ${field}${similar(field, Object.keys(fields))}`);
+            errors.push(`${where2}积木 ${key} 没有字段 ${field}${similar(field, Object.keys(fields))}`);
             ok = false;
           }
         }
@@ -7545,10 +7545,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       return ok;
     };
     const entity2 = (node, prefab, path) => {
-      const where = sourcePrefix(node.source);
+      const where2 = sourcePrefix(node.source);
       const props = node.props;
       if (flatChildren(props.children).length) {
-        errors.push(`${where}<${prefab.prefab}> 有子节点：M1 的实体是平的，不支持子节点`);
+        errors.push(`${where2}<${prefab.prefab}> 有子节点：M1 的实体是平的，不支持子节点`);
         return null;
       }
       const chain = chainOf(prefab, node);
@@ -7556,12 +7556,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const acc = {};
       const tags = /* @__PURE__ */ new Set();
       let ok = true;
-      for (const p of chain) ok = apply(acc, tags, p.def, PREFAB_RESERVED, `${where}预制件 ${p.prefab}：`) && ok;
-      ok = apply(acc, tags, props, RESERVED, where) && ok;
+      for (const p of chain) ok = apply(acc, tags, p.def, PREFAB_RESERVED, `${where2}预制件 ${p.prefab}：`) && ok;
+      ok = apply(acc, tags, props, RESERVED, where2) && ok;
       const vec = (name, value, fallback) => {
         if (value === void 0) return [...fallback];
         if (!isVec3(value)) {
-          errors.push(`${where}${name} 必须是三个有限数 [x, y, z]，收到 ${JSON.stringify(value)}`);
+          errors.push(`${where2}${name} 必须是三个有限数 [x, y, z]，收到 ${JSON.stringify(value)}`);
           ok = false;
           return [...fallback];
         }
@@ -7571,7 +7571,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       const rot = vec("rot", props.rot, [0, 0, 0]);
       const scale = typeof props.scale === "number" && Number.isFinite(props.scale) ? [props.scale, props.scale, props.scale] : vec("scale", props.scale, [1, 1, 1]);
       if (props.name !== void 0 && typeof props.name !== "string") {
-        errors.push(`${where}name 必须是字符串`);
+        errors.push(`${where2}name 必须是字符串`);
         ok = false;
       }
       if (!ok) return null;
@@ -7586,20 +7586,20 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       return spec;
     };
     const rule = (node, layer) => {
-      const where = sourcePrefix(node.source);
+      const where2 = sourcePrefix(node.source);
       const p = node.props;
       const path = join(layer, segment(layer, "rule", node.key));
       if (!claim(path, node)) return;
       if (typeof p.on !== "string" || !(BUILTIN_EVENTS.includes(p.on) || EVENT.test(p.on))) {
-        errors.push(`${where}<rule> 未知的事件 ${JSON.stringify(p.on)}：可用 touch、death、every 或自定义事件名（标识符）`);
+        errors.push(`${where2}<rule> 未知的事件 ${JSON.stringify(p.on)}：可用 touch、death、every 或自定义事件名（标识符）`);
         return;
       }
       if (typeof p.do !== "function") {
-        errors.push(`${where}<rule on="${p.on}"> 缺少 do 函数`);
+        errors.push(`${where2}<rule on="${p.on}"> 缺少 do 函数`);
         return;
       }
       if (p.on === "every" && !(typeof p.seconds === "number" && p.seconds > 0)) {
-        errors.push(`${where}<rule on="every"> 需要正数 seconds`);
+        errors.push(`${where2}<rule on="every"> 需要正数 seconds`);
         return;
       }
       const filter = (v) => v === void 0 ? void 0 : isPrefab(v) ? v.prefab : String(v);
@@ -7628,6 +7628,109 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       throw error;
     }
     return result;
+  }
+
+  // runtime/src/world/inspect.ts
+  var where = (s) => s ? `${s.file}:${s.line}` : void 0;
+  function plain(value, depth = 0) {
+    if (typeof value === "function") return "[function]";
+    if (depth > 8) return "…";
+    if (Array.isArray(value)) return value.map((v) => plain(v, depth + 1));
+    if (isPlainObject2(value)) {
+      const out = {};
+      for (const key of Object.keys(value)) out[key] = plain(value[key], depth + 1);
+      return out;
+    }
+    if (value && typeof value === "object") return Object.prototype.toString.call(value);
+    return value;
+  }
+  function treeView(result) {
+    return {
+      entities: result.entities.map((e) => ({
+        path: e.path,
+        prefab: e.prefab,
+        at: e.at,
+        rot: e.rot,
+        scale: e.scale,
+        ...e.name !== void 0 ? { name: e.name } : {},
+        tags: e.tags,
+        blocks: plain(e.blocks),
+        source: where(e.source)
+      })),
+      rules: result.rules.map((r) => ({ path: r.path, on: r.on, a: r.a, b: r.b, seconds: r.seconds, do: "[function]", source: where(r.source) })),
+      stage: result.stage ? { ...plain({ ...result.stage, source: void 0 }), source: where(result.stage.source) } : null
+    };
+  }
+  var isVec32 = (v) => Array.isArray(v) && v.length === 3 && v.every((n2) => typeof n2 === "number" && Number.isFinite(n2));
+  function mergePatches(...layers) {
+    let out;
+    for (const layer of layers) {
+      if (!layer) continue;
+      out ?? (out = {});
+      for (const path of Object.keys(layer)) out[path] = out[path] ? merge(out[path], layer[path]) : clone(layer[path]);
+    }
+    return out;
+  }
+  function applyPatches(specs, patches, registry, warn) {
+    const byPath = new Map(specs.map((s) => [s.path, s]));
+    for (const path of Object.keys(patches)) {
+      if (!byPath.has(path)) warn(`补丁的路径 "${path}" 在这次挂载里不存在${similar(path, [...byPath.keys()])}`);
+    }
+    return specs.map((spec) => {
+      const patch = patches[spec.path];
+      if (!patch) return spec;
+      if (!isPlainObject2(patch)) {
+        warn(`补丁 "${spec.path}" 必须是对象`);
+        return spec;
+      }
+      const out = { ...spec, blocks: { ...spec.blocks } };
+      for (const key of Object.keys(patch)) {
+        const value = patch[key];
+        const bad = (what) => warn(`补丁 "${spec.path}" 的 ${key} ${what}`);
+        switch (key) {
+          case "at":
+          case "rot":
+            if (isVec32(value)) out[key] = [value[0], value[1], value[2]];
+            else bad("必须是 [x, y, z]");
+            continue;
+          case "scale":
+            if (typeof value === "number" && Number.isFinite(value)) out.scale = [value, value, value];
+            else if (isVec32(value)) out.scale = [value[0], value[1], value[2]];
+            else bad("必须是数或 [x, y, z]");
+            continue;
+          case "name":
+            if (typeof value === "string") out.name = value;
+            else bad("必须是字符串");
+            continue;
+          case "tags":
+            if (Array.isArray(value) && value.every((t) => typeof t === "string")) out.tags = [...value];
+            else bad("必须是字符串数组");
+            continue;
+        }
+        const block = registry.block(key);
+        if (!block) {
+          warn(`补丁 "${spec.path}" 里未知的积木 ${key}${similar(key, registry.blockNames())}`);
+          continue;
+        }
+        if (value === false || value === null) {
+          delete out.blocks[key];
+          continue;
+        }
+        const over = value === true ? {} : value;
+        if (!isPlainObject2(over)) {
+          bad("必须是对象、true 或 false");
+          continue;
+        }
+        const fields = block.props ?? {};
+        const valid = {};
+        for (const field of Object.keys(over)) {
+          if (field in fields) valid[field] = over[field];
+          else warn(`补丁 "${spec.path}" 的积木 ${key} 没有字段 ${field}${similar(field, Object.keys(fields))}`);
+        }
+        out.blocks[key] = merge(out.blocks[key] ?? clone(fields), valid);
+      }
+      return out;
+    });
   }
 
   // runtime/src/world/collide.ts
@@ -8074,6 +8177,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_cmdEvents", []);
       /** 有焦点控件的单元：非空时不采样键盘与轴 */
       __publicField(this, "_captures", /* @__PURE__ */ new Set());
+      /** 挂载 id → 最近一次挂载的树与覆盖层（运行期补丁重新求值用） */
+      __publicField(this, "_inputs", /* @__PURE__ */ new Map());
+      /** 挂载 id → 最近一次求值结果（树视图用） */
+      __publicField(this, "_results", /* @__PURE__ */ new Map());
+      /** 挂载 id → 运行期补丁（pot world set），只在内存里 */
+      __publicField(this, "_patches", /* @__PURE__ */ new Map());
       this._root = ctx;
       for (const block of BUILTIN_BLOCKS) this.registry.addBlock(block);
       for (const prefab of BUILTIN_PREFABS) this.registry.addPrefab(prefab);
@@ -8250,6 +8359,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       }
     }
     // ---------------------------------------------------------------- 挂载与对比（15.6）
+    /** overrides：覆盖层（按 key 路径的属性补丁，16.7），叠在求值结果上再对比 */
     mount(tree, options = {}) {
       const unit = unitOf(this.ctx) ?? "(host)";
       const id = options.id ?? unit;
@@ -8261,11 +8371,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       for (const prefab of result.prefabs) {
         if (this.registry.prefab(prefab.prefab) !== prefab) this.ctx.effect(() => this.registry.addPrefab(prefab), `world.prefab(${prefab.prefab})`);
       }
-      const data = this.data;
-      this._diff(data, id, result.entities);
-      this._rules.set(id, result.rules);
-      if (result.stage) this._stages.set(id, result.stage);
-      else this._stages.delete(id);
+      this._inputs.set(id, { tree, overrides: options.overrides });
+      this._applyMount(id, result);
       this._detached.delete(id);
       this._mountedThisRun.add(id);
       const fiber = this.ctx.fiber;
@@ -8277,6 +8384,68 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         this._attached.delete(id);
         this._detached.add(id);
       }, `world.mount(${id})`);
+    }
+    _applyMount(id, result) {
+      const input = this._inputs.get(id);
+      const patches = mergePatches(input?.overrides, this._patches.get(id));
+      const entities = patches ? applyPatches(result.entities, patches, this.registry, (m) => this._warnOnce(`挂载 ${id}：${m}`)) : result.entities;
+      this._results.set(id, result);
+      this._diff(this.data, id, entities);
+      this._rules.set(id, result.rules);
+      if (result.stage) this._stages.set(id, result.stage);
+      else this._stages.delete(id);
+    }
+    _remount(id) {
+      const input = this._inputs.get(id);
+      if (!input) return;
+      this._applyMount(id, evaluate(input.tree, this.registry));
+    }
+    _warnOnce(message) {
+      if (this._reported.has(message)) return;
+      if (this._reported.size > 1e3) this._reported.clear();
+      this._reported.add(message);
+      this._root.logger("world").warn(message);
+    }
+    // ---------------------------------------------------------------- 开发工具（16.6、16.7）
+    /** 树视图：给了挂载 id 只返回它的，否则按挂载 id 返回全部 */
+    treeView(id) {
+      if (id !== void 0) {
+        const result = this._results.get(id);
+        if (!result) throw new Error(`没有挂载 "${id}"，现有 ${[...this._results.keys()].join("、") || "（无）"}`);
+        return treeView(result);
+      }
+      const out = {};
+      for (const [key, result] of this._results) out[key] = treeView(result);
+      return out;
+    }
+    /** World 数据的检视：tick、流程、vars、（筛选后的）实体 */
+    inspect(filter) {
+      const data = this.data;
+      return { tick: data.tick, flow: this.flow, vars: clone(data.vars), entities: this.query(filter).map((e) => clone(e)) };
+    }
+    /** 运行期补丁：按 key 路径叠加属性，立即重新挂载；冷重启后丢失 */
+    setPatch(mount, path, patch) {
+      if (!this._inputs.has(mount)) throw new Error(`没有挂载 "${mount}"，现有 ${[...this._inputs.keys()].join("、") || "（无）"}`);
+      if (typeof path !== "string" || !path) throw new Error("world set 需要 key 路径");
+      if (!isPlainObject2(patch)) throw new Error("world set 的补丁必须是对象，写法与标签属性相同");
+      const all = this._patches.get(mount) ?? {};
+      all[path] = all[path] ? merge(all[path], patch) : clone(patch);
+      this._patches.set(mount, all);
+      this._remount(mount);
+    }
+    /** 清掉运行期补丁（不给挂载 id 时清全部） */
+    clearPatches(mount) {
+      const ids = mount === void 0 ? [...this._patches.keys()] : [mount];
+      for (const id of ids) {
+        if (!this._patches.delete(id)) continue;
+        this._remount(id);
+      }
+    }
+    /** 当前的运行期补丁 */
+    patches() {
+      const out = {};
+      for (const [id, all] of this._patches) out[id] = clone(all);
+      return out;
     }
     _diff(data, id, specs) {
       var _a12;
@@ -8361,6 +8530,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
         this._rules.delete(id);
         this._stages.delete(id);
+        this._inputs.delete(id);
+        this._results.delete(id);
       }
       this._detached.clear();
     }
@@ -8521,9 +8692,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       try {
         fn();
       } catch (error) {
-        const where = source ? `${source.file}:${source.line} ` : "";
-        const message = `${where}${what} 出错：${error?.stack ?? error?.message ?? error}`;
-        const key = `${where}${what}:${error?.message ?? error}`;
+        const where2 = source ? `${source.file}:${source.line} ` : "";
+        const message = `${where2}${what} 出错：${error?.stack ?? error?.message ?? error}`;
+        const key = `${where2}${what}:${error?.message ?? error}`;
         if (this._reported.has(key)) return;
         if (this._reported.size > 1e3) this._reported.clear();
         this._reported.add(key);
@@ -9365,6 +9536,23 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
 
   // runtime/src/world/game.ts
+  function readOverrides(ctx, mount) {
+    if (!ctx.data.exists("overrides.json")) return void 0;
+    let all;
+    try {
+      all = ctx.data.load("overrides.json");
+    } catch (error) {
+      ctx.logger("world").error(error?.message ?? String(error));
+      return void 0;
+    }
+    const mine = all?.[mount];
+    if (mine === void 0) return void 0;
+    if (!mine || typeof mine !== "object" || Array.isArray(mine)) {
+      ctx.logger("world").error('data/overrides.json 的 "%s" 必须是 { key 路径: 属性补丁 }', mount);
+      return void 0;
+    }
+    return mine;
+  }
   function defineGame(def) {
     if (!def || typeof def !== "object") throw new Error("defineGame 的参数必须是对象");
     for (const key of ["scene", "ui"]) {
@@ -9394,7 +9582,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (scene) {
           const mountScene = () => {
             const s = w.flowScene;
-            w.mount(scene({ state: s.state, params: s.params, data: ctx.data }));
+            w.mount(scene({ state: s.state, params: s.params, data: ctx.data }), { overrides: readOverrides(ctx, unit) });
           };
           mountScene();
           if (flow) w.onFlowEnter(mountScene);

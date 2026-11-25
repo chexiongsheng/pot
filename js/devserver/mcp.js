@@ -16,7 +16,8 @@ const tools = [
   { name: 'pot_check', description: '在本机对游戏目录做类型检查 + 试打包（不需要 Runner）。返回错误列表', inputSchema: { type: 'object', properties: { dir: { type: 'string', description: '游戏目录绝对路径' } }, required: ['dir'] } },
   { name: 'pot_eval', description: '在 Runner 的 JS 运行时中执行代码。可用变量：runtime、ctx（根上下文）、pot。表达式直接返回值；多语句请用 return', inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] } },
   { name: 'pot_state', description: '读写 state。action: keys | get | set | reset', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['keys', 'get', 'set', 'reset'] }, key: { type: 'string' }, value: {} } } },
-  { name: 'pot_query', description: '查询运行时。what: info（总体）| objects（场景对象，可按 unit 过滤）| data（数据文件依赖）| cache | modules（源码模块依赖图）', inputSchema: { type: 'object', properties: { what: { type: 'string', enum: ['info', 'objects', 'data', 'cache', 'modules'] }, unit: { type: 'string' } } } },
+  { name: 'pot_query', description: '查询运行时。what: info（总体）| objects（场景对象，可按 unit 过滤）| data（数据文件依赖）| cache | modules（源码模块依赖图）| world（tick、流程、vars、实体；unit 作为标签或预制件筛选）| tree（场景树视图：key 路径、属性、源位置；unit 作为挂载 id）', inputSchema: { type: 'object', properties: { what: { type: 'string', enum: ['info', 'objects', 'data', 'cache', 'modules', 'world', 'tree'] }, unit: { type: 'string' } } } },
+  { name: 'pot_world', description: '运行期按 key 路径改场景属性（写法同标签属性）。action: set（path、patch）| clear | list；mount 缺省 game；save 为真时写进游戏的 data/overrides.json（覆盖层）', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['set', 'clear', 'list'] }, path: { type: 'string' }, patch: { type: 'object' }, mount: { type: 'string' }, save: { type: 'boolean' } }, required: ['action'] } },
   { name: 'pot_plugins', description: '已加载单元及其挂载点', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_leaks', description: '泄漏检查：最近一次热重载未回收的旧版本、对象数、定时器数', inputSchema: { type: 'object', properties: {} } },
   { name: 'pot_time', description: '控制游戏时间。action: get | pause | resume | step（frames）| scale（value）', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['get', 'pause', 'resume', 'step', 'scale'] }, frames: { type: 'number' }, value: { type: 'number' } } } },
@@ -35,6 +36,7 @@ async function callTool(api, name, args = {}) {
     case 'pot_eval': return api.call({ type: 'eval', code: args.code })
     case 'pot_state': return api.call({ type: 'state', ...args })
     case 'pot_query': return api.call({ type: 'query', ...args })
+    case 'pot_world': return api.call({ type: 'world', ...args })
     case 'pot_plugins': return api.call({ type: 'plugins' })
     case 'pot_leaks': return api.call({ type: 'leaks' })
     case 'pot_time': return api.call({ type: 'time', ...args })

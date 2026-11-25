@@ -16,7 +16,9 @@
  *   pot stage <游戏目录> <暂存目录>           只暂存（game/ + release.json + 图标），供 Unity 菜单 pot/Build Game 使用
  *   pot mcp [--port 7788]                   以 stdio MCP 方式暴露调试工具
  *   pot status | logs [--follow] [--level error]
- *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules] [unit]
+ *   pot eval <代码> | state [keys|get|set|reset] [key] [json] | query [info|objects|data|cache|modules|world|tree] [unit|筛选|挂载]
+ *   pot world set <key 路径> <补丁 JSON> [--mount game] [--save] | world clear [--mount game] [--save] | world list
+ *                                           运行期按 key 路径改属性；--save 写进游戏的 data/overrides.json（覆盖层）
  *   pot plugins | leaks | reload <单元...> | time [get|pause|resume|step|scale] [n]
  *   pot input axis <name> <x> <y> [frames] | input key <name> [down|up|tap] | input text <文字> | input clear
  *                                           input text 里 \n 为回车、\b 为退格
@@ -160,6 +162,13 @@ async function main() {
     case 'state': {
       const [action = 'keys', key, value] = args
       return exitBy(await api.call({ type: 'state', action, key, value: parseValue(value) }))
+    }
+    case 'world': {
+      const [action = 'list', p, patch] = args
+      const msg = { type: 'world', action, mount: flags.mount, save: !!flags.save }
+      if (action === 'set') Object.assign(msg, { path: p, patch: parseValue(patch) })
+      if (action === 'clear' && flags.save && !flags.mount) msg.mount = 'game'
+      return exitBy(await api.call(msg))
     }
     case 'query':
       return exitBy(await api.call({ type: 'query', what: args[0] ?? 'info', unit: args[1] }))

@@ -1459,8 +1459,28 @@ ${code}
           return rt.cache.stats();
         case "modules":
           return rt.plugins.loader?.info?.() ?? null;
+        case "world":
+          return toPlain(rt.root.world.inspect(msg.unit || void 0), 10);
+        case "tree":
+          return rt.root.world.treeView(msg.unit || void 0);
         default:
           throw new Error(`未知查询：${msg.what}`);
+      }
+    },
+    world(msg, rt) {
+      const w = rt.root.world;
+      switch (msg.action) {
+        case "set":
+          w.setPatch(msg.mount ?? "game", msg.path, msg.patch);
+          return w.patches();
+        case "clear":
+          w.clearPatches(msg.mount);
+          return w.patches();
+        case "list":
+        case void 0:
+          return w.patches();
+        default:
+          throw new Error(`未知 world 操作：${msg.action}`);
       }
     },
     async time(msg, rt) {

@@ -10,7 +10,7 @@ const path = require('path')
 const { WebSocketServer } = require('ws')
 
 /** 由 Runner 的 JS 运行时处理 */
-const JS_SIDE = new Set(['reload', 'changed', 'eval', 'state', 'leaks', 'plugins', 'query', 'time'])
+const JS_SIDE = new Set(['reload', 'changed', 'eval', 'state', 'leaks', 'plugins', 'query', 'time', 'world'])
 /** 由 Runner 的 C# 侧处理 */
 const RUNNER_SIDE = new Set(['open', 'restart', 'home', 'screenshot', 'input'])
 
@@ -113,8 +113,42 @@ class DevServer {
     return entry
   }
 
+  /**
+   * pot world set/clear --save：把补丁写进游戏目录的 data/overrides.json（与已有内容深合并），
+   * 由 Runner 的文件监听触发热重载。只支持本机目录打开的游戏。
+   */
+  saveOverrides(msg) {
+    const dir = this.game?.kind === 'Directory' ? this.game.dir : null
+    if (!dir || !fs.existsSync(path.join(dir, 'manifest.json'))) return { ok: false, error: '--save 只支持本机目录打开的游戏（.potg、网址打开的不能写回）' }
+    const file = path.join(dir, 'data', 'overrides.json')
+    let all = {}
+    if (fs.existsSync(file)) {
+      try { all = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (error) { return { ok: false, error: `${file} 不是合法 JSON：${error.message}` } }
+    }
+    const mount = msg.mount ?? 'game'
+    const deep = (a, b) => {
+      if (b && typeof b === 'object' && !Array.isArray(b) && a && typeof a === 'object' && !Array.isArray(a)) {
+        const out = { ...a }
+        for (const k of Object.keys(b)) out[k] = deep(a[k], b[k])
+        return out
+      }
+      return b
+    }
+    if (msg.action === 'set') {
+      if (!msg.path || !msg.patch || typeof msg.patch !== 'object') return { ok: false, error: 'world set 需要 key 路径和补丁对象' }
+      all[mount] = all[mount] ?? {}
+      all[mount][msg.path] = deep(all[mount][msg.path], msg.patch)
+    } else if (msg.action === 'clear') {
+      delete all[mount]
+    } else return { ok: false, error: `未知 world 操作：${msg.action}` }
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(all, null, 2) + '\n', 'utf8')
+    return { ok: true, data: { file, overrides: all[mount] ?? {} } }
+  }
+
   /** 向 Runner 发命令并等待结果 */
   call(msg, timeout = 30000) {
+    if (msg.type === 'world' && msg.save) return Promise.resolve(this.saveOverrides(msg))
     if (!this.runner || this.runner.readyState !== 1) {
       return Promise.resolve({ ok: false, error: 'Runner 未连接。请启动 Runner，在 F1 面板中把 Dev Server 地址设为 ws://<本机IP>:' + this.port + '/runner' })
     }

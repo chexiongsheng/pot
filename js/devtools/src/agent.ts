@@ -188,7 +188,19 @@ const handlers: Record<string, Handler> = {
       case 'data': return rt.data.dependencies()
       case 'cache': return rt.cache.stats()
       case 'modules': return (rt.plugins.loader as any)?.info?.() ?? null
+      case 'world': return toPlain(rt.root.world.inspect(msg.unit || undefined), 10)
+      case 'tree': return rt.root.world.treeView(msg.unit || undefined)
       default: throw new Error(`未知查询：${msg.what}`)
+    }
+  },
+
+  world(msg, rt) {
+    const w = rt.root.world
+    switch (msg.action) {
+      case 'set': w.setPatch(msg.mount ?? 'game', msg.path, msg.patch); return w.patches()
+      case 'clear': w.clearPatches(msg.mount); return w.patches()
+      case 'list': case undefined: return w.patches()
+      default: throw new Error(`未知 world 操作：${msg.action}`)
     }
   },
 
