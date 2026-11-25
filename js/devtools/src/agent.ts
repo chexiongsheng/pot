@@ -192,12 +192,19 @@ const handlers: Record<string, Handler> = {
     }
   },
 
-  time(msg, rt) {
+  async time(msg, rt) {
     const clock = rt.clock
     switch (msg.action) {
       case 'pause': clock.pause(); break
       case 'resume': clock.resume(); break
-      case 'step': clock.step(msg.frames ?? 1); break
+      case 'step': {
+        // 等步进完成再回复，调用方随后读 state 或松开输入不会抢在中间
+        const start = clock.frame
+        clock.step(msg.frames ?? 1)
+        for (let guard = 0; clock.pendingSteps > 0 && clock.paused && guard < 100000; guard++) await clock.waitFrames(1)
+        if (clock.frame - start < (msg.frames ?? 1) && clock.pendingSteps > 0) throw new Error('time step 未完成（时钟被冻结？）')
+        break
+      }
       case 'scale': clock.scale = Number(msg.value ?? 1); break
       case undefined: case 'get': break
       default: throw new Error(`未知 time 操作：${msg.action}`)

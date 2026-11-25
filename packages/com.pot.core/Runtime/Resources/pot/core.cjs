@@ -2012,10 +2012,14 @@ var pot = (() => {
       this._paused = false;
       this._steps = 0;
     }
-    /** 暂停状态下推进 n 个游戏帧 */
+    /** 暂停状态下推进 n 个游戏帧；每帧恰好一个固定步（fixedStep 秒），与宿主帧率无关 */
     step(frames = 1) {
       this._paused = true;
       this._steps += Math.max(1, frames | 0);
+    }
+    /** step 还没推进完的帧数 */
+    get pendingSteps() {
+      return this._steps;
     }
     /** 宿主每帧调用 */
     tick(dt) {
@@ -2026,11 +2030,15 @@ var pot = (() => {
         for (const waiter of due) waiter.resolve();
       }
       if (this._freeze > 0) return;
+      let scaled;
       if (this._paused) {
         if (this._steps <= 0) return;
         this._steps--;
+        scaled = this.fixedStep > 0 ? this.fixedStep : 1 / 60;
+        this._fixedAcc = 0;
+      } else {
+        scaled = Math.max(0, dt) * this.scale;
       }
-      const scaled = Math.max(0, dt) * this.scale;
       this.time += scaled;
       this.frame++;
       this._runDue();
@@ -7387,10 +7395,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             this._guard(`积木 ${def.name}.view.enter`, () => {
               const out = def.view.enter(me, e, ctx, w);
               const list = out === void 0 || out === null ? [] : Array.isArray(out) ? out : [out];
+              const unit = w.unitOfMount(e.mount);
               for (const obj of list) {
                 if (!(obj instanceof Entity)) continue;
                 created.objs.push(obj);
                 created.scales.push(obj.scale);
+                this._label(obj.id, unit);
               }
             });
           }
@@ -7410,6 +7420,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         }
       }
       this._sync();
+    }
+    /** 改记场景对象的展示归属 */
+    _label(id, unit) {
+      const info = this._root.scene.objects.get(id);
+      if (info) info.unit = unit;
     }
     _exit(rec, e) {
       const exit = rec.def.view?.exit;
@@ -7491,6 +7506,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (sun) {
           this._guard("<stage sun>", () => {
             this._sun = scene.light({ type: "directional", name: "sun", rotation: sun.rot, intensity: sun.intensity, color: sun.color });
+            this._label(this._sun.id, this._world.stageUnit);
           });
         }
       }
@@ -7679,6 +7695,17 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
     get vars() {
       return this.data.vars;
+    }
+    /** 挂载 id 对应的单元（展示用）；w.spawn 生成的实体没有挂载，记为 (world) */
+    unitOfMount(mount) {
+      if (mount === null) return "(world)";
+      return this._attached.get(mount)?.unit ?? mount;
+    }
+    /** 当前生效的 stage 来自哪个单元（展示用） */
+    get stageUnit() {
+      let last = null;
+      for (const id of this._stages.keys()) last = id;
+      return last === null ? "(world)" : this.unitOfMount(last);
     }
     /** 当前生效的 stage（多个挂载都给了时取最后挂载的） */
     get stage() {

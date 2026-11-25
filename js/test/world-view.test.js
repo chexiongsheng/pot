@@ -47,13 +47,14 @@ test('欧拉角换算与 Unity 的 Quaternion.Euler 一致；slerp 取短弧', (
   near(pot.slerpQuaternion([0, 0, 0, 1], [0, 0, 0, -1], 0.5), [0, 0, 0, 1], '同一旋转的两个符号')
 })
 
-test('实体出现时 enter 创建场景对象，消失时 exit 并回收；对象归 (host)', async () => {
+test('实体出现时 enter 创建场景对象，消失时 exit 并回收；对象展示为挂载所属单元，生命周期归内核', async () => {
   const { runtime, engine } = await start(game('w.mount(<><Box key="a" /><Box key="b" at={[2, 0, 0]} /></>)'))
   frames(runtime, 1)
   assert.equal(looks(engine).length, 2)
   assert.equal(world(runtime).vars.enters, 2)
   assert.equal(world(runtime).view.objectCount, 2)
-  assert.deepEqual(runtime.root.scene.list('game'), [], '不挂在调用单元上')
+  assert.equal(runtime.root.scene.list('game').length, 2, 'query objects game 能查到')
+  assert.equal(runtime.root.scene.list('(host)').length, 0)
   world(runtime).destroy(byPath(runtime, 'box:b'))
   frames(runtime, 2)
   assert.equal(looks(engine).length, 1)

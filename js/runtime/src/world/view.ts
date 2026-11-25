@@ -7,6 +7,8 @@
  *   一帧只调用一次 scene.setTransforms。
  *
  * 场景对象一律用 WorldService 构造时的 ctx 创建，不挂在调用单元上，单元重载时不会被误回收。
+ * 生命周期归内核，但 scene.objects 里的 unit 改记为实体所属挂载的单元（w.spawn 的为 (world)），
+ * 这样 pot query objects <单元> 能按单元查到；unit 只用于展示，不参与回收。
  */
 import type { Context } from 'cordis'
 import { Entity, eulerToQuaternion, slerpQuaternion } from '../scene'
@@ -104,10 +106,12 @@ export class WorldView {
           this._guard(`积木 ${def.name}.view.enter`, () => {
             const out = def.view!.enter!(me, e, ctx, w)
             const list = out === undefined || out === null ? [] : Array.isArray(out) ? out : [out]
+            const unit = w.unitOfMount(e.mount)
             for (const obj of list) {
               if (!(obj instanceof Entity)) continue
               created.objs.push(obj)
               created.scales.push(obj.scale)
+              this._label(obj.id, unit)
             }
           })
         }
@@ -129,6 +133,12 @@ export class WorldView {
     }
     // 3. 变换同步
     this._sync()
+  }
+
+  /** 改记场景对象的展示归属 */
+  private _label(id: number, unit: string) {
+    const info = this._root.scene.objects.get(id)
+    if (info) info.unit = unit
   }
 
   private _exit(rec: BlockView, e: EntityData) {
@@ -217,6 +227,7 @@ export class WorldView {
       if (sun) {
         this._guard('<stage sun>', () => {
           this._sun = scene.light({ type: 'directional', name: 'sun', rotation: sun.rot as any, intensity: sun.intensity, color: sun.color })
+          this._label(this._sun.id, this._world.stageUnit)
         })
       }
     }

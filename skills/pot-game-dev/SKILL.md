@@ -36,7 +36,7 @@ node <pot>/js/devserver/cli.js open games/<game>   # 让 Runner 打开游戏（�
 1. `pot check games/<game>`：tsc 类型检查 + 试打包，Runner 运行前发现类型错误和缺失的单元。
 2. `pot status`：看 `game`（当前游戏和状态）与 `lastReload`（ok、phase、rolledBack、error、paths、mounted、leaks）。
 3. `pot logs --since <sn>`：增量读日志，报错栈第一行是 `src/...ts:行:列`。
-4. 需要时验证行为：`pot input axis move 1 0 30`、`pot time step 10`、`pot state get player`、`pot query objects player`、`pot eval "<js>"`、`pot screenshot out.png`。
+4. 需要时验证行为：`pot input axis move 1 0 30`、`pot time step 10`（暂停并推进 10 个固定步，每步 `fixedStep` 秒、与 Runner 帧率无关，推进完才返回，结果可复现）、`pot state get player`、`pot query objects player`、`pot eval "<js>"`、`pot screenshot out.png`。
 5. 需要“新开一局”时 `pot restart --reset`；只想冷重启保留 state 用 `pot restart`。切换游戏用 `pot open <目录>`。
 
 启动时就失败的单元（如语法错误）修好后保存即可自动挂载，不需要重启。

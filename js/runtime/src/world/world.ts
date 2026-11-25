@@ -199,6 +199,19 @@ export class WorldService extends Service {
     return this.data.vars
   }
 
+  /** 挂载 id 对应的单元（展示用）；w.spawn 生成的实体没有挂载，记为 (world) */
+  unitOfMount(mount: string | null): string {
+    if (mount === null) return '(world)'
+    return this._attached.get(mount)?.unit ?? mount
+  }
+
+  /** 当前生效的 stage 来自哪个单元（展示用） */
+  get stageUnit(): string {
+    let last: string | null = null
+    for (const id of this._stages.keys()) last = id
+    return last === null ? '(world)' : this.unitOfMount(last)
+  }
+
   /** 当前生效的 stage（多个挂载都给了时取最后挂载的） */
   get stage(): StageSpec | null {
     let last: StageSpec | null = null

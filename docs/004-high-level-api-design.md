@@ -1007,7 +1007,7 @@ interface Cmd {
 实施时补充的约定（M1）：
 
 - 表现由 `WorldService` 自己的 `update` 处理器驱动（先清扫，再表现）。`WorldService` 装在 `PluginsService` 之前，它的处理器先于游戏单元的 `update`，所以自然在 `ui` 之前。
-- `view.enter`、`update`、`exit` 收到的 `ctx` 是 `WorldService` 构造时的 ctx，用它 `scene.spawn` 的对象归 `(host)`；实体消失或积木定义被替换时，`exit` 之后由内核逐个 `destroy`。积木定义没变（例如只改了 `game.tsx`，积木在别的模块里）时对象保留，不重建。
+- `view.enter`、`update`、`exit` 收到的 `ctx` 是 `WorldService` 构造时的 ctx，用它 `scene.spawn` 的对象生命周期归内核，不随单元回收；`scene.objects` 里的展示归属改记为实体所属挂载的单元（`w.spawn` 的实体记为 `(world)`，平行光记为给出 `stage` 的单元），`pot query objects game` 能查到；实体消失或积木定义被替换时，`exit` 之后由内核逐个 `destroy`。积木定义没变（例如只改了 `game.tsx`，积木在别的模块里）时对象保留，不重建。
 - 跟随实体的对象位置与实体位置相同，不保留创建时的位置偏移；需要偏移的效果在 `view.update` 里自己摆放、不要从 `enter` 返回。
 - `sun` 写成对象时缺省 `rot: [50, -30, 0]`、`intensity: 1`、`color: '#ffffff'`；`stage` 去掉 `sun`（或整个 `stage`）时平行光销毁，背景与相机保持最后一次的值。`camera` 的 `at`、`look` 任一变化时两者一起重新应用（`lookAt` 依赖位置）。
 - 欧拉角换算新增在 `scene.ts`：`eulerToQuaternion`（`q = qY * qX * qZ`，即 Unity 的 `Quaternion.Euler`）与 `slerpQuaternion`（取短弧）。

@@ -1463,7 +1463,7 @@ ${code}
           throw new Error(`未知查询：${msg.what}`);
       }
     },
-    time(msg, rt) {
+    async time(msg, rt) {
       const clock = rt.clock;
       switch (msg.action) {
         case "pause":
@@ -1472,9 +1472,13 @@ ${code}
         case "resume":
           clock.resume();
           break;
-        case "step":
+        case "step": {
+          const start = clock.frame;
           clock.step(msg.frames ?? 1);
+          for (let guard = 0; clock.pendingSteps > 0 && clock.paused && guard < 1e5; guard++) await clock.waitFrames(1);
+          if (clock.frame - start < (msg.frames ?? 1) && clock.pendingSteps > 0) throw new Error("time step 未完成（时钟被冻结？）");
           break;
+        }
         case "scale":
           clock.scale = Number(msg.value ?? 1);
           break;

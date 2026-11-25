@@ -1,7 +1,7 @@
 /**
  * clock：游戏时间。宿主每帧调用 tick(dt)。
  * - freeze()/计数：热重载事务期间冻结，游戏时间与 update 都停住，宿主帧计数照常
- * - pause()/resume()/step(n)：给开发工具与游戏暂停用
+ * - pause()/resume()/step(n)：给开发工具与游戏暂停用。step 的每帧固定推进 fixedStep（不看宿主 dt 与 scale），结果可复现
  * - scale：时间缩放
  * - fixed-update：固定步长事件（fixedStep，默认 1/60 秒），在 update 之前触发，低帧率时一帧补多步
  * - waitFrames(n)：按宿主帧计数（冻结时也走），用于“等 GC 生效”等场景
@@ -92,10 +92,15 @@ export class ClockService extends Service {
     this._steps = 0
   }
 
-  /** 暂停状态下推进 n 个游戏帧 */
+  /** 暂停状态下推进 n 个游戏帧；每帧恰好一个固定步（fixedStep 秒），与宿主帧率无关 */
   step(frames = 1) {
     this._paused = true
     this._steps += Math.max(1, frames | 0)
+  }
+
+  /** step 还没推进完的帧数 */
+  get pendingSteps() {
+    return this._steps
   }
 
   /** 宿主每帧调用 */
@@ -107,11 +112,16 @@ export class ClockService extends Service {
       for (const waiter of due) waiter.resolve()
     }
     if (this._freeze > 0) return
+    let scaled: number
     if (this._paused) {
       if (this._steps <= 0) return
       this._steps--
+      // 单步：固定推进一个固定步，并把未满一步的余量清掉，保证恰好触发一次 fixed-update
+      scaled = this.fixedStep > 0 ? this.fixedStep : 1 / 60
+      this._fixedAcc = 0
+    } else {
+      scaled = Math.max(0, dt) * this.scale
     }
-    const scaled = Math.max(0, dt) * this.scale
     this.time += scaled
     this.frame++
     this._runDue()
