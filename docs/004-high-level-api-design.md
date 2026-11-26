@@ -2062,3 +2062,12 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - `kits.json` 收录 `.vert`、`.frag`、`.glsl`；`buildRelease` 用 esbuild 的 metafile 统计实际引入的套件，返回 `kits` 与 `kitResources`。
 - 测试 `kit-resources.test.js`：读取与 include、副本优先、两种路径的热重载、路径校验、build 与 eject。
 
+第 3 步（资产搬家）：
+
+- 52 个文件用 `git mv` 移走：realistic 收 17 个模块、`orig/port.ts`、`vendor/three-geo` 与 21 个着色器（含 `post/`）；harbor 收 `level`、`origlevel`、`physics` 与 `lamp`、`gull` 着色器；mech 收 `gull`、`hound`、`models` 与 `gullcone.frag`。游戏的 `src/lib` 只剩 `types`、`bus`、`rating`、`palette`，`src/vendor` 与 `data/shaders` 已删除。
+- import 由脚本按旧位置解析再映射：同一套件内用相对路径，跨套件与游戏里一律 `@pot/kit/<套件>/<模块>`；着色器路径改成 `@pot/kit/<套件>/shaders/…`。
+- 为满足 19.2 的依赖方向做了三处拆分：渲染层常量 `LEVEL_LAYER`、`ENEMY_LAYER`、`VIEW_LAYER` 移到 `realistic/layers`（harbor/level 转出）；右手系到 Unity 的转换 `toUnityPos`、`toUnityTransform`、`writeUnityTRS`、`hdr` 移到 `realistic/three-unity`（harbor/origlevel 转出）；`decals.surfaceAt(boxes, point)` 由调用方传关卡碰撞盒。这样 mech 只依赖 realistic 与 fps，`EnemyType` 也由 mech 自己定义，套件不再引用游戏文件。
+- harbor、mech 有了 `index.ts`（`requires` 分别为 `[realistic]`、`[fps, realistic]`），积木留到第 5 步以后再登记。
+- 验收：`npm test` 277/278（仅 pot_gfx 一致性），玩家金标准与敌人回归不变；`pot check`、`pot test` 通过；`pot build` 引入 fps、harbor、mech、realistic 四个套件、复制 26 个套件资源；Runner 实机开局画面与迁移前一致（`shots/m35s3-play.png`），无新错误。
+- 技术债：`orig/port.ts` 是原版整段关卡代码（约 305KB），先放 realistic，第 8 步按场景与通用部分再拆；音效名仍是 `saltline.<名字>`；`palette` 暂留游戏，第 9 步随界面处理；`kits.json` 从约 28KB 涨到约 900KB（port 与 three-geo 占大头），它随 com.pot.core 进每个发布包，第 10 步要让发布包只带用到的套件或干脆不带 `kits.json`（发布构建本来就把套件代码打进 bundle）。
+

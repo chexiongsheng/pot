@@ -1,17 +1,17 @@
 /** 场景：关卡几何与 PBR 表面、喷字贴花、黄昏光照与天气、画质档位、中继模型、撤离点信标、环境声 */
 import type { Context, Entity, MaterialOptions, Texture, Vec3 } from '@pot/core'
-import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '../lib/level'
-import { createApron } from '../lib/apron'
-import { createSea } from '../lib/sea'
-import { createRain } from '../lib/rain'
-import { rng } from '../lib/math'
-import { createMats, MATS, type Mat, type Mats } from '../lib/mats'
-import { toMesh } from '../lib/geo'
-import { emissiveMaterial, gullMesh, hdr, lampAttributes, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '../lib/origlevel'
-import { registerSfx, sfx } from '../lib/sfx'
-import { createPost } from '../lib/post'
+import { buildLevel, LEVEL_LAYER, levelPoints, P, VIEW_LAYER, type LevelData, type Piece } from '@pot/kit/harbor/level'
+import { createApron } from '@pot/kit/realistic/apron'
+import { createSea } from '@pot/kit/realistic/sea'
+import { createRain } from '@pot/kit/realistic/rain'
+import { rng } from '@pot/kit/realistic/math'
+import { createMats, MATS, type Mat, type Mats } from '@pot/kit/realistic/mats'
+import { toMesh } from '@pot/kit/realistic/geo'
+import { emissiveMaterial, gullMesh, hdr, lampAttributes, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from '@pot/kit/harbor/origlevel'
+import { registerSfx, sfx } from '@pot/kit/realistic/sfx'
+import { createPost } from '@pot/kit/realistic/post'
 import { on } from '../lib/bus'
-import * as T from '../lib/textures'
+import * as T from '@pot/kit/realistic/textures'
 import { game } from '../lib/types'
 
 export const name = 'world'
@@ -240,7 +240,7 @@ export async function apply(ctx: Context) {
   const dynamic: { mesh: any; ent: Entity; last: number[]; token: MatToken; version: number }[] = []
   // 闪灯与海鸥的顶点动画（原版 onBeforeCompile 注入）用 ctx.gfx 自定义着色器 + 自定义顶点属性实现
   const lampShader = ctx.gfx.supported
-    ? ctx.gfx.shader({ vertex: 'shaders/lamp.vert', fragment: 'shaders/lamp.frag', name: 'saltline/lamp', attributes: { blink: 'vec3', aLamp: 'vec3' } })
+    ? ctx.gfx.shader({ vertex: '@pot/kit/harbor/shaders/lamp.vert', fragment: '@pot/kit/harbor/shaders/lamp.frag', name: 'saltline/lamp', attributes: { blink: 'vec3', aLamp: 'vec3' } })
     : undefined
   for (let k = 0; k < orig.dynamics.length; k++) {
     const d = orig.dynamics[k]
@@ -265,7 +265,7 @@ export async function apply(ctx: Context) {
   }
   if (ctx.gfx.supported) {
     scene.mesh('saltline/gulls', () => gullMesh(), meshKey)
-    const gullShader = ctx.gfx.shader({ vertex: 'shaders/gull.vert', fragment: 'shaders/gull.frag', name: 'saltline/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
+    const gullShader = ctx.gfx.shader({ vertex: '@pot/kit/harbor/shaders/gull.vert', fragment: '@pot/kit/harbor/shaders/gull.frag', name: 'saltline/gull', attributes: { aOrbit: 'vec4', aPar: 'vec4' } })
     scene.spawn({ shape: 'mesh:saltline/gulls', name: 'gulls', position: [0, 0, 0], collider: false })
       .shader(gullShader, { cull: 'none', frustumCull: false, shadows: false, sceneDepth: false, uniforms: { uColor: [0.2, 0.21, 0.23] } })
   }

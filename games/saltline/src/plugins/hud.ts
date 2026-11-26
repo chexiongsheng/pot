@@ -1,10 +1,10 @@
 /** HUD：指南针、任务目标、生命、弹药、准星与命中标记、击杀信息、无线电字幕、敌情警告、交互环、受伤暗角、渐黑 */
 import type { Context } from '@pot/core'
 import { emit, on } from '../lib/bus'
-import { levelPoints, type LevelData } from '../lib/level'
-import { angleDelta, clamp, formatTime, sub, yawOf } from '../lib/math'
+import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { angleDelta, clamp, formatTime, sub, yawOf } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
-import { sfx } from '../lib/sfx'
+import { sfx } from '@pot/kit/realistic/sfx'
 import { foes, game, player, weapon } from '../lib/types'
 
 export const name = 'hud'

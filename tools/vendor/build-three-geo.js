@@ -1,5 +1,5 @@
 // 把 three.js 的纯几何子集打成单个 CommonJS 文件，放进游戏包（游戏只能 require 相对路径文件）。
-// 用法：node tools/vendor/build-three-geo.js games/saltline/src/vendor/three-geo.js
+// 用法：node tools/vendor/build-three-geo.js kits/realistic/vendor/three-geo.js
 const path = require('path')
 const fs = require('fs')
 const esbuild = require(path.join(__dirname, '../../js/node_modules/esbuild'))

@@ -4,7 +4,7 @@
  * 原版坐标 (x, y, z) → Unity (x, y, -z)；绕 Y 的旋转（弧度）→ 取反后转为角度。
  */
 import type { MaterialOptions, Shape, Vec3 } from '@pot/core'
-import { DEG } from './math'
+import { DEG } from '@pot/kit/realistic/math'
 
 export interface LevelData {
   palette: Record<string, string>
@@ -55,10 +55,7 @@ export interface Box {
   max: Vec3
 }
 
-export const LEVEL_LAYER = 8
-export const ENEMY_LAYER = 9
-/** 第一人称枪模层（不进平面反射） */
-export const VIEW_LAYER = 10
+export { LEVEL_LAYER, ENEMY_LAYER, VIEW_LAYER } from '@pot/kit/realistic/layers'
 
 /** 原版坐标 → Unity */
 export const P = (x: number, y: number, z: number): Vec3 => [x, y, -z]

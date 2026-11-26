@@ -3,11 +3,11 @@
  * 机械飞鸥（四旋翼无人机）：原版 xm/FC/j_（模型）与 Q_ 中外观相关部分（姿态、旋翼、频闪灯、云台、镜头、坠毁翻滚）的机械移植。
  * 与猎犬相同：原版 SkinnedMesh 每顶点 1 根骨骼，这里按骨骼拆成刚体，Three.js 坐标里搭 Object3D 层级，每帧把骨骼世界矩阵写到 Runner 实体。
  */
-import { Vector2, Vector3, Object3D, LatheGeometry, CylinderGeometry, TorusGeometry, BufferGeometry, Float32BufferAttribute } from '../vendor/three-geo'
-import { Fn } from './orig/port'
-import { toMesh, moduleStamp } from './geo'
-import { ENEMY_LAYER } from './level'
-import { hdr, writeUnityTRS } from './origlevel'
+import { Vector2, Vector3, Object3D, LatheGeometry, CylinderGeometry, TorusGeometry, BufferGeometry, Float32BufferAttribute } from '@pot/kit/realistic/vendor/three-geo'
+import { Fn } from '@pot/kit/realistic/orig/port'
+import { toMesh, moduleStamp } from '@pot/kit/realistic/geo'
+import { ENEMY_LAYER } from '@pot/kit/realistic/layers'
+import { hdr, writeUnityTRS } from '@pot/kit/realistic/three-unity'
 import { Rig, Ss, vm, Ts, s0, ga, Of, As, Yn, an, va, ft, Ce, ds, Ro, Si, su, Ur, Yv, slotMaterial } from './hound'
 
 const Ci = TorusGeometry
@@ -220,7 +220,7 @@ export function buildGull(ctx, name: string, mats?: any) {
   const def = gullDef()
   let cone = null
   if (ctx.gfx?.supported) {
-    const sh = ctx.gfx.shader({ fragment: 'shaders/gullcone.frag', name: 'saltline/gull-cone' })
+    const sh = ctx.gfx.shader({ fragment: '@pot/kit/mech/shaders/gullcone.frag', name: 'saltline/gull-cone' })
     if (sh.ok !== false) cone = sh
   }
   if (!registered.has(ctx)) {

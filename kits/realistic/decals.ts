@@ -9,7 +9,6 @@
  */
 import type { Context, Entity, Vec3 } from '@pot/core'
 import * as port from './orig/port'
-import { origLevel } from './origlevel'
 
 export type DecalKind = 'bullet_metal' | 'bullet_concrete' | 'bullet_wood' | 'scorch' | 'soot' | 'bullet_glass'
 
@@ -222,10 +221,13 @@ function frameUV(frame: number, cell = 256): [number, number, number, number] {
   return [(M + b) / DL, 1 - (E + 1 - b) / XV, (M + 1 - b) / DL, 1 - (E + b) / XV]
 }
 
-/** 命中点所在原版碰撞盒的材质（最小的包含盒；找不到按混凝土） */
-export function surfaceAt(point: Vec3, eps = 0.06): string {
+/** 带表面材质的碰撞盒（关卡提供） */
+export interface SurfaceBox { min: Vec3; max: Vec3; surface: string; playerOnly?: boolean }
+
+/** 命中点所在碰撞盒的材质（最小的包含盒；找不到按混凝土） */
+export function surfaceAt(boxes: readonly SurfaceBox[], point: Vec3, eps = 0.06): string {
   let best = 'concrete', vol = Infinity
-  for (const b of origLevel().boxes) {
+  for (const b of boxes) {
     if (b.playerOnly) continue
     if (point[0] < b.min[0] - eps || point[0] > b.max[0] + eps || point[1] < b.min[1] - eps || point[1] > b.max[1] + eps || point[2] < b.min[2] - eps || point[2] > b.max[2] + eps) continue
     const v = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2])
@@ -268,7 +270,7 @@ export function createDecals(ctx: Context, cap = 160): Decals | undefined {
   const MESH = 'saltline/decals'
   const upload = () => scene.mesh(MESH, { positions, normals, uvs: uv, colors, indices, tangents })
   upload()
-  const shader = gfx.shader({ fragment: 'shaders/decal.frag', name: 'saltline/decal' })
+  const shader = gfx.shader({ fragment: '@pot/kit/realistic/shaders/decal.frag', name: 'saltline/decal' })
   const ent: Entity = scene.spawn({ shape: `mesh:${MESH}`, name: 'fx_decals', position: [0, 0, 0], collider: false })
     .shader(shader, { queue: 'transparent', blend: 'alpha', cull: 'none', depthWrite: false, shadows: false, frustumCull: false, polygonOffset: [-4, -4], uniforms: { uMap: map, uOrm: orm, uNrm: nrm } })
   ent.active(false)

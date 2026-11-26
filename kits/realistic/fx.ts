@@ -313,8 +313,8 @@ export function createFx(ctx: Context, opts: { mask?: number } = {}): Fx | undef
 
   const LIT_CAP = 1400, ADD_CAP = 3200 - 160
   const attributes = { aAxis: 'vec4', aCol: 'vec4', aMisc: 'vec4' } as const
-  const litShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_lit.frag', name: 'saltline/fx-lit', attributes })
-  const addShader = gfx.shader({ vertex: 'shaders/fx.vert', fragment: 'shaders/fx_add.frag', name: 'saltline/fx-add', attributes })
+  const litShader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/fx.vert', fragment: '@pot/kit/realistic/shaders/fx_lit.frag', name: 'saltline/fx-lit', attributes })
+  const addShader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/fx.vert', fragment: '@pot/kit/realistic/shaders/fx_add.frag', name: 'saltline/fx-add', attributes })
   const common = { queue: 'transparent', cull: 'none', depthWrite: false, shadows: false, frustumCull: false }
   const r = createBatch(ctx, 'lit', LIT_CAP, litShader, {
     ...common, blend: 'premultiplied',

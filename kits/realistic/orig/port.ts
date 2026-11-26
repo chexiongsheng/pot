@@ -5,7 +5,7 @@
  * 原版行号：17182–17378（建模辅助）、19796–22547（道具库与关卡）、22549–23489（远景）。
  * 适配层（材质、物理、场景图展平、输出给 Runner）见 ../origlevel.ts。
  */
-import * as lt from '../../vendor/three-geo'
+import * as lt from '../vendor/three-geo'
 
 const {
   Vector2: Ae, Vector3: W, Matrix4: Ye, Quaternion: Lt, Euler: In, Color: Ve, Box3: $n, MathUtils: bs,

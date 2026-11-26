@@ -1,7 +1,7 @@
 /** 关卡碰撞：把关卡的碰撞盒挂成带 body 的静态实体（层 default、playerWall、bullet），供 w.move、w.raycast 使用 */
 import type { Context } from '@pot/core'
-import { levelBoxes } from '../lib/physics'
-import type { LevelData } from '../lib/level'
+import { levelBoxes } from '@pot/kit/harbor/physics'
+import type { LevelData } from '@pot/kit/harbor/level'
 
 export const name = 'collision'
 

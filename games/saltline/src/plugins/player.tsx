@@ -2,9 +2,9 @@
 import { defineBlock, defineGame, type Context } from '@pot/core'
 import fps, { damage } from '@pot/kit/fps'
 import { on, emit } from '../lib/bus'
-import { levelBoxes } from '../lib/physics'
-import { levelPoints, type LevelData } from '../lib/level'
-import { sfx } from '../lib/sfx'
+import { levelBoxes } from '@pot/kit/harbor/physics'
+import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { sfx } from '@pot/kit/realistic/sfx'
 import { game, playerEntity, weapon } from '../lib/types'
 
 export const name = 'player'

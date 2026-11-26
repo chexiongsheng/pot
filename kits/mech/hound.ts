@@ -6,11 +6,11 @@
  * 外观按材质槽合成蒙皮网格（每顶点绑一根骨骼），一只猎犬 4 个渲染器，而不是每个"骨骼×槽"一个。
  * 坐标为原版右手系（模型朝 +Z），几何经 geo.toMesh() 翻转。
  */
-import { Vector3, Matrix4, Quaternion, SphereGeometry, TorusGeometry, Object3D, BufferAttribute } from '../vendor/three-geo'
-import { Wi, ot, Fn, Dc, sa } from './orig/port'
-import { toMesh, skinMesh, moduleStamp } from './geo'
-import { ENEMY_LAYER } from './level'
-import { hdr, writeUnityTRS } from './origlevel'
+import { Vector3, Matrix4, Quaternion, SphereGeometry, TorusGeometry, Object3D, BufferAttribute } from '@pot/kit/realistic/vendor/three-geo'
+import { Wi, ot, Fn, Dc, sa } from '@pot/kit/realistic/orig/port'
+import { toMesh, skinMesh, moduleStamp } from '@pot/kit/realistic/geo'
+import { ENEMY_LAYER } from '@pot/kit/realistic/layers'
+import { hdr, writeUnityTRS } from '@pot/kit/realistic/three-unity'
 
 const W = Vector3, Ye = Matrix4, Lt = Quaternion, ls = SphereGeometry, Ci = TorusGeometry
 

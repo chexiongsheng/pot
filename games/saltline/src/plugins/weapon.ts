@@ -1,20 +1,20 @@
 /** 武器 PAC-9：射线射击、扩散、后坐力、换弹、瞄准、枪模（含双手、刻字）、曳光与命中火花 */
 import type { Context, Entity, MaterialOptions, StandardMaterial, Vec3 } from '@pot/core'
 import { emit, on, type BulletHit } from '../lib/bus'
-import { isPuddle } from '../lib/apron'
-import { createPac9Materials, wetness } from '../lib/pac9-mats'
-import { createDecals, decalFor, surfaceAt } from '../lib/decals'
-import { createFx } from '../lib/fx'
-import { origLevel } from '../lib/origlevel'
-import { linearColor, toMesh, type RGB } from '../lib/geo'
-import { buildPac9, PAC9 } from '../lib/gun'
-import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from '../lib/hands'
-import { ENEMY_LAYER, LEVEL_LAYER, VIEW_LAYER } from '../lib/level'
-import { clamp, damp, forward, jitter, lerp } from '../lib/math'
-import { sfx } from '../lib/sfx'
-import * as Tex from '../lib/textures'
+import { isPuddle } from '@pot/kit/realistic/apron'
+import { createPac9Materials, wetness } from '@pot/kit/realistic/pac9-mats'
+import { createDecals, decalFor, surfaceAt } from '@pot/kit/realistic/decals'
+import { createFx } from '@pot/kit/realistic/fx'
+import { origLevel } from '@pot/kit/harbor/origlevel'
+import { linearColor, toMesh, type RGB } from '@pot/kit/realistic/geo'
+import { buildPac9, PAC9 } from '@pot/kit/realistic/gun'
+import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from '@pot/kit/realistic/hands'
+import { ENEMY_LAYER, LEVEL_LAYER, VIEW_LAYER } from '@pot/kit/realistic/layers'
+import { clamp, damp, forward, jitter, lerp } from '@pot/kit/realistic/math'
+import { sfx } from '@pot/kit/realistic/sfx'
+import * as Tex from '@pot/kit/realistic/textures'
 import { game, player, WEAPON, eyeOf, type WeaponState } from '../lib/types'
-import { Quaternion, Vector3 } from '../vendor/three-geo'
+import { Quaternion, Vector3 } from '@pot/kit/realistic/vendor/three-geo'
 
 export const name = 'weapon'
 
@@ -92,7 +92,7 @@ export function apply(ctx: Context) {
   }
   /** 原版 impact 的表面判定：碰撞盒材质；朝上、贴地且落在积水遮罩里的命中按水面处理 */
   const surfaceOf = (pt: Vec3, n: Vec3, preset?: string) => {
-    const s = preset ?? surfaceAt(pt)
+    const s = preset ?? surfaceAt(origLevel().boxes, pt)
     if (s !== 'water' && n[1] > 0.7 && pt[1] < 0.08 && isPuddle(pt[0], -pt[2], interior)) return 'water'
     return s
   }
@@ -211,7 +211,7 @@ export function apply(ctx: Context) {
   // 原版 N_：程序化枪口火焰（星芒、侧焰、横向喷流、核心光、枪管余热）。不支持运行时着色器的平台不画火焰，只留火光
   let flash: Entity | null = null
   if (ctx.gfx?.supported) {
-    const sh = ctx.gfx.shader({ fragment: 'shaders/muzzle.frag', name: 'saltline/muzzle' })
+    const sh = ctx.gfx.shader({ fragment: '@pot/kit/realistic/shaders/muzzle.frag', name: 'saltline/muzzle' })
     if (sh.ok !== false) {
       scene.mesh('muzzle-flash', muzzleFlashMesh)
       flash = scene.spawn({ shape: 'mesh:muzzle-flash', name: 'flash', parent: muzzle, collider: false, layer: VIEW_LAYER, active: false })

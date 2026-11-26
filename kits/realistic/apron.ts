@@ -2,7 +2,7 @@
  * 原版地面（pretty.js 23498-23830：F1/Ab/fs/SR/Rb/Cb/Ib）机械移植。
  * - Rb：CPU 生成的大尺度遮罩（r 积水高度、g 干湿、b 油污、a 磨损），覆盖 Li
  * - Cb：可平铺细节 det 与法线 nrm
- * - 着色器见 data/shaders/apron.frag（TR + AR 片段移植，光照走 <pot/lit>）
+ * - 着色器见 shaders/apron.frag（TR + AR 片段移植，光照走 <pot/lit>）
  * 坐标：遮罩与着色器都用原版 three 坐标（x, z）；Unity z = -three z，着色器里自行换算。
  * 缺口：Pb 标线贴图用 Canvas2D 绘制（Runner 无 2D 画布），暂用 level.ts 的标线几何代替。
  */
@@ -123,7 +123,7 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   const detail = tex(det), detailN = tex(nrm)
   ctx.logger('apron').info('遮罩 %d² %dms，细节 %d² %dms', maskRes, t1 - t0, detailRes, Date.now() - t1)
 
-  const shader = gfx.shader({ fragment: 'shaders/apron.frag', name: 'saltline/apron' })
+  const shader = gfx.shader({ fragment: '@pot/kit/realistic/shaders/apron.frag', name: 'saltline/apron' })
   const uniforms: Record<string, any> = {
     uRain: 0.6, uWetG: 1, uMaskRes: maskRes,
     uMask: mask, uDetail: detail, uDetailN: detailN,

@@ -178,7 +178,7 @@
 
 ## 自建粒子：把实例数据塞进普通顶点属性
 
-粒子、广告牌这类每顶点要带很多数据的效果，用 `scene.mesh` 的 `attributes` 加 `gfx.shader` 的 `attributes` 声明自定义顶点属性（最多 7 个 vec4，Float32 原样传），不要再把数据塞进 normal/uv/color：color 的 rgb 会被逐分量 sRGB→线性，HDR 颜色要放进自定义属性。参考 `games/saltline/src/lib/fx.ts` 与 `data/shaders/fx.vert`（aAxis、aCol、aMisc）。
+粒子、广告牌这类每顶点要带很多数据的效果，用 `scene.mesh` 的 `attributes` 加 `gfx.shader` 的 `attributes` 声明自定义顶点属性（最多 7 个 vec4，Float32 原样传），不要再把数据塞进 normal/uv/color：color 的 rgb 会被逐分量 sRGB→线性，HDR 颜色要放进自定义属性。参考 `kits/realistic/fx.ts` 与 `kits/realistic/shaders/fx.vert`（aAxis、aCol、aMisc）。
 
 ## 射线打地面"未命中"
 
@@ -186,11 +186,11 @@
 
 ## 积水算了涟漪法线，倒影却纹丝不动
 
-`pot_Lit` 只按法线把倒影采样点平移约 0.05·距离，细小涟漪几乎看不出。要让倒影晃动，给 `s.planarOffset` 赋屏幕 uv 偏移（原版 three 的 RR 做法：法线投到视线前方/侧方，乘 `(积水 + 0.03)/(1 + 距离·0.07)`，钳到 ±0.12）。参考 `games/saltline/data/shaders/apron.frag`。
+`pot_Lit` 只按法线把倒影采样点平移约 0.05·距离，细小涟漪几乎看不出。要让倒影晃动，给 `s.planarOffset` 赋屏幕 uv 偏移（原版 three 的 RR 做法：法线投到视线前方/侧方，乘 `(积水 + 0.03)/(1 + 距离·0.07)`，钳到 ±0.12）。参考 `kits/realistic/shaders/apron.frag`。
 
 ## 刚性多足角色传送后腿被拉直、身体悬空
 
-步态记录的是落脚点的世界坐标，实体被直接改位置（出生、复活、存档恢复、调试传送）后脚还停在旧处，IK 把腿拉到极限。每帧检查脚与机身标准落点的水平距离，超过一步长（saltline 猎犬取 1.2 m）就整体重置落脚点并清步态相位。参考 `games/saltline/src/lib/hound.ts`。
+步态记录的是落脚点的世界坐标，实体被直接改位置（出生、复活、存档恢复、调试传送）后脚还停在旧处，IK 把腿拉到极限。每帧检查脚与机身标准落点的水平距离，超过一步长（saltline 猎犬取 1.2 m）就整体重置落脚点并清步态相位。参考 `kits/mech/hound.ts`。
 
 ## 四足/车式移动横着走、倒着走
 

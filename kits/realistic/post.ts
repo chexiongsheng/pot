@@ -42,7 +42,7 @@ export interface PostFx {
 export function createPost(ctx: Context, opts: { exposure?: number; sunColor?: string } = {}): PostFx | undefined {
   if (!ctx.gfx.supported) return
   const g = POST_TUNE
-  const sh = (name: string) => ctx.gfx.shader({ fragment: `shaders/post/${name}.frag`, fullscreen: true })
+  const sh = (name: string) => ctx.gfx.shader({ fragment: `@pot/kit/realistic/shaders/post/${name}.frag`, fullscreen: true })
   const down = sh('down'), up = sh('up'), streak = sh('streak'), adapt = sh('adapt'), grade = sh('grade'), final = sh('final')
   for (const s of [down, up, streak, adapt, grade, final]) if (!s.ok) return
   // 体积光可选：着色器失败时整条链照常工作，只是没有光柱

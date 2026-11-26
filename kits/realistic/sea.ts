@@ -1,8 +1,8 @@
 /**
  * 原版海面（pretty.js kb）机械移植：
  * - 网格：近处变密的格网（x 27.5..880，z -880..880）+ 3 块远处四边形填补陆地背后
- * - 顶点：4 个 Gerstner 波（data/shaders/sea.vert）
- * - 片元：11 个波的斜率 + 细节法线、码头与船体泡沫、风区/涌浪、太阳闪光、远处雾霭（data/shaders/sea.frag）
+ * - 顶点：4 个 Gerstner 波（shaders/sea.vert）
+ * - 片元：11 个波的斜率 + 细节法线、码头与船体泡沫、风区/涌浪、太阳闪光、远处雾霭（shaders/sea.frag）
  * 细节纹理与 apron 共用（原版同一份 Cb）。
  */
 import type { Context, Texture } from '@pot/core'
@@ -49,7 +49,7 @@ export function createSea(ctx: Context, detail: { detail: Texture; detailN: Text
   const { scene, gfx } = ctx
   if (!gfx.supported) return false
   scene.mesh('saltline/sea', seaMesh())
-  const shader = gfx.shader({ vertex: 'shaders/sea.vert', fragment: 'shaders/sea.frag', name: 'saltline/sea' })
+  const shader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/sea.vert', fragment: '@pot/kit/realistic/shaders/sea.frag', name: 'saltline/sea' })
   const uniforms: Record<string, any> = {
     uDetail: detail.detail, uDetailN: detail.detailN,
     uHazeA: HORIZON_AWAY.map(v => v * 0.85), uHazeB: HORIZON.map(v => v * 0.8),

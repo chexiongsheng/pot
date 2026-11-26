@@ -1,5 +1,5 @@
 /**
- * saltline 迁移到 w.move 之前的 Collision（games/saltline/src/lib/physics.ts 的原样副本，只换了 import）。
+ * saltline 迁移到 w.move 之前的 Collision（当时 games/saltline/src/lib/physics.ts（现 kits/harbor/physics.ts）的原样副本，只换了 import）。
  * world-collide.test.js 用它验证 w.move 逐步一致；saltline 本身已不再使用。
  *
  * 轴对齐包围盒移动：按 X、Z、Y 分轴推进并回退，支持上台阶与向下吸附地面。

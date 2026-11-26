@@ -2,8 +2,9 @@
 import type { Context, Entity } from '@pot/core'
 import { buildGull, type GullModel } from './gull'
 import { buildHound, type HoundModel } from './hound'
-import type { Mats } from './mats'
-import type { EnemyType } from './types'
+import type { Mats } from '@pot/kit/realistic/mats'
+/** 机甲种类：鸥（飞行）、犬（地面） */
+export type EnemyType = 'gull' | 'hound'
 
 export interface EnemyModel {
   root: Entity

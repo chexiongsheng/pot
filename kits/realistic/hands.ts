@@ -10,7 +10,7 @@
  * 颜色常量（线性、可大于 1，与很暗的手套底色相乘）保留原名：Bv 手背 Fv 防滑垫 Lv 指节护垫 am 侧面 lm 掌面 dC 垫边
  * kf 缝线 gl 袖口织带 Df 袖口胶条 pC 拉襻 E_ 袖子 mC 臂章 gC 臂章白字。
  */
-import { BufferAttribute, BufferGeometry, Euler, Float32BufferAttribute, Matrix4, Quaternion, Vector3 } from '../vendor/three-geo'
+import { BufferAttribute, BufferGeometry, Euler, Float32BufferAttribute, Matrix4, Quaternion, Vector3 } from './vendor/three-geo'
 import { merge } from './geo'
 import { PAC9 } from './gun'
 

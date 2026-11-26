@@ -8,7 +8,7 @@
  * xr→extrudeX, qo→extrudeZ, Cn→lathe, Fi→pin, Dv→slot, fC→octRect, Fn→tube, Ii→merge
  */
 import type { MeshData } from '@pot/core'
-import { BoxGeometry, BufferAttribute, BufferGeometry, CatmullRomCurve3, Euler, ExtrudeGeometry, Float32BufferAttribute, Matrix4, Path, Shape, TubeGeometry, Vector2, Vector3, mergeGeometries } from '../vendor/three-geo'
+import { BoxGeometry, BufferAttribute, BufferGeometry, CatmullRomCurve3, Euler, ExtrudeGeometry, Float32BufferAttribute, Matrix4, Path, Shape, TubeGeometry, Vector2, Vector3, mergeGeometries } from './vendor/three-geo'
 
 export type Geo = any
 export type RGB = [number, number, number]

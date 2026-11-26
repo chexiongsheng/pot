@@ -1,9 +1,9 @@
 /** 游戏入口：挂载各单元，负责阶段状态机、标题镜头、中继交互、波次生成、撤离与评级 */
 import type { Context, Vec3 } from '@pot/core'
 import { emit, on } from '../lib/bus'
-import { levelPoints, type LevelData } from '../lib/level'
-import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '../lib/math'
-import { sfx } from '../lib/sfx'
+import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '@pot/kit/realistic/math'
+import { sfx } from '@pot/kit/realistic/sfx'
 import { foes, GAME, player, type EnemyType, type GameState, type Phase } from '../lib/types'
 
 export const name = 'game'

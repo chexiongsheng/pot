@@ -88,12 +88,12 @@ export function createRain(ctx: Context, opts: { mask: Texture; quality?: number
   const bind = { queue: 'transparent', blend: 'add', cull: 'none', depthWrite: false, shadows: false, frustumCull: false } as const
 
   scene.mesh('saltline/rain', seedQuads(drops, drips, rng))
-  const rainShader = gfx.shader({ vertex: 'shaders/rain.vert', fragment: 'shaders/rain.frag', name: 'saltline/rain' })
+  const rainShader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/rain.vert', fragment: '@pot/kit/realistic/shaders/rain.frag', name: 'saltline/rain' })
   const rainEnt: Entity = scene.spawn({ shape: 'mesh:saltline/rain', name: 'rain', position: [0, 0, 0], collider: false })
     .shader(rainShader, { ...bind, uniforms: { ...shared, uSky: sky, uRain: 0.6, uDrip: boxes.length ? 1 : 0, uVel: [-2.6, -9.4, 1.1], uBox: [26, 15, 26] } })
 
   scene.mesh('saltline/rain-splash', seedQuads(splashes, 0, rng))
-  const splashShader = gfx.shader({ vertex: 'shaders/splash.vert', fragment: 'shaders/splash.frag', name: 'saltline/rain-splash' })
+  const splashShader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/splash.vert', fragment: '@pot/kit/realistic/shaders/splash.frag', name: 'saltline/rain-splash' })
   const splashEnt: Entity = scene.spawn({ shape: 'mesh:saltline/rain-splash', name: 'rain-splash', position: [0, 0, 0], collider: false })
     .shader(splashShader, { ...bind, uniforms: { ...shared, uRain: 0.6, uMask: opts.mask, uMaskRect: [LI.x0, LI.z0, 1 / LI.size] } })
 

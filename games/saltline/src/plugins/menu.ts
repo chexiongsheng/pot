@@ -1,10 +1,10 @@
 /** 菜单：标题、暂停、阵亡、结算简报，以及设置、操作说明、项目介绍面板 */
 import type { Context } from '@pot/core'
 import { emit } from '../lib/bus'
-import { clamp, formatTime } from '../lib/math'
+import { clamp, formatTime } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
 import { rating } from '../lib/rating'
-import { sfx } from '../lib/sfx'
+import { sfx } from '@pot/kit/realistic/sfx'
 import { game, type GameState } from '../lib/types'
 
 export const name = 'menu'
