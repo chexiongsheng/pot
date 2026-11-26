@@ -285,7 +285,9 @@ export function apply(ctx: Context) {
     const hit = bulletRay(origin, dir)
     const end: Vec3 = hit ? hit.point : [origin[0] + dir[0] * W.range, origin[1] + dir[1] * W.range, origin[2] + dir[2] * W.range]
     if (hit) {
-      const r = mechHit(ctx.world, hit.id, W.damage, norm(sub(hit.point, origin)), W.weakMultiplier)
+      const part = (ctx.world as any).view.partOf(hit.id)
+      const weak = part?.tag === 'weak'
+      const r = part && mechHit(ctx.world, part.entity, W.damage * (weak ? W.weakMultiplier : 1), norm(sub(hit.point, origin)), weak)
       const info = { enemy: !!r, killed: !!r?.killed, weak: !!r?.weak }
       if (r?.killed) (ctx.world as any).emit('slKill', { kind: r.kind, weak: r.weak })
       if (info.enemy) {

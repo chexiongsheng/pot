@@ -17,8 +17,6 @@ interface Look { m: EnemyModel; dead: boolean; fired: number; hits: number; atta
 interface Fx { o: any; l?: any }
 interface Store {
   looks: Map<number, Look>
-  /** 模型部件 id → 所属实体与是否弱点（武器命中用） */
-  parts: Map<number, { id: number; weak: boolean }>
   fx: Map<number, Fx>
   mats?: Mats
   matsTried: boolean
@@ -31,7 +29,7 @@ const stores = new WeakMap<object, Store>()
 
 function store(w: any): Store {
   let S = stores.get(w)
-  if (!S) stores.set(w, (S = { looks: new Map(), parts: new Map(), fx: new Map(), matsTried: false, frame: -1, time: 0, dt: 0 }))
+  if (!S) stores.set(w, (S = { looks: new Map(), fx: new Map(), matsTried: false, frame: -1, time: 0, dt: 0 }))
   return S
 }
 
@@ -47,11 +45,6 @@ function mats(S: Store, ctx: Context) {
     }
   }
   return S.mats
-}
-
-/** 部件 id 属于哪个机甲（武器命中时查）；不是机甲部件时为 undefined */
-export function partOwner(w: any, part: number) {
-  return stores.get(w)?.parts.get(part)
 }
 
 /** 本帧的帧间隔：clock 只有 time 与 frame，按上一帧记下的值算；隔了帧（或第一帧）为 0 */
@@ -144,7 +137,8 @@ export const foeView = {
   enter(f: any, e: any, ctx: Context, w: any) {
     const S = store(w)
     const m = buildEnemy(ctx, f.kind, `${f.kind}-${e.id}`, mats(S, ctx))
-    for (const [part, weak] of m.parts) S.parts.set(part, { id: e.id, weak })
+    // 命中体登记到实体上（w.view.partOf 查，弱点 tag 为 weak），表现退出时自动注销
+    for (const [part, weak] of m.parts) w.view.bindPart(part, e.id, weak ? 'weak' : 'body')
     m.hound?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(f.yaw))
     m.gull?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(f.yaw))
     S.looks.set(e.id, { m, dead: false, fired: f.fired, hits: f.hits, attack: f.attack, smokeT: 0 })
@@ -181,7 +175,6 @@ export const foeView = {
   exit(_f: any, e: any, _objs: any, _ctx: Context, w: any) {
     const S = store(w), L = S.looks.get(e.id)
     if (!L) return
-    for (const part of L.m.parts.keys()) S.parts.delete(part)
     L.m.root.destroy()
     S.looks.delete(e.id)
   },

@@ -11,7 +11,7 @@ import { damage } from '@pot/kit/fps'
 import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, RAD, segmentDistance, sub, yawOf } from '@pot/kit/realistic/math'
 import type { EnemyType } from './models'
 import { chestOf, eyeOf, findTarget, hpOf } from './target'
-import { boltView, boomView, foeView, partOwner } from './look'
+import { boltView, boomView, foeView } from './look'
 
 type Mode = 'patrol' | 'combat' | 'search' | 'dying'
 
@@ -503,21 +503,19 @@ export interface MechHit {
 }
 
 /**
- * 子弹打中模型部件：按部件找到机甲，弱点乘 weakMul 后扣血、闪白；
- * 给了 dir（射击方向）时做受击动画、飞鸥被打退；没在交战时转入交战；血量见底时倒下。
+ * 机甲受到 n 点伤害（已含弱点倍率）：扣血、闪白；给了 dir（射击方向）时做受击动画、飞鸥被打退；
+ * 没在交战时转入交战；血量见底时倒下。target 是实体或实体 id；不是机甲或已在倒下时返回 null。
  */
-export function mechHit(w: any, part: number, dmg: number, dir?: Vec3, weakMul = 2): MechHit | null {
-  const owner = partOwner(w, part)
-  const e = owner && w.get(owner.id), f = e?.b.mechFoe
-  if (!owner || !f || f.mode === 'dying') return null
-  const n = dmg * (owner.weak ? weakMul : 1)
+export function mechHit(w: any, target: any, n: number, dir?: Vec3, weak = false): MechHit | null {
+  const e = typeof target === 'number' ? w.get(target) : target, f = e?.b?.mechFoe
+  if (!f || f.mode === 'dying') return null
   damage(w, e, n)
   f.flash = 0.08
   if (dir) {
     f.hits++
     f.hitDmg = n
     f.hitDir = [...dir] as Vec3
-    f.hitWeak = owner.weak
+    f.hitWeak = weak
     // 原版：飞鸥被打退 min(3, dmg·.09)
     if (f.kind === 'gull') {
       const k = Math.min(3, n * 0.09)
@@ -528,7 +526,18 @@ export function mechHit(w: any, part: number, dmg: number, dir?: Vec3, weakMul =
   if (t && f.mode !== 'combat') enterCombat(f, e, w, t.pos)
   const killed = !(e.b.health?.hp > 0)
   if (killed) die(f, w, dir)
-  return { entity: e, kind: f.kind, weak: owner.weak, killed, pos: [...e.pos] as Vec3, damage: n }
+  return { entity: e, kind: f.kind, weak, killed, pos: [...e.pos] as Vec3, damage: n }
+}
+
+/** fps 的 gunHit：目标是机甲时扣血，再发 mechHurt { ...MechHit, by: 射手 } */
+export function onGunHit(w: any, p: any) {
+  const r = p && mechHit(w, p.target, p.damage, p.dir, !!p.weak)
+  if (r) w.emit('mechHurt', { ...r, by: p.entity })
+}
+
+/** fps 的 gunFired：枪声惊动附近的机甲 */
+export function onGunFired(w: any, p: any) {
+  if (p?.origin) mechHear(w, p.origin)
 }
 
 /** 听到 pos 处的声响（如枪声）：听觉半径内、不在交战的机甲转去搜索 */

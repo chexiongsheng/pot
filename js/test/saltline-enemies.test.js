@@ -119,6 +119,36 @@ test('saltline 敌人：玩家死后不再开火，弹道不再伤人', async ()
   P.clear()
 })
 
+test('saltline 敌人：mech 接 fps 的 gunHit（扣血、发 mechHurt、打死倒下）与 gunFired（惊动附近的机甲）', async () => {
+  let hound, hurts
+  const { P, rows } = await run(40, (i, P) => {
+    const w = P.w()
+    const p = P.player().pos
+    if (i === 0) {
+      hurts = []
+      w.on('mechHurt', (_w, h) => hurts.push({ id: h.entity.id, weak: h.weak, killed: h.killed, damage: h.damage, by: h.by?.id }))
+      P.spawn('hound', [p[0] + 14, 0, p[2]], false)
+    }
+    if (i === 2) {
+      hound = w.query('enemy')[0]
+      assert.equal(hound.b.mechFoe.mode, 'patrol')
+      w.emit('gunFired', { entity: null, origin: [hound.pos[0] - 3, 1.6, hound.pos[2]], dir: [1, 0, 0], shot: 1 })
+    }
+    if (i === 4) {
+      assert.equal(hound.b.mechFoe.mode, 'search', '枪声惊动')
+      w.emit('gunHit', { entity: null, target: hound, weak: true, point: hound.pos, normal: [0, 0, 1], dir: [1, 0, 0], damage: 30, shot: 1 })
+      w.emit('gunHit', { entity: null, target: w.query('player')[0], weak: false, point: p, normal: [0, 0, 1], dir: [1, 0, 0], damage: 30, shot: 2 })
+    }
+    if (i === 6) w.emit('gunHit', { entity: null, target: hound.id, weak: false, point: hound.pos, normal: [0, 0, 1], dir: [1, 0, 0], damage: 9999, shot: 3 })
+  })
+  assert.equal(hurts.length, 2, '打玩家不算机甲受伤')
+  assert.deepEqual(hurts[0], { id: hound.id, weak: true, killed: false, damage: 30, by: undefined })
+  assert.equal(hurts[1].killed, true)
+  assert.equal(hound.b.mechFoe.mode, 'dying')
+  assert.ok(rows[5].modes === 'combat', '受击转入交战')
+  P.clear()
+})
+
 test('saltline 敌人：mechClear 清空敌人、弹道与爆炸', async () => {
   const { P, game, rows } = await run(400, twoFoes)
   assert.ok(rows[rows.length - 1].modes.length > 0, '清空前应有敌人')

@@ -2160,3 +2160,5 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 不再要求鼠标锁定才能开火（由菜单保证游戏中总是锁定）。
   - 命中标记、命中与击杀音效由事件驱动，在命中的下一步出现。
   - 视图模型的走动晃动原版读 WASD 按键，`viewGun` 不读输入，改用 `moveFps.vel` 在朝向上的投影（除以走速）；手感接近，数值不逐帧相同。
+- 实施（7a，fps）：gunFps 按上面实现，测试在 kit-fps.test.js（world 模式的射速、命中、后坐与开镜；打空、空仓换弹的补弹与枪机时刻、战术换弹、没有备弹；不活跃或死亡不开火；view 模式经 emitUI 回写、弱点倍率，以及重复、不在环里、打自己、超出射程、坐标非法的报告被拒）。
+- 实施（7b，mech）：mechHit(w, target, n, dir?, weak?)；on.gunHit 发 mechHurt，on.gunFired 调 mechHear；look.ts 删除 S.parts 与 partOwner，命中体改登记到 w.view。saltline 的 weapon.ts 过渡期改为先 w.view.partOf 再按新签名调 mechHit，行为不变（冒烟 hash 仍为 9cc30054）。saltline-enemies.test.js 加一例：枪声惊动巡逻的犬，gunHit 扣血并发 mechHurt，打玩家不算，打死后进入 dying。
