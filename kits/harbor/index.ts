@@ -1,6 +1,11 @@
 /**
  * harbor 套件（004 第 19.2 节）：港口场景。原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、
- * 关卡数据与玩法点（level）、关卡碰撞盒（physics），以及场景用的着色器（lamp 闪灯、gull 远景海鸥）。
+ * 关卡数据与玩法点（level）、关卡碰撞盒（physics），地面积水（apron）、海面（sea）、雨幕（rain）与着色器。
+ * 场景积木：harborLevel（整张图的地面、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、
+ * harborStatics（原版静态网格，chunk / of 分份）。
+ *
+ *   <entity key="harbor" keep harborLevel />
+ *   {[0, 1, 2, 3].map((i) => <entity key={`statics${i}`} keep harborStatics={{ chunk: i, of: 4 }} />)}
  *
  *   import { origLevel } from '@pot/kit/harbor/origlevel'
  *   import { levelBoxes } from '@pot/kit/harbor/physics'
@@ -8,11 +13,14 @@
  *   setGunEnv(ctx.world, harborGunEnv())   // realistic 的 viewGun：港口的表面种类与室内盒
  */
 import { defineKit } from '@pot/core'
-import type { Vec3 } from '@pot/core'
+import type { Over, Vec3 } from '@pot/core'
 import realistic, { type GunEnv } from '@pot/kit/realistic'
-import { isPuddle } from '@pot/kit/realistic/apron'
+import { isPuddle } from './apron'
 import { surfaceAt } from '@pot/kit/realistic/decals'
 import { origLevel } from './origlevel'
+import { harborLevel, harborStatics, type HarborLevelProps, type HarborStaticsProps } from './scene'
+
+export { harborLevel, harborStatics }
 
 /**
  * viewGun 的场景查询（原版 impact 与 setWetness）：表面取碰撞盒材质，朝上、贴地且落在积水遮罩里的命中按水面处理；
@@ -36,8 +44,17 @@ export function harborGunEnv(): GunEnv {
   }
 }
 
+declare module '@pot/core' {
+  interface GameBlockProps {
+    harborLevel?: Over<HarborLevelProps>
+    harborStatics?: Over<HarborStaticsProps>
+  }
+}
+
 export default defineKit({
   name: 'harbor',
-  about: '港口场景：关卡构建、道具模型、关卡碰撞盒；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
+  about: '港口场景：harborLevel（地面积水、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，分份）；关卡碰撞盒（physics）；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
+  vars: { harborRelays: [] as string[] },
+  blocks: [harborLevel, harborStatics],
   requires: [realistic],
 })

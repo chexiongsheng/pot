@@ -2203,3 +2203,14 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 闪电的随机数从 world 单元自己的 `rng(97)` 改为 `w.rand`，World 随机序列多了消耗，冒烟 hash 会变；闪电方向与雷声音高用表现层的 `Math.random`。
   - 闪电只在模拟走时排期：标题与游戏中会打雷，暂停时不打（原版暂停时也不倒计时）。
   - 加载进度：场景部分由“编译材质、生成地面……”这些文字变成“生成场景 k/n”。
+- 实施：
+  - 框架（提交 b1f623b）：`keep` 按上面实现。
+  - realistic：`atmosphere` 的 `chain`、`quality`、`shaderRain`、`lightning.sound` 与 `setPostValues` 按设计实现；表现层的帧间隔与 mech、viewGun 一样由 `clock.time` 差分求得（上限 0.1 秒）。`atmosphere` 的状态多了 `delay`（最近一次闪电到雷声的秒数）。`beacon` 的脉动用 `clock.time`，不进状态。套件 `vars` 加 `renderQuality`（缺省 2）。`registerSfx`、`sfx` 从套件入口导出；viewGun、mech 的三个表现在 enter 里调 `registerSfx`。
+  - harbor：`kits/harbor/scene.ts`（约 20KB，基本是 world.ts 的场景部分原样迁来）。`harborLevel` 的属性多了 `level`（关卡数据文件，缺省 `level.json`）：积木不该写死游戏的文件名。`apron`、`rain` 补 `destroy()`，`createSea` 改为返回海面对象（原来返回布尔）。套件 `vars` 加 `harborRelays`。
+  - saltline：`parts/stage.tsx`（布景，静态网格分 8 份）、`parts/ambience.ts`（`slAmbience`）；`slDirector` 写 `harborRelays`（变了才写，写副本）与信标的 `on`（按标签 `extraction` 找实体，id 缓存在状态 `bid`）；`slControl` 写 `renderQuality`，菜单改画质时也直接写（暂停中模拟不走，`slControl` 写不到，原来 world 单元每帧读设置）；关卡碰撞盒与布景标 `keep`；`cameraFps` 的 `near: 0.02, far: 600`；`load` 先 `registerSfx`（界面单元的音效不等布景进场）。删除 `plugins/world.ts`、`lib/bus.ts`。
+  - 测试：`kit-realistic.test.js` 加 3 例（链、画质档位与 `renderQuality`、`shaderRain`、`setPostValues`；雷声按 delay 与近雷；信标显隐、脉动与销毁）；新增 `kit-harbor.test.js`（用 saltline 的关卡数据：地面、海面、雨幕、静态与动态网格、三个中继灯随 `harborRelays` 变化；`keep` 跨状态不重建；去掉后布景对象全部销毁、加回时对象数复原）。`npm test` 299/300（仅 pot_gfx 一致性），玩家金标准与敌人回归不变；`pot check`、`pot test` 通过，冒烟 hash 由 8ba0dee8 变为 ab615a74（闪电改用 `w.rand`、新增 vars，与预计一致）。
+  - Runner 实机（重建后）：启动 3.9 秒，无报错。三个固定机位（堆场、码头、中继）与迁移前的截图对比，地面积水与反射、海面、雨幕、集装箱材质、起重机、远景、光照与后处理一致（`shots/s8-before-*.png`、`s8-after-*.png`）。连续 3 次重试，环境与港口实体的 id 不变，场景对象 646、引擎对象 205 不增长；三处中继断开后撤离点光圈与光柱亮起；画质切到 0 档后分辨率下降、bloom 关闭；把闪电提前后触发正常。
+  - 遗留：
+    - 加载进度：`defineGame` 的 `load` 占前 80%、预热占后 20%（17.13），saltline 的 `load` 现在只挂界面，耗时几乎全在预热，进度条会很快走到 80% 再慢慢走完；`harborLevel` 的 enter 是一整块（材质编译、地面、海面、雨幕、动态网格），加载界面在这一块里不刷新。可以让 `load` 的 `step` 报一个预计占比，或者把 `harborLevel` 再拆成几个实体，第 10 步再看。
+    - 套件资源随 World 缓存（材质、着色器、贴图）不在热重载套件模块时释放，与 mech、viewGun 相同。
+  - 字节数：saltline 的 `src` 共 64370 字节（第 7 步后约 83KB，少了 world.ts 22866 与 bus.ts，多了 stage 1434、ambience 2569）；harbor 的 `scene.ts` 20604，realistic 的 `index.ts` 由约 12KB 增到 20176。

@@ -128,3 +128,70 @@ test('surface：材质预设与覆盖，未知预设报错', async () => {
   assert.ok(b.color[0] > 0.9 && b.color[1] < 0.1, '显式颜色')
   assert.match(host.logs.map((l) => l.text).join('\n'), /未知的材质预设 gold/)
 })
+
+const QUALITY = `[
+  { renderScale: 0.5, shadowDistance: 20, shadowResolution: 512, shadowCascades: 1, reflection: 0, drops: 100, ao: 0, antialias: 'none', reflectionShadows: false, bloom: false },
+  { renderScale: 1, shadowDistance: 60, shadowResolution: 2048, shadowCascades: 4, reflection: 0.5, drops: 900, ao: 1, antialias: 'smaa', msaa: 4, reflectionShadows: true },
+]`
+
+test('atmosphere：后处理链（chain）、画质档位（quality 按 w.vars.renderQuality）、setPostValues、shaderRain', async () => {
+  const extra = `<rule on="every" seconds={0.05} do={(w) => { if (w.vars.q !== undefined) w.vars.renderQuality = w.vars.q }} />`
+  const src = gameSource(`{ chain: {}, quality: ${QUALITY}, shaderRain: true, rain: 0.5 }`, extra)
+    .replace("import realistic from '@pot/kit/realistic'", "import realistic, { setPostValues } from '@pot/kit/realistic'\n;(globalThis as any).__setPost = setPostValues")
+  globalThis.__hits = []
+  const g = await startGame(new Map([['manifest.json', JSON.stringify({ id: 'realistic.test', plugins: ['game'] })], [GAME, src]]))
+  assert.deepEqual(g.runtime.failures, [])
+  frames(g.runtime, 2)
+  assert.deepEqual(g.host.logs.filter((l) => l.level === 'error').map((l) => l.text), [])
+  const e = g.engine
+  assert.ok(e.post && e.post.passes.length > 5, '建了后处理链')
+  assert.equal(e.renderState.post?.tonemap, undefined, '有链时不设 URP 后处理的色调映射')
+  // renderQuality 缺省 2，超出档位表取最后一档
+  near(e.renderState.quality.renderScale, 1)
+  assert.equal(e.renderState.quality.msaa, 4)
+  assert.ok(e.renderState.reflection.enabled)
+  assert.equal(e.renderState.weather.drops, 0, 'shaderRain：着色器可用时内置雨滴为 0')
+  near(e.renderState.weather.rain, 0.5)
+  const w = g.runtime.root.world
+  w.vars.q = 0
+  frames(g.runtime, 6)
+  near(e.renderState.quality.renderScale, 0.5)
+  assert.ok(!e.renderState.reflection.enabled)
+  assert.ok(e.postDisabled.size > 0, '关 bloom 的 pass')
+  globalThis.__setPost(w, { uDamage: 0.7 })
+  frames(g.runtime, 1)
+  assert.ok(JSON.stringify(e.post).length > 0)
+})
+
+test('atmosphere：lightning.sound 按 delay 放雷声（强度大于 0.6 为近雷）', async () => {
+  const { runtime, engine } = await start(`{ lightning: { first: [0.1, 0.1], every: [100, 100], power: [0.9, 0.9], sound: true } }`)
+  engine.played = []
+  frames(runtime, 10)
+  assert.equal(globalThis.__hits.length, 1)
+  const delay = globalThis.__hits[0][1]
+  // 闪电在第 6、7 步，雷声在其后 delay 秒
+  frames(runtime, Math.floor(delay * 60) - 8)
+  assert.equal(engine.played.filter((p) => p.name.startsWith('saltline.thunder')).length, 0, '未到 delay 不响')
+  frames(runtime, 12)
+  assert.deepEqual(engine.played.filter((p) => p.name.startsWith('saltline.thunder')).map((p) => p.name), ['saltline.thunderNear'])
+})
+
+test('beacon：on 为假时隐藏，为真时显示并脉动；去掉后对象全部销毁', async () => {
+  const g = await start(null, `<entity key="b" at={[3, 0, 4]} beacon={{ radius: 2, color: '#38e070' }} />`)
+  const root = () => [...g.engine.objects.values()].find((o) => o.name === 'beacon')
+  const base = g.engine.objects.size
+  assert.ok(root(), '建了信标')
+  assert.equal(root().active, false)
+  const e = g.runtime.root.world.query().find((x) => x.b.beacon)
+  e.b.beacon.on = true
+  frames(g.runtime, 2)
+  assert.equal(root().active, true)
+  const ring = [...g.engine.objects.values()].find((o) => o.name === 'ring')
+  assert.ok(ring.scale[0] >= 2 * 2 * 0.9 && ring.scale[0] <= 2 * 2 * 1.05)
+  g.files.set(GAME, gameSource(null))
+  const reply = await run(g.runtime, g.pot.devtools.handle({ id: 1, type: 'changed', paths: [GAME] }))
+  assert.equal(reply.data.ok, true, reply.data.error)
+  frames(g.runtime, 2)
+  assert.equal(root(), undefined)
+  assert.equal(g.engine.objects.size, base - 4)
+})

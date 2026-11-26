@@ -205,7 +205,7 @@ export function apply(ctx: Context) {
         const on = (s.quality ?? 2) === i
         ui.rect(qx, qy, qw, 28, on ? C.signal : C.steel, { radius: 3, alpha: on ? 1 : 0.25 })
         ui.text(label, qx + qw / 2, qy + 14, { size: 14, weight: 600, color: on ? C.ink : C.bone, align: 'center', valign: 'middle' })
-        if (input.pressed('mouse0') && ui.hit(qx, qy, qw, 28) && !on) { s.quality = i; ctx.audio.play(sfx('ui'), { volume: 0.4 }) }
+        if (input.pressed('mouse0') && ui.hit(qx, qy, qw, 28) && !on) { s.quality = i; (ctx.world as any).vars.renderQuality = i; ctx.audio.play(sfx('ui'), { volume: 0.4 }) }
       })
     } else if (v.slPanel === 'controls') {
       CONTROLS.forEach(([k, v], i) => {

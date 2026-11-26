@@ -88,12 +88,12 @@ export const directorFade = (w: any) => looks.get(w)?.fade ?? 0
 
 const ss = (a: number, c: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t) }
 
-export const slDirector = defineBlock<typeof PROPS, { pid: number }>({
+export const slDirector = defineBlock<typeof PROPS, { pid: number; bid: number }>({
   name: 'slDirector',
-  about: 'saltline 导演：开局布置、子阶段（intro/playing/dead/complete）、中继交互、波次与追击增援、撤离；表现为标题镜头、切断音效、渐黑',
+  about: 'saltline 导演：开局布置、子阶段（intro/playing/dead/complete）、中继交互、波次与追击增援、撤离；把中继状态写给 harbor（harborRelays），撤离点开放时点亮信标；表现为标题镜头、切断音效、渐黑',
   order: 10,
   props: PROPS,
-  state: { pid: -1 },
+  state: { pid: -1, bid: -1 },
 
   init(me, _e, w) {
     const sl: Sl = w.vars.sl, f = w.flow
@@ -116,6 +116,11 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number }>({
     const sl: Sl = w.vars.sl, F = me.flow, dt = w.dt
     sl.t += dt
     sl.warnT = Math.max(0, sl.warnT - dt)
+    // harbor 的中继模型读 harborRelays；撤离点信标在三处都断开后亮起（标题时不亮）
+    const shown: string[] = w.vars.harborRelays ?? []
+    if (shown.length !== sl.relays.length || shown.some((r, i) => r !== sl.relays[i])) w.vars.harborRelays = [...sl.relays]
+    const beacon = findBeacon(w, me)
+    if (beacon) beacon.on = w.flow.state !== 'title' && sl.relays.length > 0 && sl.relays.every((r) => r === 'cut')
     if (w.flow.state !== 'play') return
     const n = me.relays.length
     if (sl.phase === 'intro') {
@@ -234,6 +239,15 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number }>({
     },
   },
 })
+
+/** 撤离点信标（标签 extraction 的实体的 beacon）；bid 是缓存的实体 id */
+function findBeacon(w: any, me: { bid: number }): any {
+  const e = me.bid < 0 ? undefined : w.get(me.bid)
+  if (e?.b.beacon) return e.b.beacon
+  const found = w.query('extraction')[0]
+  me.bid = found ? found.id : -1
+  return found?.b.beacon
+}
 
 /** 标题镜头（原版 z()）：周期 max(26, 路径长/速度)，smoothstep 混合缓动，位置与目标微晃，滚转，首尾淡入淡出；返回渐黑 */
 function titleCamera(ctx: Context, F: any, L: Look, dt: number, now: number) {

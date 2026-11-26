@@ -216,8 +216,8 @@ function headBlocked(w: any, e: any, me: MoveFpsProps & MoveFpsState, layers: st
 /** 第一人称相机：跟随同一实体的 moveFps */
 export const cameraFps = defineBlock({
   name: 'cameraFps',
-  about: '第一人称相机：放在 moveFps 实体的眼高处，带 fov（瞄准、冲刺）、步伐摆动与震动（shake、kick 由别的积木写入）',
-  props: { fov: 74, fovAds: 52, fovSprint: 6, bobX: 0.013, bobY: 0.024, shakeDecay: 3, lockCursor: true },
+  about: '第一人称相机：放在 moveFps 实体的眼高处，带 fov（瞄准、冲刺）、步伐摆动与震动（shake、kick 由别的积木写入）；near、far 为裁剪面（0 为不改）',
+  props: { fov: 74, fovAds: 52, fovSprint: 6, bobX: 0.013, bobY: 0.024, shakeDecay: 3, lockCursor: true, near: 0, far: 0 },
   state: { active: true, shake: 0, kick: [0, 0] as [number, number] },
   step(me, _e, w) {
     me.shake = Math.max(0, me.shake - w.dt * me.shakeDecay)
@@ -225,6 +225,7 @@ export const cameraFps = defineBlock({
   view: {
     enter(me, _e, ctx) {
       if (me.lockCursor) ctx.input.cursor(true)
+      if (me.near > 0 || me.far > 0) ctx.scene.view({ near: me.near > 0 ? me.near : undefined, far: me.far > 0 ? me.far : undefined })
     },
     update(me, e, _objs, ctx, w) {
       const m = e.b.moveFps as (MoveFpsProps & MoveFpsState) | undefined
@@ -642,7 +643,7 @@ function onGunReport(w: any, p: any) {
 declare module '@pot/core' {
   interface GameBlockProps {
     moveFps?: Over<typeof MOVE_PROPS>
-    cameraFps?: Over<{ fov: number; fovAds: number; fovSprint: number; bobX: number; bobY: number; shakeDecay: number; lockCursor: boolean }>
+    cameraFps?: Over<{ fov: number; fovAds: number; fovSprint: number; bobX: number; bobY: number; shakeDecay: number; lockCursor: boolean; near: number; far: number }>
     health?: Over<{ max: number; regen: number; regenDelay: number }>
     aiChase?: Over<{ target: string; range: number; speed: number; stopAt: number; sight: boolean; eye: number } & typeof AI_BODY>
     aiPatrol?: Over<{ points: Vec3[]; speed: number; wait: number; loop: boolean; arrive: number } & typeof AI_BODY>

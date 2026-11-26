@@ -28,6 +28,7 @@ const slControl = defineBlock<typeof CONTROL_PROPS>({
     h.regen = m.active ? me.regen : 0
     m.sensitivity = s.sensitivity
     m.invertY = s.invertY
+    w.vars.renderQuality = s.quality
     c.fov = s.fov ?? me.fov
   },
 })
@@ -114,7 +115,7 @@ export function Player({ data }: { data: SceneArgs['data'] }) {
     <entity key="player" tags={['player']} at={[...start.pos]} rot={[0, start.yaw, 0]}
       slControl={{ regen: regenRate, fov }} slFeedback={{ seaY, rescueDamage, rescued: data.load('flow.json').rescued }}
       moveFps={{ ...move, layers: ['default', 'playerWall'], ground: { y: 0, maxX: groundMaxX }, bounds: bounds ?? null }}
-      cameraFps={{ fov, fovAds, fovSprint, bobX, bobY, lockCursor: false }}
+      cameraFps={{ fov, fovAds, fovSprint, bobX, bobY, lockCursor: false, near: 0.02, far: 600 }}
       health={{ max: maxHealth, regen: regenRate, regenDelay }}
       gunFps={{ ...gun, magSize: mag, reserveStart: reserve, spreadHip: spread, hitscan: 'view', viewMask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER), viewPlanes: GROUND_PLANES }}
       viewGun />

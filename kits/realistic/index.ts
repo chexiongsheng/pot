@@ -10,11 +10,16 @@
  *     </>,
  *   })
  *
- * 黄昏预设与闪电的时间分布、闪光曲线取自 saltline；saltline 自己的后处理链、apron 雨幕留在游戏里。
+ * 黄昏预设与闪电的时间分布、闪光曲线取自 saltline。atmosphere 还可以换成原版移植的后处理链（chain）、
+ * 按画质档位表切换（quality，档位读 w.vars.renderQuality）、闪电后放雷声（lightning.sound）；
+ * 游戏驱动的后处理参数（受伤、低血量、开镜）用 setPostValues 写。beacon 是目标标记（光圈、光柱、点光）。
  */
 import { defineBlock, defineKit, parseColor } from '@pot/core'
 import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3, WeatherOptions } from '@pot/core'
 import { viewGun } from './viewgun'
+import { createPost, type PostFx } from './post'
+import { registerSfx, sfx } from './sfx'
+import { VIEW_LAYER } from './layers'
 
 // ---------------------------------------------------------------- 预设
 
@@ -131,7 +136,7 @@ const scaled = (c: Color, k: number): Color => {
 
 // ---------------------------------------------------------------- atmosphere
 
-const LIGHTNING = { every: [30, 60] as [number, number], first: [12, 30] as [number, number], power: [0.3, 1] as [number, number], flash: 1 }
+const LIGHTNING = { every: [30, 60] as [number, number], first: [12, 30] as [number, number], power: [0.3, 1] as [number, number], flash: 1, sound: false }
 export type LightningProps = typeof LIGHTNING
 
 const ATMOS_PROPS = {
@@ -145,9 +150,32 @@ const ATMOS_PROPS = {
   rain: 0,
   reflection: 0,
   lightning: null as Partial<LightningProps> | null,
+  /** 原版移植的后处理链（运行时着色器可用时代替 URP 后处理）；sunColor 缺省取 sky.sun */
+  chain: null as { exposure?: number; sunColor?: string } | null,
+  /** 画质档位表：按 w.vars.renderQuality 选档 */
+  quality: null as QualityLevel[] | null,
+  /** 雨由别的积木用着色器画（运行时着色器可用时内置雨滴粒子数为 0） */
+  shaderRain: false,
 }
 
-const ATMOS_STATE = { active: true, next: -1, t: 99, power: 0, strikes: 0 }
+/** 画质档位（saltline 的 tuning.quality.levels） */
+export interface QualityLevel {
+  renderScale: number
+  shadowDistance: number
+  shadowResolution: number
+  shadowCascades: number
+  /** 平面反射分辨率比例，0 为关 */
+  reflection: number
+  /** 内置雨滴粒子数（shaderRain 且着色器可用时不用） */
+  drops: number
+  ao: number
+  antialias: 'none' | 'fxaa' | 'smaa'
+  msaa?: number
+  reflectionShadows: boolean
+  bloom?: boolean
+}
+
+const ATMOS_STATE = { active: true, next: -1, t: 99, power: 0, strikes: 0, delay: 0 }
 
 export type AtmosphereProps = typeof ATMOS_PROPS
 
@@ -173,8 +201,50 @@ interface Held {
   sun: Entity | null
   env: Preset
   flash: number
+  post?: PostFx
+  /** 已应用的画质档位（-1 为未应用） */
+  quality: number
+  strikes: number
+  thunder: { at: number; near: boolean; gain: number }[]
+  time: number
+  frame: number
+}
+
+/** 表现层的帧间隔（clock.time 的差分，上限 0.1 秒；同一帧多次取得到同一值） */
+function frameDt(h: { time: number; frame: number; dt?: number }, clock: { time: number; frame: number }): number {
+  if (h.frame !== clock.frame) {
+    h.dt = h.frame === clock.frame - 1 ? Math.min(0.1, Math.max(0, clock.time - h.time)) : 0
+    h.frame = clock.frame
+    h.time = clock.time
+  }
+  return h.dt ?? 0
 }
 const held = new Map<number, Held>()
+
+/** 游戏驱动的后处理参数（受伤、低血量、开镜等），按 World 存，atmosphere 的表现每帧写进链 */
+const postValues = new WeakMap<object, Record<string, number | number[]>>()
+
+/**
+ * 写后处理链的参数（uDamage、uLowHealth、uAds 等）；没有链时忽略。
+ * 按 w.registry 存：游戏传进来的 ctx.world 是服务代理，表现钩子拿到的是 World 本体
+ */
+export function setPostValues(w: { registry: object }, values: Record<string, number | number[]>) {
+  const cur = postValues.get(w.registry)
+  if (cur) Object.assign(cur, values)
+  else postValues.set(w.registry, { ...values })
+}
+
+function applyQuality(ctx: any, me: AtmosphereProps, h: Held, index: number) {
+  const levels = me.quality!
+  const q = levels[Math.max(0, Math.min(levels.length - 1, index))]
+  h.quality = index
+  const scene = ctx.scene
+  scene.quality({ renderScale: q.renderScale, shadowDistance: q.shadowDistance, shadowResolution: q.shadowResolution, shadowCascades: q.shadowCascades, msaa: q.msaa ?? 1 })
+  scene.reflection({ enabled: q.reflection > 0, height: 0, scale: q.reflection > 0 ? q.reflection : undefined, exclude: [VIEW_LAYER], shadows: q.reflectionShadows })
+  scene.post({ ao: q.ao, antialias: q.antialias })
+  h.post?.quality(q.bloom !== false)
+  scene.weather({ ...h.env.weather, drops: me.shaderRain && ctx.gfx.supported ? 0 : q.drops })
+}
 
 function applyAmbient(ctx: any, a: AmbientSpec, k: number) {
   ctx.scene.ambient({ sky: scaled(a.sky, k), equator: scaled(a.equator, k), ground: scaled(a.ground, k) }, a.reflection)
@@ -189,7 +259,7 @@ const range = (w: any, r: [number, number]) => w.rand(Math.min(r[0], r[1]), Math
 
 export const atmosphere = defineBlock({
   name: 'atmosphere',
-  about: '写实环境：preset（dusk、overcast、night）加分节覆盖 sun、sky、ambient、fog、post、weather；rain 为雨量简写，reflection 开平面反射，lightning 打雷（发 lightning 事件，payload { entity, power, delay }）。一个场景只放一个；active 为 false 时不打雷',
+  about: '写实环境：preset（dusk、overcast、night）加分节覆盖 sun、sky、ambient、fog、post、weather；rain 为雨量简写，reflection 开平面反射，lightning 打雷（发 lightning 事件，payload { entity, power, delay }；sound 为 true 时按 delay 放雷声）；chain 用原版后处理链（游戏参数用 setPostValues 写）；quality 为画质档位表（档位读 w.vars.renderQuality）；shaderRain 表示雨由着色器画。一个场景只放一个；active 为 false 时不打雷',
   props: ATMOS_PROPS,
   state: ATMOS_STATE,
   step(me, e, w) {
@@ -205,32 +275,72 @@ export const atmosphere = defineBlock({
     me.strikes++
     me.next = range(w, l.every)
     const delay = 0.5 + (1 - me.power) * 2 + w.rand() * 0.6
+    me.delay = delay
     w.emit('lightning', { entity: e, power: me.power, delay })
   },
   view: {
-    enter(me, e, ctx) {
+    enter(me, e, ctx, w) {
       const env = resolveAtmosphere(me)
       const scene = ctx.scene
       const old = held.get(e.id)
-      if (old?.sun) old.sun.destroy()
+      if (old) release(old)
       const sun = scene.light({ type: 'directional', name: 'sun', rotation: env.sun.rotation, intensity: env.sun.intensity, color: env.sun.color, shadows: 'soft' })
-      held.set(e.id, { sun, env, flash: 0 })
+      const h: Held = { sun, env, flash: 0, quality: -1, strikes: me.strikes, thunder: [], time: ctx.clock.time, frame: ctx.clock.frame }
+      held.set(e.id, h)
+      if (me.lightning?.sound) registerSfx(ctx)
       scene.sky(env.sky)
       applyAmbient(ctx, env.ambient, 1)
       applyFog(ctx, env.fog, 1, true)
-      scene.post(env.post)
-      scene.weather(env.weather)
-      scene.reflection(me.reflection > 0 ? { enabled: true, height: 0, scale: me.reflection } : { enabled: false })
+      if (me.chain) h.post = createPost(ctx, { exposure: me.chain.exposure ?? 1, sunColor: me.chain.sunColor ?? (env.sky.sun as string | undefined) })
+      if (!h.post) scene.post(env.post)
+      if (me.quality?.length) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2)
+      else {
+        scene.weather(env.weather)
+        scene.reflection(me.reflection > 0 ? { enabled: true, height: 0, scale: me.reflection } : { enabled: false })
+      }
       scene.refreshEnvironment()
     },
     update(me, e, _objs, ctx, w) {
       const h = held.get(e.id)
-      if (!h || !me.lightning) return
+      if (!h) return
+      const dt = frameDt(h, ctx.clock)
+      if (me.quality?.length && (w.vars.renderQuality ?? 2) !== h.quality) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2)
+      if (h.post) {
+        h.post.update(dt)
+        const values = postValues.get(w.registry)
+        if (values) {
+          h.post.set(values)
+          postValues.delete(w.registry)
+        }
+      }
+      if (!me.lightning) return
+      // 新的闪电：链上随机一个闪光方向，排雷声
+      if (me.strikes !== h.strikes) {
+        h.strikes = me.strikes
+        if (h.post) {
+          const a = Math.PI * (0.55 + Math.random() * 0.9)
+          const d = [Math.cos(a), 0.35 + Math.random() * 0.3, Math.sin(a) * (Math.random() < 0.5 ? -1 : 1)]
+          const l = Math.hypot(d[0], d[1], d[2])
+          h.post.set({ uFlashDir: [d[0] / l, d[1] / l, -d[2] / l] })
+        }
+        if (me.lightning.sound) h.thunder.push({ at: h.time + me.delay, near: me.power > 0.6, gain: 0.35 + 0.65 * me.power })
+      }
+      for (let i = h.thunder.length - 1; i >= 0; i--) {
+        const s = h.thunder[i]
+        if (h.time < s.at) continue
+        h.thunder.splice(i, 1)
+        ctx.audio.play(sfx(s.near ? 'thunderNear' : 'thunder'), { volume: s.gain, pitch: 0.9 + Math.random() * 0.2 })
+      }
       const flash = me.lightning.flash ?? LIGHTNING.flash
       const t = me.t + (me.active ? ctx.clock.fixedAlpha * w.dt : 0)
       const v = lightningValue(t, me.power) * flash
       if (v === h.flash) return
       h.flash = v
+      // 有链时写链的 uThunder（原版：闪光值 × 0.35）；没有链时按闪光提亮环境光与雾
+      if (h.post) {
+        h.post.set({ uThunder: v * 0.35 })
+        return
+      }
       const k = 1 + v * 3
       applyAmbient(ctx, h.env.ambient, k)
       applyFog(ctx, h.env.fog, k, false)
@@ -238,19 +348,83 @@ export const atmosphere = defineBlock({
     exit(_me, e, _objs, ctx) {
       const h = held.get(e.id)
       held.delete(e.id)
-      if (h?.sun) {
-        try {
-          h.sun.destroy()
-        } catch {
-          // 已随单元回收
-        }
-      }
+      if (h) release(h)
       ctx.scene.fog(false)
       ctx.scene.weather({ rain: 0, wetness: 0, puddles: 0 })
       ctx.scene.reflection({ enabled: false })
     },
   },
 })
+
+function release(h: Held) {
+  for (const o of [h.sun, h.post?.chain]) {
+    try {
+      o?.destroy()
+    } catch {
+      // 已随单元回收
+    }
+  }
+  h.sun = null
+  h.post = undefined
+}
+
+// ---------------------------------------------------------------- beacon
+
+const BEACON_PROPS = { radius: 3, color: '#38e070', height: 12 }
+const BEACON_STATE = { on: false }
+
+interface Beacon { root: Entity; ring: Entity; pillar: Entity; light: Entity; on: boolean }
+const beacons = new Map<number, Beacon>()
+
+const hex2 = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
+
+export const beacon = defineBlock({
+  name: 'beacon',
+  about: '目标标记：地面光圈、光柱、点光，脉动。radius 为光圈半径，color 为颜色（#rrggbb），height 为光柱高；状态 on 由游戏写（为 false 时隐藏）',
+  props: BEACON_PROPS,
+  state: BEACON_STATE,
+  view: {
+    enter(me, e, ctx) {
+      const scene = ctx.scene
+      const old = beacons.get(e.id)
+      if (old) dropBeacon(old)
+      const root = scene.spawn({ shape: 'empty', name: 'beacon', position: e.pos, active: false })
+      const ring = scene.spawn({ parent: root, shape: 'cylinder', name: 'ring', position: [0, 0.02, 0], scale: [me.radius * 2, 0.01, me.radius * 2], color: `${me.color}55`, material: { mode: 'additive', shadows: false }, collider: false })
+      const pillar = scene.spawn({ parent: root, shape: 'cylinder', name: 'pillar', position: [0, me.height / 2, 0], scale: [0.25, me.height / 2, 0.25], color: `${me.color}33`, material: { mode: 'additive', shadows: false }, collider: false })
+      const light = scene.light({ type: 'point', name: 'beacon-light', parent: root, position: [0, 1.5, 0], intensity: 2.5, range: 10, color: me.color })
+      beacons.set(e.id, { root, ring, pillar, light, on: false })
+    },
+    update(me, e, _objs, ctx) {
+      const b = beacons.get(e.id)
+      if (!b) return
+      if (me.on !== b.on) {
+        b.on = me.on
+        b.root.active(me.on)
+      }
+      if (!me.on) return
+      const pulse = 0.5 + 0.5 * Math.sin(ctx.clock.time * 3)
+      const r = me.radius * 2 * (0.9 + pulse * 0.15)
+      b.ring.scale = [r, 0.01, r]
+      b.pillar.color(`${me.color}${hex2(30 + pulse * 40)}`)
+      b.light.intensity(1.8 + pulse * 1.2)
+    },
+    exit(_me, e) {
+      const b = beacons.get(e.id)
+      beacons.delete(e.id)
+      if (b) dropBeacon(b)
+    },
+  },
+})
+
+function dropBeacon(b: Beacon) {
+  for (const o of [b.light, b.pillar, b.ring, b.root]) {
+    try {
+      o.destroy()
+    } catch {
+      // 已随父节点销毁
+    }
+  }
+}
 
 // ---------------------------------------------------------------- surface
 
@@ -290,13 +464,16 @@ declare module '@pot/core' {
     atmosphere?: Over<AtmosphereProps>
     surface?: Over<typeof SURFACE_PROPS>
     viewGun?: boolean | Record<string, never>
+    beacon?: Over<typeof BEACON_PROPS>
   }
 }
 
 export { viewGun, setGunEnv, type GunEnv } from './viewgun'
+export { registerSfx, sfx } from './sfx'
 
 export default defineKit({
   name: 'realistic',
-  about: '写实：atmosphere（环境预设 dusk、overcast、night，雨、平面反射、闪电）、surface（材质预设 wetGround、metal、concrete）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
-  blocks: [atmosphere, surface, viewGun],
+  about: '写实：atmosphere（环境预设 dusk、overcast、night，雨、平面反射、闪电与雷声，后处理链，画质档位）、surface（材质预设 wetGround、metal、concrete）、beacon（目标标记）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
+  vars: { renderQuality: 2 },
+  blocks: [atmosphere, surface, beacon, viewGun],
 })

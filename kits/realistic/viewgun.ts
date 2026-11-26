@@ -17,7 +17,7 @@ import { buildPac9, PAC9 } from './gun'
 import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from './hands'
 import { LEVEL_LAYER, VIEW_LAYER } from './layers'
 import { clamp, damp, lerp, norm, sub } from './math'
-import { sfx } from './sfx'
+import { registerSfx, sfx } from './sfx'
 import * as Tex from './textures'
 import { Quaternion, Vector3 } from './vendor/three-geo'
 
@@ -515,6 +515,7 @@ export const viewGun = defineBlock({
     enter(_me, e, ctx, w) {
       const g = e.b.gunFps as Gun | undefined
       if (!g) return
+      registerSfx(ctx as any)
       const S = store(w)
       const R = resources(S, ctx as any)
       R.decals?.clear()

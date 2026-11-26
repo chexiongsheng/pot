@@ -1,4 +1,4 @@
-/** 低层单元（hud、menu、world）共用的读取函数。一局的进度在 w.vars.sl（parts/state.ts） */
+/** 低层单元（hud、menu）共用的读取函数。一局的进度在 w.vars.sl（parts/state.ts） */
 import type { Context, Vec3 } from '@pot/core'
 import type { GunFpsState } from '@pot/kit/fps'
 import { phaseOf, type EnemyType, type Phase, type Settings, type Sl } from '../parts/state'

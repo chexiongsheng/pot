@@ -5,7 +5,7 @@
  */
 import type { Context, Vec3 } from '@pot/core'
 import { createMats, type Mats } from '@pot/kit/realistic/mats'
-import { sfx } from '@pot/kit/realistic/sfx'
+import { registerSfx, sfx } from '@pot/kit/realistic/sfx'
 import { norm, RAD } from '@pot/kit/realistic/math'
 import { buildEnemy, type EnemyModel } from './models'
 import { syncHound } from './hound'
@@ -135,6 +135,7 @@ function animateHound(L: Look, e: any, f: any, pos: Vec3, dt: number, t: any) {
 /** mechFoe 的表现 */
 export const foeView = {
   enter(f: any, e: any, ctx: Context, w: any) {
+    registerSfx(ctx)
     const S = store(w)
     const m = buildEnemy(ctx, f.kind, `${f.kind}-${e.id}`, mats(S, ctx))
     // 命中体登记到实体上（w.view.partOf 查，弱点 tag 为 weak），表现退出时自动注销
@@ -195,6 +196,7 @@ function drop(w: any, id: number) {
 /** mechBolt 的表现：发光胶囊朝飞行方向，出现时播开火声 */
 export const boltView = {
   enter(b: any, e: any, ctx: Context, w: any) {
+    registerSfx(ctx)
     const o = ctx.scene.spawn({ shape: 'capsule', name: 'bolt', scale: [0.09, 0.32, 0.09], color: b.kind === 'gull' ? '#ff6a40' : '#ffb347', material: { mode: 'additive', shadows: false }, collider: false } as any)
     o.position = [...e.pos] as Vec3
     store(w).fx.set(e.id, { o })
@@ -216,6 +218,7 @@ export const boltView = {
 /** mechBoom 的表现：火球按寿命胀大变淡，点光源随之熄灭；出现时播爆炸声 */
 export const boomView = {
   enter(_b: any, e: any, ctx: Context, w: any) {
+    registerSfx(ctx)
     const o = ctx.scene.spawn({ shape: 'sphere', name: 'boom', color: '#ffb347', material: { mode: 'additive', shadows: false }, collider: false } as any)
     o.position = [...e.pos] as Vec3
     o.scale = [0.6, 0.6, 0.6]

@@ -5,7 +5,7 @@
  * - 片元：11 个波的斜率 + 细节法线、码头与船体泡沫、风区/涌浪、太阳闪光、远处雾霭（shaders/sea.frag）
  * 细节纹理与 apron 共用（原版同一份 Cb）。
  */
-import type { Context, Texture } from '@pot/core'
+import type { Context, Entity, Texture } from '@pot/core'
 
 /** 原版海面高度（oi.seaY） */
 export const SEA_Y = -1.6
@@ -45,16 +45,16 @@ function seaMesh() {
 const HORIZON: [number, number, number] = [0.95, 0.55, 0.28]
 const HORIZON_AWAY: [number, number, number] = [0.16, 0.22, 0.3]
 
-export function createSea(ctx: Context, detail: { detail: Texture; detailN: Texture }): boolean {
+/** 建海面，返回海面对象（着色器不可用时为 undefined） */
+export function createSea(ctx: Context, detail: { detail: Texture; detailN: Texture }): Entity | undefined {
   const { scene, gfx } = ctx
-  if (!gfx.supported) return false
+  if (!gfx.supported) return undefined
   scene.mesh('saltline/sea', seaMesh())
-  const shader = gfx.shader({ vertex: '@pot/kit/realistic/shaders/sea.vert', fragment: '@pot/kit/realistic/shaders/sea.frag', name: 'saltline/sea' })
+  const shader = gfx.shader({ vertex: '@pot/kit/harbor/shaders/sea.vert', fragment: '@pot/kit/harbor/shaders/sea.frag', name: 'saltline/sea' })
   const uniforms: Record<string, any> = {
     uDetail: detail.detail, uDetailN: detail.detailN,
     uHazeA: HORIZON_AWAY.map(v => v * 0.85), uHazeB: HORIZON.map(v => v * 0.8),
   }
-  scene.spawn({ shape: 'mesh:saltline/sea', name: 'sea', position: [0, 0, 0], collider: false })
+  return scene.spawn({ shape: 'mesh:saltline/sea', name: 'sea', position: [0, 0, 0], collider: false })
     .shader(shader, { uniforms, shadows: false })
-  return true
 }

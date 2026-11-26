@@ -107,6 +107,8 @@ export interface Apron {
   detailN: Texture
   /** Rb 积水遮罩（r < 0.49 为积水；雨点溅射共用） */
   mask: Texture
+  /** 销毁地面与三张贴图 */
+  destroy(): void
 }
 
 /** 原版 Ib：apron 平面 190×320，平移 (-65,0,0)；不投影、接收阴影 */
@@ -123,7 +125,7 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
   const detail = tex(det), detailN = tex(nrm)
   ctx.logger('apron').info('遮罩 %d² %dms，细节 %d² %dms', maskRes, t1 - t0, detailRes, Date.now() - t1)
 
-  const shader = gfx.shader({ fragment: '@pot/kit/realistic/shaders/apron.frag', name: 'saltline/apron' })
+  const shader = gfx.shader({ fragment: '@pot/kit/harbor/shaders/apron.frag', name: 'saltline/apron' })
   const uniforms: Record<string, any> = {
     uRain: 0.6, uWetG: 1, uMaskRes: maskRes,
     uMask: mask, uDetail: detail, uDetailN: detailN,
@@ -136,5 +138,6 @@ export function createApron(ctx: Context, opts: { maskRes?: number; detailRes?: 
     detail, detailN, mask,
     setWet(v) { ent.uniforms({ uWetG: v }) },
     setRain(v) { ent.uniforms({ uRain: v }) },
+    destroy() { for (const o of [ent, mask, detail, detailN] as { destroy(): void }[]) { try { o.destroy() } catch { /* 已回收 */ } } },
   }
 }

@@ -1,6 +1,6 @@
 /** HUD：指南针、任务目标、生命、弹药、准星与命中标记、击杀信息、无线电字幕、敌情警告、交互环、受伤暗角、渐黑 */
 import type { Context } from '@pot/core'
-import { emit } from '../lib/bus'
+import { setPostValues } from '@pot/kit/realistic'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { angleDelta, clamp, formatTime, sub, yawOf } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
@@ -66,7 +66,7 @@ export function apply(ctx: Context) {
       const key = [damage, lowHealth, ads].map((v) => Math.round(v * 200)).join(',')
       if (key !== hurtShown) {
         hurtShown = key
-        emit(ctx, 'saltline/post', { uDamage: damage, uLowHealth: lowHealth, uAds: ads })
+        setPostValues(ctx.world as any, { uDamage: damage, uLowHealth: lowHealth, uAds: ads })
       }
     }
 
