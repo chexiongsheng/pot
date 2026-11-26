@@ -2163,8 +2163,10 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 视图模型的走动晃动原版读 WASD 按键，`viewGun` 不读输入，改用 `moveFps.vel` 在朝向上的投影（除以走速）；手感接近，数值不逐帧相同。
 - 实施（7a，fps）：gunFps 按上面实现，测试在 kit-fps.test.js（world 模式的射速、命中、后坐与开镜；打空、空仓换弹的补弹与枪机时刻、战术换弹、没有备弹；不活跃或死亡不开火；view 模式经 emitUI 回写、弱点倍率，以及重复、不在环里、打自己、超出射程、坐标非法的报告被拒）。
 - 实施（7b，mech）：mechHit(w, target, n, dir?, weak?)；on.gunHit 发 mechHurt，on.gunFired 调 mechHear；look.ts 删除 S.parts 与 partOwner，命中体改登记到 w.view。saltline 的 weapon.ts 过渡期改为先 w.view.partOf 再按新签名调 mechHit，行为不变（冒烟 hash 仍为 9cc30054）。saltline-enemies.test.js 加一例：枪声惊动巡逻的犬，gunHit 扣血并发 mechHurt，打玩家不算，打死后进入 dying。
-- 实施（7b，viewGun 与 saltline）：
+- 实施（7c，viewGun 与 harbor；7d，saltline 接线）：
   - realistic 新增 `kits/realistic/viewgun.ts`（约 27KB，基本是 weapon.ts 的表现部分原样迁来），导出 `viewGun`、`setGunEnv`、`GunEnv`；套件的 `blocks` 为 atmosphere、surface、viewGun。湿润度按 `shelter` 的结果趋近：露天（结果为 1）速率 0.6，遮蔽下 0.25，与原版一致。表现的帧间隔由 `clock.time` 差分求得，上限 0.1 秒。
+  - `setGunEnv` 按 `w.registry` 存，不按 `w`：游戏在 `load` 里传的 `ctx.world` 是服务代理，表现钩子拿到的是 World 本体，二者作 WeakMap 键对不上（第一版就是这样，`harborGunEnv` 没生效，弹孔一律按混凝土；水面平面靠 tag 照样有水花，实机没看出来，由下面的测试发现）。传 `null` 恢复缺省。套件里按 World 缓存的 WeakMap 都在表现或模拟钩子里取，键是同一个本体，不受影响。
+  - 测试 `kit-viewgun.test.js` 5 例：视图模型挂在相机下、8 条曳光，开枪放枪声与表面命中声；打中登记的部件只放光点与火花；`setGunEnv` 注入水面；打空后空仓声与换弹声，生命归零隐藏；热重载两次去掉、加回 viewGun，场景对象数不增长，枪口火焰着色器不重复编译。
   - harbor 新增 `harborGunEnv()`：`surface` 先认 tag 为 `'water'`，再按碰撞盒材质（`surfaceAt`），朝上、低于 0.08 米且在积水遮罩里的点算水面；`shelter` 在室内盒里返回 0.3，否则 1。
   - saltline：`Player` 从 `tuning.json` 的 `weapon` 取属性，`mag`、`reserve`、`spread` 换名为 `magSize`、`reserveStart`、`spreadHip`，`viewMask` 为关卡层与敌人层，`viewPlanes` 为码头地面（y=0）与水面（y=-1.6）两块平面。`weapon(ctx)` 改为直接返回玩家的 `gunFps` 状态，hud 照旧读。加载进度改为场景 0 到 0.95、界面 0.95 到 0.99（少了 weapon 一步）。删除 `plugins/weapon.ts`（474 行）、`WeaponState`、`WEAPON`，`lib/bus.ts` 只剩 `saltline/post`。
   - 字节数：`src/plugins` 加 `src/parts` 约 78KB，`src/lib` 约 4.9KB。

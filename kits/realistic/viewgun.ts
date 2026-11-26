@@ -35,9 +35,12 @@ const DEFAULT_ENV: GunEnv = {
 }
 const envs = new WeakMap<object, GunEnv>()
 
-/** 由游戏在 load 里设置；没设时用缺省（tag 为 water 是水，其余混凝土；处处露天） */
-export function setGunEnv(w: object, env: Partial<GunEnv>) {
-  envs.set(w, { ...DEFAULT_ENV, ...env })
+/**
+ * 由游戏在 load 里设置；没设或传 null 时用缺省（tag 为 water 是水，其余混凝土；处处露天）。
+ * 按 w.registry 存：游戏传进来的 ctx.world 是服务代理，表现钩子拿到的是 World 本体，二者不是同一对象
+ */
+export function setGunEnv(w: { registry: object }, env: Partial<GunEnv> | null) {
+  envs.set(w.registry, { ...DEFAULT_ENV, ...(env ?? {}) })
 }
 
 // ---------------------------------------------------------------- 常量
@@ -355,7 +358,7 @@ function shotFx(ctx: Context, w: any, R: Res, r: Rig, e: any, g: Gun, m: Move | 
   }
 }
 
-const env = (w: any) => envs.get(w) ?? DEFAULT_ENV
+const env = (w: any) => envs.get(w.registry) ?? DEFAULT_ENV
 
 /** 原版 setWetness：雨淋程度 1（露天）时以 0.6 的速率变湿，否则以 0.25 的速率趋向它 */
 function updateWetness(r: Rig, target: number, dt: number) {
