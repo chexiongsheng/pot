@@ -6962,7 +6962,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
 
   // runtime/src/world/registry.ts
-  var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "children"]);
+  var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "keep", "children"]);
   var PREFAB_RESERVED = /* @__PURE__ */ new Set(["is", "tags", "about"]);
   var IDENT = /^[a-z][A-Za-z0-9]*$/;
   function defineBlock(def) {
@@ -7777,6 +7777,10 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         errors.push(`${where2}name 必须是字符串`);
         ok = false;
       }
+      if (props.keep !== void 0 && typeof props.keep !== "boolean") {
+        errors.push(`${where2}keep 必须是 true 或 false`);
+        ok = false;
+      }
       if (!ok) return null;
       const blocks = {};
       for (const name of Object.keys(acc)) {
@@ -7784,6 +7788,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         blocks[name] = merge(clone(block.props ?? {}), acc[name]);
       }
       const spec = { path, prefab: prefab.prefab, at, rot, scale, tags: [...tags], blocks };
+      if (props.keep === true) spec.keep = true;
       if (props.name !== void 0) spec.name = props.name;
       if (node.source) spec.source = node.source;
       return spec;
@@ -9703,7 +9708,7 @@ TS：${r.layout.text}
       for (const hook of [...this._enterHooks]) this._guard(`进入流程状态 ${req.name} 时重建场景`, void 0, hook);
       if (target.enter) this._guard(`flow 状态 ${req.name} 的 enter`, void 0, () => target.enter(this));
     }
-    /** 进入流程状态前：销毁 w.spawn 的实体与游戏挂载的实体，清空该挂载的 key 记录和接触表 */
+    /** 进入流程状态前：销毁 w.spawn 的实体与游戏挂载的实体（标了 keep 的保留，随后的重新挂载照常对比），清空其余 key 记录和接触表 */
     _enterCleanup(data, mountId) {
       for (const key of Object.keys(data.entities)) {
         const e = data.entities[key];
@@ -9711,11 +9716,13 @@ TS：${r.layout.text}
       }
       const mount = data.mounts[mountId];
       if (mount) {
-        for (const rec of Object.values(mount.keys)) {
+        const kept = {};
+        for (const [path, rec] of Object.entries(mount.keys)) {
           const e = !rec.dead && data.entities[rec.id];
-          if (e) this._remove(data, e, false);
+          if (e && rec.keep) kept[path] = rec;
+          else if (e) this._remove(data, e, false);
         }
-        data.mounts[mountId] = { keys: {} };
+        data.mounts[mountId] = { keys: kept };
       }
       data.contacts = {};
     }
@@ -9881,10 +9888,12 @@ TS：${r.layout.text}
         const rec = mount.keys[spec.path];
         if (!rec) {
           const e2 = this._create(data, spec, id, spec.path);
-          mount.keys[spec.path] = { id: e2.id, dead: false, last };
+          mount.keys[spec.path] = spec.keep ? { id: e2.id, dead: false, last, keep: true } : { id: e2.id, dead: false, last };
           continue;
         }
         if (rec.dead) continue;
+        if (spec.keep) rec.keep = true;
+        else delete rec.keep;
         const e = data.entities[rec.id];
         if (!e) {
           rec.dead = true;
@@ -9894,7 +9903,7 @@ TS：${r.layout.text}
         if (old.prefab !== spec.prefab) {
           this._remove(data, e, false);
           const fresh = this._create(data, spec, id, spec.path);
-          mount.keys[spec.path] = { id: fresh.id, dead: false, last };
+          mount.keys[spec.path] = spec.keep ? { id: fresh.id, dead: false, last, keep: true } : { id: fresh.id, dead: false, last };
           continue;
         }
         if (last === rec.last) continue;

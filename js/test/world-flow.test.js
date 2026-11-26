@@ -197,3 +197,47 @@ test('flow：冷重启（exportJSON 后启动）保留流程状态与玩家位�
   assert.equal(w(cold.runtime).flow.state, 'play')
   assert.equal(w(cold.runtime).vars.enters, 1)
 })
+
+test('flow：标了 keep 的实体在流程切换时保留（同一 key 照常对比属性，新状态没有它才删）', async () => {
+  const src = source().replace(`{s.state === 'title' && <entity key="logo" name="logo" />}`,
+    `<entity key="stage" keep name={s.state === 'over' ? 'stage-over' : 'stage'} />
+    {s.state !== 'title' && <entity key="hud" keep name="hud" />}
+    {s.state === 'title' && <entity key="logo" name="logo" />}`)
+  const { runtime } = await start(src)
+  step(runtime)
+  const stage = () => w(runtime).query().find((e) => (e.name ?? '').startsWith('stage'))
+  const id = stage().id
+  w(runtime).emit('start')
+  step(runtime)
+  assert.equal(stage().id, id, 'title → play 保留')
+  const hud = w(runtime).query().find((e) => e.name === 'hud').id
+  w(runtime).emit('win', { score: 2 })
+  step(runtime)
+  assert.equal(w(runtime).flow.state, 'over')
+  assert.equal(stage().id, id, 'play → over 保留')
+  assert.equal(stage().name, 'stage-over', '属性照常对比更新')
+  assert.equal(w(runtime).query().find((e) => e.name === 'hud').id, hud)
+  w(runtime).emit('again')
+  step(runtime)
+  assert.equal(stage().id, id, '重进 play 仍保留')
+  assert.equal(stage().name, 'stage')
+  assert.equal(w(runtime).query('player').length, 1, '没标 keep 的照常重建')
+  // 新状态的场景里没有了就删（hud 只在非 title）
+  const map = files(src.replace("play: { on: { pause: 'paused', win: 'over' }", "play: { on: { pause: 'paused', win: 'over', quit: 'title' }"))
+  const g = await start(map.get(GAME))
+  step(g.runtime)
+  w(g.runtime).emit('start')
+  step(g.runtime)
+  assert.equal(w(g.runtime).query().filter((e) => e.name === 'hud').length, 1)
+  w(g.runtime).emit('quit')
+  step(g.runtime)
+  assert.equal(w(g.runtime).flow.state, 'title')
+  assert.equal(w(g.runtime).query().filter((e) => e.name === 'hud').length, 0, '新状态没有它就删')
+})
+
+test('flow：keep 不是布尔值时报错', async () => {
+  const src = source().replace(`<entity key="logo" name="logo" />`, `<entity key="logo" name="logo" keep={1 as any} />`)
+  const ctx = await startGame(files(src))
+  const all = JSON.stringify(ctx.runtime.failures) + ctx.host.logs.map((l) => l.text).join('\n')
+  assert.match(all, /keep 必须是 true 或 false/)
+})

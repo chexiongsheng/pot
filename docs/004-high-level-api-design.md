@@ -1122,6 +1122,7 @@ flow?: {
   - 目标是叠加状态：只改 `state`、`params`，不动场景。
   - 当前是叠加状态、目标是 `base`、且没带 `params`：恢复，不动场景。
   - 其他情况都是“进入”：`state`、`base` 设为目标，`params` 设为传入值（缺省 `{}`）；销毁 `w.spawn` 生成的实体，清空接触表；游戏挂载的 key 记录清空、实体销毁（不标 `dead`），再以新状态求值 `scene` 并挂载；最后调用 `enter`。其他单元用 `ctx.world.mount` 挂的子树不受影响。
+  - 例外：标签上写了 `keep` 的实体（M3.5 第 8 步加）保留记录与实体，重新挂载时照常按 key 对比：新状态的场景里还有它就只更新变了的属性（状态不动），没有了才删。用于每个状态都有、重建又贵的布景（关卡几何、环境、后处理链），以及大量静态碰撞盒。
 - 叠加状态下每一步只做第 1 步（采样指令）和第 6、7 步（事件、延迟销毁），积木 `step`、触发检测、`every` 都不跑，`tick` 不加一。表现照常画，插值的上一步变换等于当前值。
 - 热重载后 `flow` 定义变了、当前状态不存在时，记一条警告并进入 `start`。
 - `flow` 由 `defineGame` 交给 `WorldService.setFlow`，撤销规则与 `controls` 相同。一个 World 同时只能有一个 `flow`，第二个设置者报错。
@@ -2019,8 +2020,8 @@ games/saltline/
 
 | 套件 | 定位 | 从 saltline 移入 |
 |---|---|---|
-| `realistic` | 写实风格：渲染管线、材质、模型工具、特效、音效 | `orig/port`、`vendor/three-geo`、`geo`、`meshes`、`mats`、`sl-shaders`、`sl-patch`、`pac9-mats`、`textures`、`post` 与后处理着色器、`sea`、`apron`、`rain`、`fx`、`decals`、`sfx`、`math`、`palette`，以及第一人称视图模型 `gun`、`hands` 与对应着色器 |
-| `harbor`（依赖 `realistic`） | 港口场景内容：道具模型、关卡构建、关卡碰撞盒 | `level`、`origlevel`、`collision` 的碰撞盒、中继模型 |
+| `realistic` | 写实风格：渲染管线、材质、模型工具、特效、音效 | `orig/port`、`vendor/three-geo`、`geo`、`meshes`、`mats`、`sl-shaders`、`sl-patch`、`pac9-mats`、`textures`、`post` 与后处理着色器、`fx`、`decals`、`sfx`、`math`、`palette`，以及第一人称视图模型 `gun`、`hands` 与对应着色器 |
+| `harbor`（依赖 `realistic`） | 港口场景内容：道具模型、关卡构建、关卡碰撞盒 | `level`、`origlevel`、`collision` 的碰撞盒、中继模型，以及 `apron`（地面积水）、`sea`（海面）、`rain`（雨幕与檐口滴水）与对应着色器（第 8 步从 realistic 移来：三者的范围、积水斑块、码头线、海面轮廓、室内盒都是这张图的，换一张图用不上） |
 | `mech`（依赖 `fps`、`realistic`） | 机械敌人：模型与行为积木 | `gull`、`hound`、`models`，`enemies` 里的 `slFoe`、`slGull`、`slHound`、`slBolt`（去掉 `sl` 前缀） |
 | `fps` | 第一人称玩法 | 新增枪械逻辑积木（弹匣、射速、散布、换弹、命中射线），saltline 的 `weapon` 逻辑移入 |
 
@@ -2172,3 +2173,33 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 字节数：`src/plugins` 加 `src/parts` 约 78KB，`src/lib` 约 4.9KB。
   - 测试：玩家金标准的入口 `kits` 加 realistic（`Player` 带 `viewGun`，无画面运行时它没有表现，只需要积木名已登记），840 步结果不变。冒烟 hash 由 9cc30054 变为 8ba0dee8（开火改到固定步，与预计一致）。
   - Runner 实机：开火时枪口火焰、曳光、后坐、弹药计数（30 到 25）正常，弹孔与水花正常；把犬摆到准星前开枪，3 发命中，犬的生命值下降，战绩命中数加 3；按 R 换弹，换弹姿态与“换弹中”提示正常，补弹后弹匣由 22 回到 30、备弹由 150 扣到 142；阵亡后隐藏，重试后枪模重建（30/150），连续 4 次重试后场景对象数、引擎对象数、实体数都不增长。
+
+第 8 步（场景渲染）：
+
+- 架构调整（框架）：实体标签加 `keep`（见 16.2）。流程的“进入”会销毁并重建游戏挂载的全部实体，saltline 每次开局、重试、回标题都要进入状态；场景渲染变成积木后，关卡几何、几百个原版网格、后处理链也会跟着重建，每次要卡一两秒。标了 `keep` 的实体跨状态保留，新状态的场景里还有同一 key 时只对比属性。`keep` 进 `MountRecord`（不进 `EntityData`，不影响 `worldHash` 的实体部分），不参与 `last` 的对比串；不是布尔值时报错。测试 `world-flow.test.js` 加两例。
+- 目标。删除低层单元 `plugins/world.ts`（约 23KB）。它做了五件事，按“换一种玩法还用不用得上”分开：环境（太阳、天空、雾、后处理链、画质档位、雷电）是写实风格通用的，进 realistic；港口的地面、海面、雨幕、关卡几何与原版模型、动画、中继灯是这张图的，进 harbor；撤离点信标是通用的目标标记，进 realistic；环境声（雨声、低鸣、交战紧张感随阶段变化）与总音量是本游戏的混音，留在 saltline 写成表现积木。
+- realistic：
+  - `atmosphere` 扩展（不另立积木：saltline 的 `look` 除天气外与 dusk 预设逐项相同，闪电的时间分布与闪光曲线本来就取自 saltline）：
+    - `chain: { exposure?, sunColor? } | null`：运行时着色器可用时用 `post` 模块的后处理链（bloom 金字塔、自动曝光、调色等），不再调 `scene.post(post)`；不可用时照旧用 URP 后处理。`sunColor` 缺省取环境的 `sky.sun`。有链时闪电的闪光写链的 `uThunder`（`lightningValue × 0.35 × flash`，与原版相同），每次新闪电随机一个 `uFlashDir`；不再按闪光提亮环境光与雾（原版也没有）。没有链时保持原来的提亮。
+    - `setPostValues(w, values)`：游戏驱动的后处理参数（`uDamage`、`uLowHealth`、`uAds` 等），存到 World 上，`atmosphere` 的表现在下一帧写进链。按 `w.registry` 存（与 `setGunEnv` 同理）。没有链时忽略。
+    - `lightning.sound: boolean`：表现层在闪电后按事件的 `delay` 放雷声（强度大于 0.6 为近雷，音量 `0.35 + 0.65 × power`）。`delay` 同时记进状态（`atmosphere.delay`），表现据 `strikes` 的变化取用。
+    - `quality: QualityLevel[] | null`：画质档位表。有表时按套件变量 `w.vars.renderQuality`（realistic 的 `vars`，缺省 2）选档，进场和档位变化时应用 `scene.quality`、平面反射（排除视图模型层）、`scene.post({ ao, antialias })`、链的 bloom 开关、`scene.weather` 的内置雨滴数；没有表时反射照旧由 `reflection` 决定。
+    - `shaderRain: boolean`：雨由别的积木用着色器画（harbor 的 `harborLevel`），运行时着色器可用时内置雨滴粒子数为 0。
+  - `beacon`：目标标记（地面光圈、光柱、点光，脉动）。属性 `radius`、`color`，状态 `on`（由游戏写）。
+  - 音效：`registerSfx` 是幂等的，用到音效的套件表现（`atmosphere` 有雷声时、`viewGun`、`beacon` 不用）在 enter 里调用，不再依赖游戏先注册。
+- fps：`cameraFps` 加 `near`、`far`（0 为不改），进场时设置（原版 0.02 与 600 米）。
+- harbor：
+  - `apron`、`sea`、`rain` 与 7 个着色器移入，各自补 `destroy()`（场景对象与贴图），供表现 exit 回收。
+  - `harborLevel`（一个实体）：地面（apron）、海面、雨幕、`buildLevel` 的关卡几何（地面、海面在 apron、sea 可用时由它们代替）、原版动态网格（闸杆、中继等，每帧同步原版动画）、远景闪灯与海鸥、原版点光、中继灯。属性 `tex`（贴图档，0 为缺省，与原 `tuning.quality.tex` 相同）。中继的状态读套件变量 `w.vars.harborRelays`（`'live' | 'cutting' | 'cut'` 数组，游戏写），按原版 `setState` 驱动模型与灯。
+  - `harborStatics`：原版合并后的静态网格，属性 `chunk`、`of` 把列表分成若干份，每份一个实体。原 world.ts 在装配几百个网格时逐个让帧回报进度；表现的 enter 是同步的，分份后启动预热（17.13）在实体之间让帧，加载界面不会卡住。
+  - 材质（`createMats`）、表面贴图、喷字贴花、闪灯与海鸥着色器按 World 缓存，几个积木共用；场景对象按实体建，exit 倒序销毁。
+- saltline：
+  - `game.tsx` 的 `scene` 加 `<Stage>`（`parts/stage.tsx`）：环境实体（`atmosphere`：dusk 加 `tuning.look.weather`、`chain`、`lightning: { sound: true }`、`quality` 取 `tuning.quality.levels`、`shaderRain`），`harborLevel`、若干 `harborStatics`，撤离点 `beacon`，环境声 `slAmbience`。关卡盒与玩家仍在前面（实体 id 顺序影响 `w.move`）。布景实体与关卡碰撞盒都标 `keep`：重试不再重建 559 个碰撞盒与整张港口；碰撞盒保留旧 id、玩家新建，id 仍是碰撞盒在前。
+  - `slControl` 写 `w.vars.renderQuality = 设置.quality`；`slDirector` 写 `w.vars.harborRelays = sl.relays`，并按“三处中继都断开且不在标题”写撤离点的 `beacon.on`。
+  - `slAmbience`（`parts/ambience.ts`，只有 view）：雨声、低鸣、紧张感三条循环音，按阶段与是否交战调音量（与原版相同），设置里的总音量变化时调 `ctx.audio.volume`。
+  - hud 改用 `setPostValues`；`lib/bus.ts` 只剩这一个事件，删除。`load` 不再挂 world，加载进度改为界面与菜单两段，场景的进度由启动预热按实体回报。
+  - 删除调试事件 `saltline/thunder`（手动打雷）。
+- 预计的差异：
+  - 闪电的随机数从 world 单元自己的 `rng(97)` 改为 `w.rand`，World 随机序列多了消耗，冒烟 hash 会变；闪电方向与雷声音高用表现层的 `Math.random`。
+  - 闪电只在模拟走时排期：标题与游戏中会打雷，暂停时不打（原版暂停时也不倒计时）。
+  - 加载进度：场景部分由“编译材质、生成地面……”这些文字变成“生成场景 k/n”。

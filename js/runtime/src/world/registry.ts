@@ -11,7 +11,7 @@ import type { Prefab, PotNode } from './node'
 import type { NativeHint } from './layout'
 
 /** 实体标签与 w.spawn 上不是积木名的属性 */
-export const RESERVED = new Set(['key', 'at', 'rot', 'scale', 'name', 'tags', 'children'])
+export const RESERVED = new Set(['key', 'at', 'rot', 'scale', 'name', 'tags', 'keep', 'children'])
 /** 预制件定义里不是积木名的字段 */
 export const PREFAB_RESERVED = new Set(['is', 'tags', 'about'])
 

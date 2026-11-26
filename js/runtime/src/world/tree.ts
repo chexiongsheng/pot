@@ -20,6 +20,8 @@ export interface EntitySpec {
   name?: string
   /** 预制件链上的 tags 与标签上的合并去重 */
   tags: string[]
+  /** 流程切换时保留（keep 属性） */
+  keep?: true
   /** 积木名到属性（已含积木 props 默认值） */
   blocks: Record<string, Record<string, any>>
   source?: SourcePos
@@ -300,6 +302,10 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
       errors.push(`${where}name 必须是字符串`)
       ok = false
     }
+    if (props.keep !== undefined && typeof props.keep !== 'boolean') {
+      errors.push(`${where}keep 必须是 true 或 false`)
+      ok = false
+    }
     if (!ok) return null
     const blocks: Record<string, Record<string, any>> = {}
     for (const name of Object.keys(acc)) {
@@ -307,6 +313,7 @@ export function evaluate(root: PotChild, registry: Registry): TreeResult {
       blocks[name] = merge(clone(block.props ?? {}), acc[name])
     }
     const spec: EntitySpec = { path, prefab: prefab.prefab, at, rot, scale, tags: [...tags], blocks }
+    if (props.keep === true) spec.keep = true
     if (props.name !== undefined) spec.name = props.name
     if (node.source) spec.source = node.source
     return spec

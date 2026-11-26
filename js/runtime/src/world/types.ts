@@ -39,6 +39,8 @@ export interface EntityProps extends BuiltinBlockProps, GameBlockProps {
   scale?: number | Vec3
   name?: string
   tags?: string[]
+  /** 进入新的流程状态时保留（不销毁重建）：新状态的场景里还有同一 key 时照常对比属性，没有了才删 */
+  keep?: boolean
   /** 游戏自写的积木（M1 放行） */
   [block: string]: any
 }
