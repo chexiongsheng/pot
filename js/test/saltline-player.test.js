@@ -22,11 +22,12 @@ function goldenFiles() {
   files.set('src/plugins/golden.tsx', `
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
+import realistic from '@pot/kit/realistic'
 import { player } from '../lib/types'
 import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks } from '../parts/player'
 export default defineGame({
-  kits: [fps],
+  kits: [fps, realistic],
   blocks: playerBlocks,
   vars: { sl: { phase: 'playing' }, slSettings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } },
   load: (ctx) => {

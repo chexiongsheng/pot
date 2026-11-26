@@ -279,11 +279,19 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
     if (ev.weak) sl.stats.weak++
     slEmit(w, 'slFeed', { text: `${ev.kind === 'gull' ? '机械飞鸥' : '机械猎犬'} 已摧毁`, weak: ev.weak })
   }
+  /** 战绩：开枪数（fps 的 gunFired）、命中数（mech 的 mechHurt，击杀时转成 slKill） */
+  const fired = (w: any) => { (w.vars.sl as Sl).stats.shots++ }
+  const hurt = (w: any, h: { kind: EnemyType; weak: boolean; killed: boolean }) => {
+    ;(w.vars.sl as Sl).stats.hits++
+    if (h.killed) slEmit(w, 'slKill', { kind: h.kind, weak: h.weak })
+  }
   return <>
     <entity key="director" tags={['director']} slDirector={{
       flow, relays: relays.map((r) => ({ pos: r.pos, label: r.label })), spawns, extraction, foes: foeSpawns(data.load('tuning.json'), level),
     }} />
     <rule on="mechAlert" do={alert} />
+    <rule on="gunFired" do={fired} />
+    <rule on="mechHurt" do={hurt} />
     <rule on="slKill" do={kill} />
   </>
 }

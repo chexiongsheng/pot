@@ -1,12 +1,13 @@
-/** 低层单元（hud、menu、weapon、world）共用的读取函数。一局的进度在 w.vars.sl（parts/state.ts） */
+/** 低层单元（hud、menu、world）共用的读取函数。一局的进度在 w.vars.sl（parts/state.ts） */
 import type { Context, Vec3 } from '@pot/core'
+import type { GunFpsState } from '@pot/kit/fps'
 import { phaseOf, type EnemyType, type Phase, type Settings, type Sl } from '../parts/state'
 
 export type { EnemyType, Phase, Settings, Sl }
 
 /**
  * 玩家状态的视图：玩家是带 moveFps、cameraFps、health 的实体（player.tsx），这里把积木状态按旧字段名映射出来，
- * 其他单元照旧读写。只有 sprinting（武器开火时打断冲刺）与 shake（爆炸震屏）可写。
+ * 其他单元照旧读写。只有 sprinting 与 shake（爆炸震屏）可写。
  */
 export interface PlayerState {
   pos: Vec3
@@ -31,28 +32,11 @@ export interface PlayerState {
   shake: number
 }
 
-export interface WeaponState {
-  mag: number
-  reserve: number
-  reloading: boolean
-  reloadT: number
-  reloadTotal: number
-  ads: number
-  cooldown: number
-  bloom: number
-  recoilP: number
-  recoilY: number
-  kick: number
-  /** 当前准星扩散（弧度），给 HUD 用 */
-  spread: number
-}
-
-export const WEAPON = 'saltline/weapon'
-
 export const game = (ctx: Context): Sl => (ctx.world as any).vars.sl
 export const settings = (ctx: Context): Settings => (ctx.world as any).vars.slSettings
 export const phase = (ctx: Context): Phase => phaseOf(ctx.world)
-export const weapon = (ctx: Context) => ctx.state.get<WeaponState>(WEAPON)
+/** 玩家的枪（fps 的 gunFps 积木状态：mag、reserve、reloading、ads、spread 等）；还没加载时为 undefined */
+export const weapon = (ctx: Context): GunFpsState | undefined => playerEntity(ctx)?.b.gunFps
 
 /** 敌人摘要（标签 enemy 的实体，mech 套件的 mechFoe）：mode 为 patrol/combat/search/dying 等 */
 export function foes(ctx: Context): { mode: string; pos: Vec3; kind: EnemyType }[] {

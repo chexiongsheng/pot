@@ -1,6 +1,6 @@
 /** HUD：指南针、任务目标、生命、弹药、准星与命中标记、击杀信息、无线电字幕、敌情警告、交互环、受伤暗角、渐黑 */
 import type { Context } from '@pot/core'
-import { emit, on } from '../lib/bus'
+import { emit } from '../lib/bus'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { angleDelta, clamp, formatTime, sub, yawOf } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
@@ -31,7 +31,10 @@ export function apply(ctx: Context) {
   w0.on('slRadio', (_w: any, text: string) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
   w0.on('slWarn', (_w: any, text: string) => { warn = { text, t: 0 } })
   w0.on('slMessage', (_w: any, text: string) => { message = { text, t: 0 } })
-  on(ctx, 'saltline/hitmarker', (kill, weak) => { marker = { t: 0, kill, weak } })
+  w0.on('mechHurt', (_w: any, h: { killed: boolean; weak: boolean }) => {
+    marker = { t: 0, kill: !!h.killed, weak: !!h.weak }
+    ctx.audio.play(sfx(h.killed ? 'kill' : 'hit'), { volume: 0.5, pitch: h.weak ? 1.25 : 1 })
+  })
   w0.on('slFeed', (_w: any, f: SlEvents['slFeed']) => {
     feed.unshift({ text: f.weak ? `${f.text} · 弱点命中` : f.text, weak: f.weak, t: 0 })
     feed = feed.slice(0, 5)

@@ -14,6 +14,7 @@
  */
 import { defineBlock, defineKit, parseColor } from '@pot/core'
 import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3, WeatherOptions } from '@pot/core'
+import { viewGun } from './viewgun'
 
 // ---------------------------------------------------------------- 预设
 
@@ -288,11 +289,14 @@ declare module '@pot/core' {
   interface GameBlockProps {
     atmosphere?: Over<AtmosphereProps>
     surface?: Over<typeof SURFACE_PROPS>
+    viewGun?: boolean | Record<string, never>
   }
 }
 
+export { viewGun, setGunEnv, type GunEnv } from './viewgun'
+
 export default defineKit({
   name: 'realistic',
-  about: '写实：atmosphere（环境预设 dusk、overcast、night，雨、平面反射、闪电）与 surface（材质预设 wetGround、metal、concrete）',
-  blocks: [atmosphere, surface],
+  about: '写实：atmosphere（环境预设 dusk、overcast、night，雨、平面反射、闪电）、surface（材质预设 wetGround、metal、concrete）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
+  blocks: [atmosphere, surface, viewGun],
 })
