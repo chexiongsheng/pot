@@ -7,6 +7,8 @@
  *
  * - 预置代码：#version、精度、内置 uniform（pot_*）、顶点属性（顶点阶段）
  * - #include <pot/lit>（光照工具）、<pot/varyings>（默认顶点着色器的输出），#include "相对路径"（data/ 下）
+ * - 套件里的着色器（004 第 19.3 节 A）：vertex/fragment 写 '@pot/kit/<名字>/<路径>'；其中的相对 #include 留在套件里，
+ *   #include "@pot/kit/<名字>/<路径>" 可以从游戏或别的套件引用
  * - 不给 vertex 时用内置的 <pot/standard.vert>
  * - 改文件触发热重载；编译出错时保留旧程序，错误按原文件行号报告
  */
@@ -710,7 +712,7 @@ export function preprocess(stage: 'vertex' | 'fragment', entry: { path?: string;
           body = lib
         }
       } else {
-        target = normalize(dirname(name.startsWith('<') || name.startsWith('(') ? '' : name) + m[2])
+        target = m[2].startsWith('@pot/kit/') ? normalize(m[2]) : normalize(dirname(name.startsWith('<') || name.startsWith('(') ? '' : name) + m[2])
         if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(' → ')}`)
         body = read(target)
       }

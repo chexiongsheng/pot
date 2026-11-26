@@ -52,6 +52,7 @@ var pot = (() => {
     GfxService: () => GfxService,
     Inject: () => Inject,
     InputService: () => InputService,
+    KIT_PREFIX: () => KIT_PREFIX,
     LIBRARY: () => LIBRARY,
     LoadingService: () => LoadingService,
     Logger: () => Logger,
@@ -2478,6 +2479,8 @@ var pot = (() => {
   };
 
   // runtime/src/data.ts
+  var KIT_PREFIX = "@pot/kit/";
+  var KIT_PATH = /^([a-z][a-z0-9-]*)\/(.+)$/;
   var DataService = class extends Service {
     constructor(ctx, _host) {
       super(ctx, "data");
@@ -2488,16 +2491,26 @@ var pot = (() => {
     _track(path) {
       const unit = unitOf(this.ctx);
       if (!unit) return;
-      let set = this._readers.get(path);
-      if (!set) this._readers.set(path, set = /* @__PURE__ */ new Set());
-      set.add(unit);
+      for (const key of path.startsWith(KIT_PREFIX) ? [path, `kits/${path.slice(KIT_PREFIX.length)}`] : [path]) {
+        let set = this._readers.get(key);
+        if (!set) this._readers.set(key, set = /* @__PURE__ */ new Set());
+        set.add(unit);
+      }
+    }
+    _read(path) {
+      if (!path.startsWith(KIT_PREFIX)) return this._host.readText(`data/${path}`) ?? null;
+      const rest = path.slice(KIT_PREFIX.length);
+      if (!KIT_PATH.test(rest) || rest.split("/").includes("..")) throw new Error(`套件资源路径不对："${path}"，应为 @pot/kit/<名字>/<路径>`);
+      const local = this._host.readText(`data/kits/${rest}`);
+      if (local !== null && local !== void 0) return local;
+      return this._host.readKit?.(rest) ?? null;
     }
     /** 读取文本；不存在时抛错 */
     text(path) {
       path = normalize(path);
       this._track(path);
-      const text = this._host.readText(`data/${path}`);
-      if (text === null || text === void 0) throw new Error(`数据文件不存在：data/${path}`);
+      const text = this._read(path);
+      if (text === null || text === void 0) throw new Error(`数据文件不存在：${display(path)}`);
       return text;
     }
     /** 读取 JSON（每次都重新解析，返回新对象，可放心修改） */
@@ -2506,16 +2519,16 @@ var pot = (() => {
       try {
         return JSON.parse(text);
       } catch (error) {
-        throw new Error(`数据文件 data/${normalize(path)} 不是合法 JSON：${error?.message ?? error}`);
+        throw new Error(`数据文件 ${display(normalize(path))} 不是合法 JSON：${error?.message ?? error}`);
       }
     }
     exists(path) {
       path = normalize(path);
       this._track(path);
-      const text = this._host.readText(`data/${path}`);
+      const text = this._read(path);
       return text !== null && text !== void 0;
     }
-    /** 读取过某个数据文件的单元 */
+    /** 读取过某个数据文件的单元；path 可以是 data/ 下的路径，也可以是 @pot/kit/<名字>/<路径> */
     readers(path) {
       return [...this._readers.get(normalize(path)) ?? []];
     }
@@ -2526,7 +2539,12 @@ var pot = (() => {
     }
   };
   function normalize(path) {
-    return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/^data\//, "");
+    path = path.replace(/\\/g, "/");
+    if (path.startsWith(KIT_PREFIX)) return path;
+    return path.replace(/^\/+/, "").replace(/^data\//, "");
+  }
+  function display(path) {
+    return path.startsWith(KIT_PREFIX) ? path : `data/${path}`;
   }
 
   // runtime/src/input.ts
@@ -6433,7 +6451,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
             body2 = lib;
           }
         } else {
-          target = normalize2(dirname(name.startsWith("<") || name.startsWith("(") ? "" : name) + m[2]);
+          target = m[2].startsWith("@pot/kit/") ? normalize2(m[2]) : normalize2(dirname(name.startsWith("<") || name.startsWith("(") ? "" : name) + m[2]);
           if (stack.includes(target)) throw new Error(`${name}:${i + 1}: #include 循环：${[...stack, target].join(" → ")}`);
           body2 = read2(target);
         }

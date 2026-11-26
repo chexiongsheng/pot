@@ -4,7 +4,7 @@
  *   runtime/src  → packages/com.pot.core/Runtime/Resources/pot/core.cjs      (globalThis.pot)
  *   devtools/src → packages/com.pot.devtools/Runtime/Resources/pot/devtools.cjs (globalThis.pot.devtools)
  * 同时在 js/dist/ 下各放一份，供 Node 测试与 Dev Server 使用。
- *   kits/        → packages/com.pot.core/Runtime/Resources/pot/kits.json （套件源码，Runner 没有套件目录时读它，004 第 17.1 节）
+ *   kits/        → packages/com.pot.core/Runtime/Resources/pot/kits.json （套件源码与资源 .json/.vert/.frag/.glsl，Runner 没有套件目录时读它，004 第 17.1、19.3 节）
  */
 const esbuild = require('esbuild')
 const fs = require('fs')
@@ -74,7 +74,7 @@ function emitKits() {
     for (const entry of fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const rel = sub ? `${sub}/${entry.name}` : entry.name
       if (entry.isDirectory()) walk(rel)
-      else if (/\.(tsx?|js|json)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files[rel] = fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n')
+      else if (/\.(tsx?|js|json|vert|frag|glsl)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files[rel] = fs.readFileSync(path.join(dir, rel), 'utf8').replace(/\r\n/g, '\n')
     }
   }
   walk('')

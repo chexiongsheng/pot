@@ -2025,7 +2025,7 @@ games/saltline/
 
 ### 19.3 架构调整
 
-A. 套件资源。套件除代码外还能带数据文件（着色器、JSON）。`ctx.data` 与 `ctx.gfx` 的路径可以写成 `@pot/kit/<名字>/<路径>`，读取次序：游戏的 `data/kits/<名字>/<路径>`（发布时复制的副本，或弹出后的副本），再回退到宿主的套件目录（`host.readKit`）。着色器里 `#include` 的相对路径按包含它的文件解析，可以跨进套件。读者登记与热重载规则同普通数据文件（DataService 按完整路径登记读者，dev agent 收到套件资源的变化时同样强制重载）。`kits.json` 收录 `.vert`、`.frag`、`.glsl`。`pot build` 把游戏用到的套件资源复制到发布包的 `data/kits/`；`pot eject` 同样复制，并把代码里的 `'@pot/kit/<名字>/'` 改写为 `'kits/<名字>/'`。
+A. 套件资源。套件除代码外还能带数据文件（着色器、JSON）。`ctx.data` 与 `ctx.gfx` 的路径可以写成 `@pot/kit/<名字>/<路径>`，读取次序：游戏的 `data/kits/<名字>/<路径>`（发布时复制的副本，或弹出后的副本），再回退到宿主的套件目录（`host.readKit`）。着色器里 `#include` 的相对路径按包含它的文件解析，可以跨进套件。读者登记与热重载规则同普通数据文件（DataService 按完整路径登记读者，dev agent 收到套件资源的变化时同样强制重载）。`kits.json` 收录 `.vert`、`.frag`、`.glsl`。`pot build` 把游戏用到的套件（按打包时实际引入的模块统计）的资源复制到发布包的 `data/kits/<名字>/`，游戏自己的副本优先；`pot eject` 把资源复制到 `data/kits/<名字>/`（代码与 JSON 仍复制到 `src/kits/<名字>/`），代码里带资源扩展名的 `'@pot/kit/<名字>/…'` 字符串不改写，运行时自然读到游戏的副本。资源指扩展名不是 `.ts`、`.tsx`、`.js` 的文件。
 
 B. 积木的宿主能力。模拟侧（`init`、`step`）只读写实体与 World，不拿 `ctx`；音效、震屏、特效等表现由 `w.emit` 发事件，表现侧（积木的 `view`、套件或游戏的表现积木）处理。不再用模块级的 `host` 变量（现在 `player.tsx` 的写法）。需要新增的 World 能力在实施时补，记在 19.5。
 
@@ -2053,4 +2053,12 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 ### 19.5 实施记录
 
 （每步完成后补写：架构调整、遇到的问题、数字。）
+
+第 2 步（套件资源）：
+
+- `DataService` 认 `@pot/kit/<名字>/<路径>`：先读 `data/kits/<名字>/<路径>`，再 `host.readKit`；含 `..` 或缺名字时报“套件资源路径不对”。读者同时登记在 `@pot/kit/…` 与 `kits/…` 两个键下，套件目录的变化（GameSession 加了 `@pot/kit/` 前缀）和游戏副本 `data/kits/…` 的变化都找得到读者。
+- dev agent：`@pot/kit/` 下的非代码文件与 `data/` 一样按读者强制重载。
+- gfx：`#include "@pot/kit/…"` 按绝对的套件路径解析，其余相对路径照旧按包含它的文件解析，所以套件着色器的相对 include 自然留在套件里。
+- `kits.json` 收录 `.vert`、`.frag`、`.glsl`；`buildRelease` 用 esbuild 的 metafile 统计实际引入的套件，返回 `kits` 与 `kitResources`。
+- 测试 `kit-resources.test.js`：读取与 include、副本优先、两种路径的热重载、路径校验、build 与 eject。
 

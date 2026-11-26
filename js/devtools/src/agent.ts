@@ -75,7 +75,7 @@ async function applyChanges(rt: Runtime, paths: string[], checkLeaks = true): Pr
   const force = new Set<string>()
   for (const path of paths) {
     const p = path.replace(/\\/g, '/')
-    if (p.startsWith('data/')) {
+    if (p.startsWith('data/') || (p.startsWith('@pot/kit/') && !/\.(tsx?|js)$/.test(p))) {
       for (const unit of rt.data.readers(p)) {
         names.add(unit)
         force.add(unit)

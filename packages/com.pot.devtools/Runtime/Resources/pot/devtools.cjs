@@ -1349,7 +1349,7 @@ ${code}
     const force = /* @__PURE__ */ new Set();
     for (const path of paths) {
       const p = path.replace(/\\/g, "/");
-      if (p.startsWith("data/")) {
+      if (p.startsWith("data/") || p.startsWith("@pot/kit/") && !/\.(tsx?|js)$/.test(p)) {
         for (const unit of rt.data.readers(p)) {
           names.add(unit);
           force.add(unit);

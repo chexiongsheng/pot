@@ -31,6 +31,7 @@ export default defineGame({
 - 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`、`body`）。游戏同名定义会覆盖系统的。
 - 碰撞在模拟侧：带 `body`（轴对齐的盒、球或竖直胶囊，可设 `layer`、`solid`）的实体进碰撞表。`w.move(e, mover, { radius, height, stepUp, layers, ground })` 做角色移动（`mover` 为 `{ vel, grounded }`，放在积木状态里）；`w.raycast(from, dir, maxDist, { layers, ignore, solid })` 返回最近的 `{ point, normal, dist, entity }` 或 null；`w.overlap({ kind: 'sphere', radius }, at)` 返回重叠的实体。三者都是纯 JS、可复现，玩法判定不要用 `scene.raycast`。
 - 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`realistic`（`import realistic from '@pot/kit/realistic'`）提供写实环境 `atmosphere` 和带材质预设的 `surface`，见下文“写实环境”。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
+- 套件可以带数据文件（着色器、JSON）：`ctx.gfx.shader({ fragment: '@pot/kit/<名字>/shaders/x.frag' })`、`ctx.data.load('@pot/kit/<名字>/x.json')`。套件着色器里的相对 `#include` 留在套件内，游戏的着色器可以写 `#include "@pot/kit/<名字>/..."`。游戏的 `data/kits/<名字>/` 有同名文件时优先读它；`pot build` 把用到的套件资源复制进发布包，`pot eject` 把它们复制到 `data/kits/<名字>/`。
 
 ## 场景树
 

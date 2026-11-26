@@ -5,6 +5,7 @@
  * - packGame：再压成 .potg（zip），Runner 可直接打开 / 安装。
  * - checkGame：tsc 类型检查 + 试打包，发现 Runner 运行前就能看出的错误。
  * - 套件（004 第 17.2 节）：@pot/kit/<名字> 解析到仓库的 kits/，打进 bundle，发布的游戏不依赖 Runner 里的套件。
+ *   用到的套件的资源（着色器、JSON 等非代码文件，19.3 A）复制到发布包的 data/kits/<名字>/。
  */
 const esbuild = require('esbuild')
 const fs = require('fs')
@@ -102,8 +103,24 @@ async function bundleUnits(gameDir) {
     jsx: 'automatic',
     jsxImportSource: '@pot/core',
     plugins: [externalPot, kitResolver],
+    metafile: true,
   })
-  return { code: result.outputFiles[0].text, units: units.map((u) => u.name) }
+  const kits = new Set()
+  for (const input of Object.keys(result.metafile?.inputs ?? {})) {
+    const rel = path.relative(KITS_DIR, path.resolve(process.cwd(), input))
+    if (!rel.startsWith('..') && !path.isAbsolute(rel)) kits.add(rel.split(path.sep)[0])
+  }
+  return { code: result.outputFiles[0].text, units: units.map((u) => u.name), kits: [...kits].sort() }
+}
+
+/** 套件里不是代码模块的文件（着色器、JSON 等），经 ctx.data / ctx.gfx 以 @pot/kit/<名字>/<路径> 读取（19.3 A） */
+function isKitResource(rel) {
+  return !/\.(tsx?|js)$/.test(rel)
+}
+
+/** 套件 name 的资源文件（相对套件目录） */
+function kitResources(name, kitsDir = KITS_DIR) {
+  return walk(path.join(kitsDir, name)).filter(isKitResource)
 }
 
 /** 发布构建：manifest.json + bundle.cjs + data/** 写入 outDir（先清空） */
@@ -124,8 +141,19 @@ async function buildRelease(gameDir, outDir) {
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.copyFileSync(path.join(gameDir, file), target)
   }
+  // 用到的套件的资源复制到 data/kits/<名字>/，运行时先读这里（游戏自己的 data/kits 副本已在上面复制，优先）
+  let resources = 0
+  for (const kit of bundle.kits) {
+    for (const rel of kitResources(kit)) {
+      const target = path.join(outDir, 'data', 'kits', kit, rel)
+      if (fs.existsSync(target)) continue
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(path.join(KITS_DIR, kit, rel), target)
+      resources++
+    }
+  }
   fs.writeFileSync(path.join(outDir, 'bundle.cjs'), bundle.code)
-  return { outDir, units: bundle.units.length }
+  return { outDir, units: bundle.units.length, kits: bundle.kits, kitResources: resources }
 }
 
 /**
@@ -205,4 +233,4 @@ async function generateGameTypes(gameDir) {
   return { ok: true, file: headless.writeTypes(gameDir, result.types) }
 }
 
-module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk, KITS_DIR, resolveKitFile }
+module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk, KITS_DIR, resolveKitFile, isKitResource, kitResources }
