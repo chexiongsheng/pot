@@ -1,46 +1,8 @@
-/** 跨单元共享的状态结构。各 key 由所属单元 define，其他单元用 ctx.state.get 读取 */
+/** 低层单元（hud、menu、weapon、world）共用的读取函数。一局的进度在 w.vars.sl（parts/state.ts） */
 import type { Context, Vec3 } from '@pot/core'
+import { phaseOf, type EnemyType, type Phase, type Settings, type Sl } from '../parts/state'
 
-export type Phase = 'title' | 'intro' | 'playing' | 'paused' | 'dead' | 'complete'
-export type RelayStatus = 'live' | 'cutting' | 'cut'
-export type EnemyType = 'gull' | 'hound'
-
-export interface Settings {
-  sensitivity: number
-  invertY: boolean
-  volume: number
-  fov: number
-  /** 画质档位 0 低 1 中 2 高 3 极高（tuning.json quality.levels） */
-  quality: number
-}
-
-export interface GameState {
-  phase: Phase
-  /** 暂停前的阶段 */
-  resume: Phase
-  phaseTime: number
-  /** 任务计时（只在 playing 走） */
-  time: number
-  retries: number
-  relays: RelayStatus[]
-  /** 正在交互的中继下标与进度 0..1；-1 为无 */
-  interact: number
-  progress: number
-  /** 可交互但未按住时的中继（用于提示） */
-  hint: number
-  alerted: boolean
-  stats: { shots: number; hits: number; kills: number; weak: number }
-  settings: Settings
-  /** 菜单子面板：'' | settings | controls | about */
-  panel: string
-  fade: number
-  titleT: number
-  pending: { type: EnemyType; delay: number; pursuit: boolean }[]
-  pursuitT: number
-  pursuitSpawned: number
-  lowWarned: boolean
-  seed: number
-}
+export type { EnemyType, Phase, Settings, Sl }
 
 /**
  * 玩家状态的视图：玩家是带 moveFps、cameraFps、health 的实体（player.tsx），这里把积木状态按旧字段名映射出来，
@@ -85,10 +47,11 @@ export interface WeaponState {
   spread: number
 }
 
-export const GAME = 'saltline/game'
 export const WEAPON = 'saltline/weapon'
 
-export const game = (ctx: Context) => ctx.state.get<GameState>(GAME)
+export const game = (ctx: Context): Sl => (ctx.world as any).vars.sl
+export const settings = (ctx: Context): Settings => (ctx.world as any).vars.slSettings
+export const phase = (ctx: Context): Phase => phaseOf(ctx.world)
 export const weapon = (ctx: Context) => ctx.state.get<WeaponState>(WEAPON)
 
 /** 敌人摘要（标签 enemy 的实体，mech 套件的 mechFoe）：mode 为 patrol/combat/search/dying 等 */

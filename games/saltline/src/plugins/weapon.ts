@@ -1,6 +1,7 @@
 /** 武器 PAC-9：射线射击、扩散、后坐力、换弹、瞄准、枪模（含双手、刻字）、曳光与命中火花 */
 import type { Context, Entity, MaterialOptions, StandardMaterial, Vec3 } from '@pot/core'
-import { emit, on, type BulletHit } from '../lib/bus'
+import { emit, on } from '../lib/bus'
+import { mechHear, mechHit } from '@pot/kit/mech'
 import { isPuddle } from '@pot/kit/realistic/apron'
 import { createPac9Materials, wetness } from '@pot/kit/realistic/pac9-mats'
 import { createDecals, decalFor, surfaceAt } from '@pot/kit/realistic/decals'
@@ -10,10 +11,10 @@ import { linearColor, toMesh, type RGB } from '@pot/kit/realistic/geo'
 import { buildPac9, PAC9 } from '@pot/kit/realistic/gun'
 import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from '@pot/kit/realistic/hands'
 import { ENEMY_LAYER, LEVEL_LAYER, VIEW_LAYER } from '@pot/kit/realistic/layers'
-import { clamp, damp, forward, jitter, lerp } from '@pot/kit/realistic/math'
+import { clamp, damp, forward, jitter, lerp, norm, sub } from '@pot/kit/realistic/math'
 import { sfx } from '@pot/kit/realistic/sfx'
 import * as Tex from '@pot/kit/realistic/textures'
-import { game, player, WEAPON, eyeOf, type WeaponState } from '../lib/types'
+import { game, phase, player, playerEntity, settings, WEAPON, eyeOf, type WeaponState } from '../lib/types'
 import { Quaternion, Vector3 } from '@pot/kit/realistic/vendor/three-geo'
 
 export const name = 'weapon'
@@ -235,7 +236,11 @@ export function apply(ctx: Context) {
   round.active(!boltLocked)
   const tp = new Vector3(), tq = new Quaternion(), tz = new Quaternion(), tm = new Vector3()
 
-  on(ctx, 'saltline/reset', (keep) => {
+  // 进入 play（开局、重试、重新开始）时重置；重试保留多余弹药。恢复暂停不会进这里（叠加状态退出不算进入）
+  ctx.world.onFlowEnter(() => {
+    const f = (ctx.world as any).flow
+    if (f.state !== 'play') return
+    const keep = f.params?.mode === 'retry'
     const m = w.mag, r = w.reserve
     Object.assign(w, fresh())
     if (keep) { w.mag = Math.max(m, W.mag); w.reserve = Math.max(r, W.reserve) }
@@ -275,13 +280,14 @@ export function apply(ctx: Context) {
     boltT = 0
     if (w.mag <= 0) { boltLocked = true; round.active(false) }
     ctx.audio.play(sfx('shot'), { volume: 0.75, pitch: 0.95 + rand() * 0.1 })
-    emit(ctx, 'saltline/shot', origin)
+    mechHear(ctx.world, origin)
 
     const hit = bulletRay(origin, dir)
     const end: Vec3 = hit ? hit.point : [origin[0] + dir[0] * W.range, origin[1] + dir[1] * W.range, origin[2] + dir[2] * W.range]
     if (hit) {
-      const info: BulletHit = { id: hit.id, point: hit.point, damage: W.damage, enemy: false, killed: false, weak: false }
-      emit(ctx, 'saltline/bullet', info)
+      const r = mechHit(ctx.world, hit.id, W.damage, norm(sub(hit.point, origin)), W.weakMultiplier)
+      const info = { enemy: !!r, killed: !!r?.killed, weak: !!r?.weak }
+      if (r?.killed) (ctx.world as any).emit('slKill', { kind: r.kind, weak: r.weak })
       if (info.enemy) {
         g.stats.hits++
         emit(ctx, 'saltline/hitmarker', info.killed, info.weak)
@@ -317,15 +323,24 @@ export function apply(ctx: Context) {
   /** 换弹时间点触发一次（原版 Vt） */
   const once = (key: string, at: number) => (w.reloadT >= at && !flags[key] ? (flags[key] = 1, true) : false)
 
+  /** 相机后坐（cameraFps.kick）与瞄准程度（moveFps.aim）由武器写到玩家实体上 */
   ctx.on('update', (dt) => {
+    const pe = playerEntity(ctx)
+    if (pe) pe.b.cameraFps.kick = [w.recoilP, w.recoilY]
+    tick(dt)
+    if (pe) pe.b.moveFps.aim = w.ads
+  })
+
+  function tick(dt: number) {
     const g = game(ctx)
     const p = player(ctx)
     if (!g || !p) return
-    const visible = g.phase === 'playing' || g.phase === 'intro' || g.phase === 'paused' || g.phase === 'dead'
+    const ph = phase(ctx)
+    const visible = ph === 'playing' || ph === 'intro' || ph === 'paused' || ph === 'dead'
     gun.active(visible && p.health > 0)
     updateWetness(dt)
     // 特效衰减（暂停时冻结）
-    if (g.phase !== 'paused') {
+    if (ph !== 'paused') {
       for (const t of tracers) if (t.life > 0 && (t.life -= dt) <= 0) t.e.active(false)
       flashT -= dt
       heat = Math.max(0, heat - dt * 0.2)
@@ -338,8 +353,8 @@ export function apply(ctx: Context) {
       }
       flashLight.intensity(flashT > 0 ? 3 : 0)
     }
-    if (g.phase !== 'playing' || p.health <= 0) {
-      if (g.phase !== 'paused') w.ads = Math.max(0, w.ads - dt / W.adsTime)
+    if (ph !== 'playing' || p.health <= 0) {
+      if (ph !== 'paused') w.ads = Math.max(0, w.ads - dt / W.adsTime)
       return
     }
     const input = ctx.input
@@ -429,7 +444,7 @@ export function apply(ctx: Context) {
 
     // 视野缩放
     const a = w.ads
-    const fov = (g.settings.fov ?? T.fov) + (T.fovAds - T.fov) * a + (p.sprinting ? T.fovSprint : 0)
+    const fov = (settings(ctx).fov ?? T.fov) + (T.fovAds - T.fov) * a + (p.sprinting ? T.fovSprint : 0)
     const k = Math.tan(fov * Math.PI / 360) / Math.tan(VIEW_FOV * Math.PI / 360)
     fovRoot.scale = [k, k, 1]
 
@@ -453,5 +468,5 @@ export function apply(ctx: Context) {
     const rz = EU.r[2] * Le + TU.r[2] * Ue + NU.r[2] * ct + 0.62 * De + Math.sin(Zo) * 0.014 * yr - ge * 0.035 * Le + kR.x + Math.sin(he * 0.5) * 4e-3 * te
     gun.localPosition = [px, py, -pz]
     gun.localRotation = euler(rx, ry, rz)
-  })
+  }
 }

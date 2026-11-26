@@ -152,7 +152,7 @@ export const foeView = {
   update(f: any, e: any, _objs: any, ctx: Context, w: any) {
     const S = store(w), dt = frameDt(S, ctx), L = S.looks.get(e.id)
     const t = findTarget(w, f.target)
-    if (!L || w.vars.mechFrozen || !t) return
+    if (!L || w.vars.mechFrozen || w.overlayActive || !t) return
     const m = L.m
     // 受击（mechHit 记下的次数变了）：猎犬按伤害与方向晃动，飞鸥机身随机歪一下
     if (L.hits !== f.hits) {
@@ -209,7 +209,7 @@ export const boltView = {
   },
   update(b: any, e: any, _objs: any, ctx: Context, w: any) {
     const x = store(w).fx.get(e.id)
-    if (!x || w.vars.mechFrozen) return
+    if (!x || w.vars.mechFrozen || w.overlayActive) return
     const o = x.o, v = b.vel, pos = at(w, e, ctx.clock.fixedAlpha)
     o.position = pos
     o.lookAt([pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]])
@@ -232,7 +232,7 @@ export const boomView = {
   },
   update(_b: any, e: any, _objs: any, _ctx: Context, w: any) {
     const x = store(w).fx.get(e.id)
-    if (!x || w.vars.mechFrozen) return
+    if (!x || w.vars.mechFrozen || w.overlayActive) return
     const lt = e.b.lifetime
     const k = Math.min(1, (lt?.age ?? 0) / (lt?.seconds ?? 0.6))
     const r = 0.6 + k * 5

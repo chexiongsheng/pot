@@ -6,7 +6,8 @@
  *   w.spawn('gull', { at, mechFoe: { pursuit: true }, health: { max: 45 } })
  *
  * 目标是带 mechFoe.target 标签的实体（缺省 player，眼高与身高读 fps 的 moveFps）；
- * w.vars.mechFrozen 冻结、mechHostile 敌对开关由游戏每步写；转入交战时发 World 事件 mechAlert { entity, pos }。
+ * w.vars.mechFrozen 冻结（如标题画面）、mechHostile 敌对开关由游戏每步写；flow 叠加状态（暂停）时模拟本就不走，表现也随之冻结；
+ * 转入交战时发 World 事件 mechAlert { entity, pos }。
  */
 import { defineKit } from '@pot/core'
 import type { Over, Vec3 } from '@pot/core'

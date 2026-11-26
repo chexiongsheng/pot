@@ -3,7 +3,7 @@
  * mechHound（地面移动、扑击、倒地）、mechBolt（弹道）、mechBoom（爆炸，只有表现）。
  * 逐行照搬 saltline 原版敌人（坐标用 Unity 系）；目标按标签找，伤害走 fps 的 damage。
  *
- * 用到的 w.vars：mechFrozen（为真时整体冻结，如暂停）、mechHostile（为假时不感知、不开火、不伤人）、mechTokenGap（攻击令牌间隔）。
+ * 用到的 w.vars：mechFrozen（为真时整体冻结，如标题画面；暂停用 flow 叠加状态，模拟不走）、mechHostile（为假时不感知、不开火、不伤人）、mechTokenGap（攻击令牌间隔）。
  * 发出的 World 事件：mechAlert { entity, pos }（从巡逻或搜索转入交战）。
  */
 import { defineBlock, definePrefab, type Vec3 } from '@pot/core'

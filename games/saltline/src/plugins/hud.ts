@@ -5,7 +5,9 @@ import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { angleDelta, clamp, formatTime, sub, yawOf } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
 import { sfx } from '@pot/kit/realistic/sfx'
-import { foes, game, player, weapon } from '../lib/types'
+import { foes, game, phase, player, settings, weapon, type Phase, type Sl } from '../lib/types'
+import { directorFade } from '../parts/director'
+import type { SlEvents } from '../parts/state'
 
 export const name = 'hud'
 
@@ -25,15 +27,16 @@ export function apply(ctx: Context) {
   let hurtShown = ''
   let lowHealth = 0
 
-  on(ctx, 'saltline/radio', (text) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
-  on(ctx, 'saltline/warn', (text) => { warn = { text, t: 0 } })
-  on(ctx, 'saltline/message', (text) => { message = { text, t: 0 } })
+  const w0 = ctx.world as any
+  w0.on('slRadio', (_w: any, text: string) => { radio = { text, t: 0 }; ctx.audio.play(sfx('radio'), { volume: 0.5 }) })
+  w0.on('slWarn', (_w: any, text: string) => { warn = { text, t: 0 } })
+  w0.on('slMessage', (_w: any, text: string) => { message = { text, t: 0 } })
   on(ctx, 'saltline/hitmarker', (kill, weak) => { marker = { t: 0, kill, weak } })
-  on(ctx, 'saltline/feed', (text, weak) => {
-    feed.unshift({ text: weak ? `${text} · 弱点命中` : text, weak, t: 0 })
+  w0.on('slFeed', (_w: any, f: SlEvents['slFeed']) => {
+    feed.unshift({ text: f.weak ? `${f.text} · 弱点命中` : f.text, weak: f.weak, t: 0 })
     feed = feed.slice(0, 5)
   })
-  on(ctx, 'saltline/reset', () => {
+  ctx.world.onFlowEnter(() => {
     warn.t = 99
     message.t = 99
     feed = []
@@ -42,9 +45,10 @@ export function apply(ctx: Context) {
   ctx.on('update', (dt) => {
     const g = game(ctx), p = player(ctx), w = weapon(ctx)
     if (!g || !p || !w) return
+    const ph = phase(ctx), fade = directorFade(ctx.world)
     const W = ui.width, H = ui.height
-    const live = g.phase === 'playing' || g.phase === 'intro' || g.phase === 'paused' || g.phase === 'dead'
-    if (g.phase !== 'paused') {
+    const live = ph === 'playing' || ph === 'intro' || ph === 'paused' || ph === 'dead'
+    if (ph !== 'paused') {
       radio.t += dt; warn.t += dt; message.t += dt; marker.t += dt
       for (const f of feed) f.t += dt
       feed = feed.filter((f) => f.t < 5)
@@ -63,22 +67,22 @@ export function apply(ctx: Context) {
       }
     }
 
-    if (g.phase === 'playing' || g.phase === 'intro' || g.phase === 'paused') {
+    if (ph === 'playing' || ph === 'intro' || ph === 'paused') {
       drawCompass(W, g.relays.every((r) => r === 'cut'))
       drawObjectives(g)
       drawHealth(H, p.health / tuning.player.maxHealth)
       drawAmmo(W, H, w)
-      if (g.phase !== 'paused') drawCrosshair(W, H, w)
-      drawInteract(W, H, g)
+      if (ph !== 'paused') drawCrosshair(W, H, w)
+      drawInteract(W, H, g, ph)
       drawFeed(W)
       drawWarn(W)
       drawMessage(W, H)
     }
-    if (g.phase !== 'title') drawRadio(W, H)
+    if (ph !== 'title') drawRadio(W, H)
 
-    if (g.fade > 0.001) ui.rect(0, 0, W, H, C.ink, { alpha: g.fade })
-    if (g.phase === 'intro') {
-      const a = clamp(Math.min(g.phaseTime * 2, g.fade * 2.5), 0, 1)
+    if (fade > 0.001) ui.rect(0, 0, W, H, C.ink, { alpha: fade })
+    if (ph === 'intro') {
+      const a = clamp(Math.min(g.t * 2, fade * 2.5), 0, 1)
       ui.text('行动代号 · 港区突击', W / 2, H / 2 - 20, { size: 34, color: C.bone, align: 'center', valign: 'middle', bold: true, alpha: a })
       ui.text(g.retries > 0 || g.relays.some((r) => r === 'cut') ? `重新部署 · 第 ${g.retries} 次` : '切断三处中继 · 撤离港区', W / 2, H / 2 + 22, { size: 18, color: C.signal, align: 'center', valign: 'middle', alpha: a })
     }
@@ -121,7 +125,7 @@ export function apply(ctx: Context) {
     ui.line(cx, top - 4, cx, top + 4, C.signal, 2)
   }
 
-  function drawObjectives(g: NonNullable<ReturnType<typeof game>>) {
+  function drawObjectives(g: Sl) {
     const x = 24, y = 20
     const allCut = g.relays.every((r) => r === 'cut')
     const n = g.relays.filter((r) => r === 'cut').length
@@ -172,8 +176,7 @@ export function apply(ctx: Context) {
 
   function drawCrosshair(W: number, H: number, w: NonNullable<ReturnType<typeof weapon>>) {
     const cx = W / 2, cy = H / 2
-    const g = game(ctx)!
-    const fovPx = H / (2 * Math.tan(((g.settings.fov ?? 74) * Math.PI / 180) / 2))
+    const fovPx = H / (2 * Math.tan(((settings(ctx).fov ?? 74) * Math.PI / 180) / 2))
     const gap = 5 + w.spread * fovPx
     const a = 1 - w.ads * 0.85
     if (a > 0.05) {
@@ -191,9 +194,9 @@ export function apply(ctx: Context) {
     }
   }
 
-  function drawInteract(W: number, H: number, g: NonNullable<ReturnType<typeof game>>) {
+  function drawInteract(W: number, H: number, g: Sl, ph: Phase) {
     const i = g.interact >= 0 ? g.interact : g.hint
-    if (i < 0 || g.phase !== 'playing') return
+    if (i < 0 || ph !== 'playing') return
     const cx = W / 2, cy = H / 2 + 110
     ui.arc(cx, cy, 24, C.ink, 6, 0, 360, 0.55)
     if (g.interact >= 0) ui.arc(cx, cy, 24, C.signal, 6, 0, 360 * clamp(g.progress, 0, 1))

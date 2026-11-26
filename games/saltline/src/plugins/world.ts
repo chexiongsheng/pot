@@ -12,7 +12,7 @@ import { registerSfx, sfx } from '@pot/kit/realistic/sfx'
 import { createPost } from '@pot/kit/realistic/post'
 import { on } from '../lib/bus'
 import * as T from '@pot/kit/realistic/textures'
-import { game } from '../lib/types'
+import { game, phase, settings } from '../lib/types'
 
 export const name = 'world'
 
@@ -333,7 +333,7 @@ export async function apply(ctx: Context) {
     scene.weather({ ...look.weather, drops: rainFx ? 0 : q.drops })
   }
   await step('应用画质', 0.73)
-  applyQuality(game(ctx)?.settings.quality ?? 2)
+  applyQuality(settings(ctx)?.quality ?? 2)
   scene.refreshEnvironment()
 
   // ---- 中继：原版模型（发光/天线/盖板动画由原版 update 驱动），这里只补一盏随发光强度变化的点光 ----
@@ -398,10 +398,10 @@ export async function apply(ctx: Context) {
   let t = 0
   ctx.on('update', (dt) => {
     t += dt
-    const g = game(ctx)
+    const g = game(ctx), s = settings(ctx), ph = phase(ctx)
     post?.update(dt)
-    updateThunder(dt, g?.phase === 'paused')
-    const quality = g?.settings.quality ?? 2
+    updateThunder(dt, ph === 'paused')
+    const quality = s?.quality ?? 2
     if (quality !== appliedQuality) applyQuality(quality)
     const relays = g?.relays ?? []
     relayParts.forEach((r: any, i: number) => r.ud.setState?.(relays[i] ?? 'live'))
@@ -412,7 +412,7 @@ export async function apply(ctx: Context) {
       r.light.intensity(Math.min(2, (r.ud.level ?? 0) * 0.2))
       r.light.color(c.color)
     })
-    const open = relays.length > 0 && relays.every((s) => s === 'cut') && g?.phase !== 'title'
+    const open = relays.length > 0 && relays.every((s) => s === 'cut') && ph !== 'title'
     exRoot.active(open)
     if (open) {
       const pulse = 0.5 + 0.5 * Math.sin(t * 3)
@@ -420,13 +420,13 @@ export async function apply(ctx: Context) {
       pillar.color(`#38e070${Math.round(30 + pulse * 40).toString(16).padStart(2, '0')}`)
       flare.intensity(1.8 + pulse * 1.2)
     }
-    const paused = g?.phase === 'paused'
-    const combat = g?.alerted && g.phase === 'playing' ? 1 : 0
+    const paused = ph === 'paused'
+    const combat = g?.alerted && ph === 'playing' ? 1 : 0
     tensionVol += (combat * 0.4 - tensionVol) * Math.min(1, dt * 0.8)
     tension.set({ volume: paused ? 0 : tensionVol })
-    const vol = g?.settings.volume ?? 0.8
+    const vol = s?.volume ?? 0.8
     if (vol !== lastVol) { lastVol = vol; ctx.audio.volume(vol) }
     rain.set({ volume: paused ? 0.08 : 0.35 })
-    drone.set({ volume: paused ? 0 : g?.phase === 'title' ? 0.35 : 0.2 })
+    drone.set({ volume: paused ? 0 : ph === 'title' ? 0.35 : 0.2 })
   })
 }

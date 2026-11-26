@@ -2107,3 +2107,33 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 旧存档里带 `slFoe` 等已删积木的实体会残留（`pot restart --reset` 可清）；`foes()` 改为只取带 `mechFoe` 的实体，残留实体不再让 hud 报错。存档迁移不在本阶段处理。
 - 验收：`npm test` 279/280（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归 5 例通过；`tsc`、saltline 的 `tsc`、`pot check`、`pot test`（冒烟 hash 7ba010f7，积木名变了，哈希随之变化）通过。Runner 实机（重建后，清空存档）：开局 8 个敌人按 `mechFoe` 生成，靠近后转入交战，“发现敌情”提示、玩家掉血与红屏、阵亡结算都正常；猎犬的烘焙材质与灯光正常（`shots/step5b-hound.png`），重置后没有新的错误日志。
 - 字节数：游戏 `plugins` + `parts` 共 99061 字节（第 4 步 127153），其中 `parts` 19340（第 4 步 47382），`enemies.tsx` 1789。mech 套件 88304 字节（`foe` 24231、`look` 10884、`target` 1150、`index` 1789，其余是第 3 步搬来的模型与动画）。
+
+第 6 步（导演逻辑）：
+
+- 阶段。`game.tsx` 的 `flow` 只有三个状态：`title`、`play`、`paused`（`pause: true` 的叠加状态）。intro、playing、dead、complete 是 `play` 里的子阶段，放在 `w.vars.sl.phase`。dead、complete 不做成叠加状态：原版阵亡后敌人照常移动、已发出的弹道飞完，敌人回归测试也依赖这一点。`phaseOf(w)` 合成旧的六个阶段名（flow 为 `play` 时取 `sl.phase`，否则取 flow 状态名），hud、menu、world 和积木都用它。
+
+  ```ts
+  flow: { start: 'title', states: {
+    title: { on: { slStart: 'play' } },
+    play: { on: { slPause: 'paused', slRetry: 'play', slRestart: 'play', slTitle: 'title' } },
+    paused: { pause: true, on: { slResume: 'play', slRestart: 'play', slTitle: 'title' } },
+  } }
+  ```
+
+- 菜单命令改用 `ctx.world.emitUI`（进指令与录像）：开始 `slStart`，继续 `slResume`（不带载荷，即恢复），重新开始 `slRestart { mode: 'fresh' }`，重试 `slRetry { mode: 'retry' }`，返回标题 `slTitle`，暂停 `slPause`。结算页的“再次出击”发 `slRestart`。`slRestart` 必须带载荷：在暂停中进入当前的 base 状态，不带参数会被当成恢复（16.2）。
+- 状态。`src/parts/state.ts` 定义 `w.vars` 的三个键：`sl`（一局的进度：子阶段、子阶段已过的模拟秒数 `t`、任务计时、重试次数、中继状态、交互进度、提示、交战标记、战绩、待生成队列、追击增援计数、低血量提示、撤离提示冷却）、`slSettings`（灵敏度、反转、音量、视野、画质）、`slPanel`（菜单子面板）。`GAME` 状态与 `defineGameState` 删除，旧存档里的 `GAME` 丢弃。事件名与载荷在 `state.ts` 的 `SlEvents` 里声明，`slEmit(w, name, payload)` 带类型地发：`slRadio`、`slWarn`、`slMessage`（字符串），`slFeed { text, weak }`，`slKill { kind, weak }`。
+- 导演 `src/parts/director.tsx`：
+  - 积木 `slDirector`（order 10，在所有套件与玩家积木之后），挂在单例实体 `<entity key="director">` 上，属性是 flow.json 与关卡点位（中继、生成点、撤离点）和敌人生成覆盖，状态只缓存玩家 id。
+  - 开局布置写在 `init` 里：每次进入 flow 状态都会重建场景，导演实体随之新建，`init` 自然执行，用不上 flow 的 `enter`。进入 `title` 时重置 `sl`；进入 `play` 时，`params.mode === 'retry'` 则重试次数加一、正在切断的中继改回 live，否则重置 `sl`；然后子阶段设为 intro，按巡逻配置与已切断数排队敌人。玩家、敌人、弹道随场景重建或 `_enterCleanup` 自然复位，不再需要 `reset`、`clear-enemies` 事件。
+  - `step`：子阶段计时；intro 结束转 playing（首次开局发开场无线电）；playing 下任务计时、阵亡、低血量提示、中继交互（指令 `interact`，`controls.actions` 加 `interact: ['e']`）、待生成队列（生成点评分改用 `w.rand`）、追击增援、撤离。
+  - `view`：标题镜头（从 `ctx.data` 读关卡的镜头路径）、切断音效与切断中的滴答声、渐黑值（导出 `directorFade(w)` 给 hud）。这些是表现，用模块级 store 记，不进存档。
+  - `Director` 组件返回导演实体和两条规则：`<rule on="mechAlert">`（playing 时首次交战发无线电，并发方向警告）、`<rule on="slKill">`（记战绩、发击杀信息）。
+- 敌人：`src/parts/enemies.ts` 只剩两个函数：`foeSpawns(tuning, level)` 把 tuning.json 映射成鸥与犬的生成覆盖，`spawnFoe(w, spawns, type, pos, pursuit)` 生成。`wireEnemies` 删除；武器开枪时直接调 `mechHear`，命中时直接调 `mechHit`，击杀发 `slKill`。
+- 玩家：`slControl` 从 `vars.slSettings` 读灵敏度、反转、视野，属性给回血速度与缺省视野；按 `phaseOf` 写 `mechFrozen`（只在 title）、`mechHostile`（只在 playing）。暂停冻结改由叠加状态完成，mech 的表现在 `mechFrozen || w.overlayActive` 时停。`slFeedback` 的 `step` 只计数（脚步、落地、受伤）并写震屏，音效由它的 `view` 按计数变化播；落水救援直接调 `damage`（playing 时）并发 `slMessage`。受伤反馈是 `Player` 组件里的 `<rule on="damaged">`。`wirePlayer` 与模块级 `host` 删除，瞄准程度与相机后坐由武器每帧写进玩家实体。
+- 过渡期的低层单元（第 7、9 步再改）：menu 接管鼠标锁定、Esc 与失焦暂停、界面音效，面板与设置读写 `vars`；weapon 用 `onFlowEnter` 在进入 `play` 时重置（重试保留弹药）；hud 用 `w.on` 收 `slRadio` 等事件，`onFlowEnter` 时清空提示；world 改用 `phase`、`settings` 辅助函数。`lib/bus` 只剩 `debug`、`hitmarker`、`post` 三个单元间事件。
+- 预计的差异：每次进入 `play` 都重建 559 个关卡碰撞盒；中继交互、intro 与渐黑按模拟步计时；暂停期间子阶段时间不再累计（修正了原版暂停后 intro 立即结束的问题）；暂停中有面板时按 Esc 只关面板（原版同时恢复）；没锁定鼠标时不再屏蔽视角输入（由菜单保证游戏中总是锁定）。
+- 实施：框架没有改动，flow 叠加状态、`emitUI`、`w.on`、`onFlowEnter`、`overlayActive` 都是 M2、M3 已有的能力，够用。`lib/types` 只剩读取函数：`game(ctx)` 取 `vars.sl`，`settings(ctx)` 取 `vars.slSettings`，`phase(ctx)` 即 `phaseOf`，外加玩家、武器、敌人的读法，第 10 步删除。武器每帧在 `tick` 之前写 `cameraFps.kick`、之后写 `moveFps.aim`，保持与 `wirePlayer` 时相同的读写时机。mech 的 `look.ts` 三个 view 在 `w.overlayActive` 时也停。
+- 回归测试：玩家金标准的入口去掉 `GAME` 与 `wirePlayer`，直接给 `vars.sl.phase = 'playing'` 与 `vars.slSettings`，不带 flow（`w.flow.state` 视为 `play`），840 步结果不变。敌人回归的探针改用 `spawnFoe`、`mechClear`，flow 只有 `play` 与叠加的 `paused`；暂停用例改为 `goto('paused')`、`goto('play')`，阵亡用例直接写 `vars.sl.phase = 'dead'`。
+- 流程验证（临时探针单元暴露 world，用 `emitUI` 驱动全流程，未提交）：标题按开始进入 intro，待生成 8 个，鼠标锁定；6 秒后 playing，场上 3 个敌人；暂停后 flow 为 `paused`、敌人位置不变、鼠标解锁；继续回到 `play`，`t` 接着走；生命归零进入 dead，鼠标解锁；重试后重试次数为 1、已切断的中继保留；重新开始后重试次数归零、中继全部 live；返回标题。全程无错误与警告。
+- 验收：`npm test` 279/280（仅 pot_gfx 一致性），玩家金标准与敌人回归 6 例通过；`tsc`、saltline 的 `tsc`、`pot check`、`pot test`（冒烟 300 步，hash 9cc30054）通过。`git grep` 确认游戏与套件里没有 `GameState`、`wirePlayer`、`wireEnemies`、`GAME`、`phaseTime` 与旧的 `saltline/*` 导演事件。Runner 实机留到第 8 步一起做。
+- 字节数：游戏 `plugins` + `parts` 共 103992 字节（第 5 步 99061），其中 `parts` 22219（`director.tsx` 11660、`player.tsx` 5198、`state.ts` 3119、`enemies.ts` 1352、`level.tsx` 890），`plugins` 81773（`game.tsx` 1826，仍是低层单元的 weapon 27439、world 22866、menu 17443、hud 12199）；`lib` 5275。略涨是因为 `state.ts` 的类型声明与事件表，以及导演拆出 step、view 与两条规则后的样板；导演逻辑本身没有变短，主要收获是状态进了 `w.vars`、阶段进了 flow、单元间事件改成带类型的 World 事件。mech 套件 88514 字节。

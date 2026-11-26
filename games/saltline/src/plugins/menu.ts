@@ -1,11 +1,11 @@
 /** 菜单：标题、暂停、阵亡、结算简报，以及设置、操作说明、项目介绍面板 */
 import type { Context } from '@pot/core'
-import { emit } from '../lib/bus'
 import { clamp, formatTime } from '@pot/kit/realistic/math'
 import { C } from '../lib/palette'
 import { rating } from '../lib/rating'
 import { sfx } from '@pot/kit/realistic/sfx'
-import { game, type GameState } from '../lib/types'
+import { game, phase, type Settings, type Sl } from '../lib/types'
+import type { FlowEvent } from '../parts/state'
 
 export const name = 'menu'
 
@@ -56,6 +56,14 @@ export function apply(ctx: Context) {
   const ui = ctx.ui
   const input = ctx.input
   let hover = ''
+  let lastFocus = true
+  const vars = (): { slPanel: string; slSettings: Settings } => (ctx.world as any).vars
+  /** 菜单命令：流程事件进下一步的指令（ui.emit），flow 据此切换 */
+  function send(name: FlowEvent, payload?: { mode: 'fresh' | 'retry' }) {
+    ctx.audio.play(sfx('ui'), { volume: 0.5 })
+    vars().slPanel = ''
+    ctx.world.emitUI(name, payload)
+  }
 
   // ---- 字距（CSS letter-spacing，单位 em）：ui.text / ui.measure 的 spacing ----
   function spacedWidth(s: string, o: Spaced) {
@@ -167,17 +175,18 @@ export function apply(ctx: Context) {
     return value
   }
 
-  function panel(g: GameState, W: number, H: number) {
+  function panel(W: number, H: number) {
+    const v = vars()
     const pw = Math.min(560, W - 80), ph = 440
     const x = W / 2 - pw / 2, y = H / 2 - ph / 2
     ui.rect(0, 0, W, H, C.ink, { alpha: 0.55 })
     ui.rect(x, y, pw, ph, C.ink, { alpha: 0.92, radius: 6 })
     ui.rect(x, y, pw, 4, C.signal)
-    const title = g.panel === 'settings' ? '设置' : g.panel === 'controls' ? '操作说明' : '项目介绍'
+    const title = v.slPanel === 'settings' ? '设置' : v.slPanel === 'controls' ? '操作说明' : '项目介绍'
     ui.text(title, x + 28, y + 26, { size: 24, weight: 600, color: C.bone })
     const cx = x + 28, cw = pw - 56
-    if (g.panel === 'settings') {
-      const s = g.settings
+    if (v.slPanel === 'settings') {
+      const s = v.slSettings as Settings
       s.sensitivity = Math.round(slider('鼠标灵敏度', s.sensitivity, 0.2, 3, cx, y + 80, cw, (v) => v.toFixed(2)) * 100) / 100
       s.fov = Math.round(slider('视野', s.fov, 60, 100, cx, y + 140, cw, (v) => `${Math.round(v)}°`))
       s.volume = Math.round(slider('音量', s.volume, 0, 1, cx, y + 200, cw, (v) => `${Math.round(v * 100)}%`) * 100) / 100
@@ -198,7 +207,7 @@ export function apply(ctx: Context) {
         ui.text(label, qx + qw / 2, qy + 14, { size: 14, weight: 600, color: on ? C.ink : C.bone, align: 'center', valign: 'middle' })
         if (input.pressed('mouse0') && ui.hit(qx, qy, qw, 28) && !on) { s.quality = i; ctx.audio.play(sfx('ui'), { volume: 0.4 }) }
       })
-    } else if (g.panel === 'controls') {
+    } else if (v.slPanel === 'controls') {
       CONTROLS.forEach(([k, v], i) => {
         const yy = y + 76 + i * 30
         ui.rect(cx, yy, 150, 24, C.steel, { alpha: 0.18, radius: 3 })
@@ -208,11 +217,11 @@ export function apply(ctx: Context) {
     } else {
       ABOUT.forEach((t, i) => ui.text(t, cx, y + 80 + i * 80, { w: cw, h: 76, size: 15, color: C.bone, wrap: true }))
     }
-    if (button('back', '返回', x + pw - 168, y + ph - 64, 140, 40) || input.pressed('escape')) g.panel = ''
+    if (button('back', '返回', x + pw - 168, y + ph - 64, 140, 40) || input.pressed('escape')) v.slPanel = ''
   }
 
-  function title(g: GameState, W: number, H: number) {
-    const { x, bottom } = frame(W, H, g.phaseTime, 1)
+  function title(g: Sl, W: number, H: number) {
+    const { x, bottom } = frame(W, H, g.t, 1)
     // 备注
     ui.text('原作 Saltline · Felix Rieseberg × Claude Fable 5.2 · pot 移植版', x, bottom, { size: 11, color: C.steel, valign: 'bottom' })
     // 右下操作速览
@@ -236,8 +245,8 @@ export function apply(ctx: Context) {
     const items: [string, string, boolean?][] = [['start', '开始行动', true], ['settings', '设置'], ['about', '项目介绍']]
     if (W < 1180) items.push(['controls', '操作说明'])
     const hit = row(items, x, by)
-    if (hit === 'start') emit(ctx, 'saltline/command', 'start')
-    else if (hit) g.panel = hit
+    if (hit === 'start') send('slStart')
+    else if (hit) vars().slPanel = hit
     // 简介：1px line 上边框 + 72×3 signal 短条
     const ps = Math.round(clamp(W * 0.0155, 17, 22))
     const pw = Math.min(620, W - x * 2)
@@ -259,29 +268,49 @@ export function apply(ctx: Context) {
     const g = game(ctx)
     if (!g) return
     const W = ui.width, H = ui.height
-    if (g.phase === 'playing' || g.phase === 'intro') return
-    if (g.panel) return panel(g, W, H)
+    const ph = phase(ctx), v = vars()
 
-    if (g.phase === 'title') return title(g, W, H)
+    // 鼠标锁定（只在 intro、playing）
+    const wantLock = ph === 'playing' || ph === 'intro'
+    if (input.cursor() !== wantLock && (wantLock ? input.focused() : true)) input.cursor(wantLock)
 
-    if (g.phase === 'paused') {
+    // 暂停：Esc 或失焦；暂停中 Esc 先关面板，没有面板才继续
+    const focus = input.focused()
+    if (wantLock && (input.pressed('escape') || (lastFocus && !focus))) {
+      lastFocus = focus
+      v.slPanel = ''
+      ctx.world.emitUI('slPause')
+      return
+    }
+    lastFocus = focus
+    if (ph === 'paused' && input.pressed('escape') && !v.slPanel) {
+      ctx.world.emitUI('slResume')
+      return
+    }
+
+    if (wantLock) return
+    if (v.slPanel) return panel(W, H)
+
+    if (ph === 'title') return title(g, W, H)
+
+    if (ph === 'paused') {
       const { x, bottom } = frame(W, H, 1, 1)
       ui.text(`任务用时 ${formatTime(g.time)}`, x, bottom, { size: 11, color: C.steel, valign: 'bottom' })
       const by = bottom - 22 - 26
       const hit = row([['resume', '继续游戏', true], ['settings', '设置'], ['controls', '操作说明'], ['restart', '重新开始任务']], x, by)
-      if (hit === 'resume') emit(ctx, 'saltline/command', 'resume')
-      else if (hit === 'restart') emit(ctx, 'saltline/command', 'restart')
-      else if (hit) g.panel = hit
+      if (hit === 'resume') send('slResume')
+      else if (hit === 'restart') send('slRestart', { mode: 'fresh' })
+      else if (hit) v.slPanel = hit
       heading('行动暂时中止', '已暂停', x, by - 26 - 30, Math.round(clamp(W * 0.08, 44, 120)), 1)
       return
     }
 
-    if (g.phase === 'dead') {
-      if (g.phaseTime < 1) return
-      const a = clamp(g.phaseTime - 1, 0, 1)
-      const { x, bottom } = frame(W, H, g.phaseTime - 1, a)
+    if (ph === 'dead') {
+      if (g.t < 1) return
+      const a = clamp(g.t - 1, 0, 1)
+      const { x, bottom } = frame(W, H, g.t - 1, a)
       const by = bottom - 26
-      if (a >= 1 && (row([['retry', '重试', true]], x, by) || input.pressed('return'))) emit(ctx, 'saltline/command', 'retry')
+      if (a >= 1 && (row([['retry', '重试', true]], x, by) || input.pressed('return'))) send('slRetry', { mode: 'retry' })
       const cut = g.relays.filter((r) => r === 'cut').length
       const sy = by - 26 - 30 - 52
       stats([['生存时间', formatTime(g.time)], ['已切断中继', `${cut} / ${g.relays.length}`]], x, sy, a)
@@ -289,16 +318,16 @@ export function apply(ctx: Context) {
       return
     }
 
-    if (g.phase === 'complete') {
-      if (g.phaseTime < 1.2) return
-      const a = clamp((g.phaseTime - 1.2) * 2, 0, 1)
+    if (ph === 'complete') {
+      if (g.t < 1.2) return
+      const a = clamp((g.t - 1.2) * 2, 0, 1)
       const r = rating(g, flow.ratings)
-      const { x, bottom } = frame(W, H, g.phaseTime - 1.2, a)
+      const { x, bottom } = frame(W, H, g.t - 1.2, a)
       const by = bottom - 26
       if (a >= 1) {
         const hit = row([['again', '再次出击', true], ['title', '返回标题']], x, by)
-        if (hit === 'again') emit(ctx, 'saltline/command', 'start')
-        else if (hit === 'title') emit(ctx, 'saltline/command', 'title')
+        if (hit === 'again') send('slRestart', { mode: 'fresh' })
+        else if (hit === 'title') send('slTitle')
       }
       const sy = by - 26 - 30 - 52
       stats([

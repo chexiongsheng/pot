@@ -1,7 +1,7 @@
 /**
  * saltline 敌人回归（004 第 17.7 节）：敌人迁移后的行为与旧版只是近似一致，这里在真实关卡上锁定当前行为（第 5 步起积木在 mech 套件）：
- * 同样的输入两次结果逐步相同；鸥在视野内会交战、开火、打掉玩家血量；暂停时冻结；玩家死后不再开火；
- * clear-enemies 清空敌人、弹道与爆炸。
+ * 同样的输入两次结果逐步相同；鸥在视野内会交战、开火、打掉玩家血量；暂停（flow 叠加状态）时冻结；玩家死后不再开火；
+ * mechClear 清空敌人、弹道与爆炸。
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -10,30 +10,30 @@ const { startGame, readGameFiles } = require('./helpers')
 
 const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 
-/** 测试入口：GAME 状态固定为 playing，引入 fps、mech 套件，用 src/parts 组装关卡碰撞、玩家与敌人接线，导出几个探针 */
+/** 测试入口：flow 只有 play 与叠加的 paused，vars.sl 子阶段为 playing；引入 fps、mech 套件，用 src/parts 组装关卡碰撞与玩家，导出几个探针 */
 function files() {
   const f = readGameFiles(GAME_DIR)
   f.set('manifest.json', JSON.stringify({ id: 'saltline.enemies', plugins: ['probe'] }))
   f.set('src/plugins/probe.tsx', `
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
-import mech from '@pot/kit/mech'
-import { GAME, player } from '../lib/types'
-import { emit } from '../lib/bus'
+import mech, { mechClear } from '@pot/kit/mech'
+import { player } from '../lib/types'
 import { LevelColliders } from '../parts/level'
-import { Player, playerBlocks, wirePlayer } from '../parts/player'
-import { wireEnemies } from '../parts/enemies'
+import { Player, playerBlocks } from '../parts/player'
+import { foeSpawns, spawnFoe } from '../parts/enemies'
 export default defineGame({
   kits: [fps, mech],
   blocks: playerBlocks,
+  vars: { sl: { phase: 'playing' }, slSettings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } },
+  flow: { start: 'play', states: { play: {}, paused: { pause: true } } },
   load: (ctx) => {
-    const g = ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', resume: 'playing', pending: [], stats: { shots: 0, hits: 0, kills: 0, weak: 0 }, relays: [], settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
-    wirePlayer(ctx)
-    wireEnemies(ctx)
+    const w = ctx.world as any
+    const spawns = foeSpawns(ctx.data.load('tuning.json'), ctx.data.load('level.json'))
     ;(globalThis as any).slProbe = {
-      g, player: () => player(ctx), w: () => ctx.world as any,
-      spawn: (type: string, pos: number[], pursuit = false) => emit(ctx, 'saltline/spawn', type as any, pos as any, pursuit),
-      clear: () => emit(ctx, 'saltline/clear-enemies'),
+      player: () => player(ctx), w: () => w,
+      spawn: (type: string, pos: number[], pursuit = false) => spawnFoe(w, spawns, type as any, pos as any, pursuit),
+      clear: () => mechClear(w),
     }
   },
   scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
@@ -95,8 +95,8 @@ test('saltline 敌人：发现玩家后交战、开火、打掉血量', async ()
 test('saltline 敌人：暂停时冻结，恢复后继续', async () => {
   const { rows } = await run(400, (i, P) => {
     twoFoes(i, P)
-    if (i === 200) P.g.phase = 'paused'
-    if (i === 300) P.g.phase = 'playing'
+    if (i === 200) P.w().goto('paused')
+    if (i === 300) P.w().goto('play')
   })
   for (let i = 202; i < 300; i++) assert.equal(rows[i].pos, rows[201].pos, `第 ${i} 步暂停中敌人不应移动`)
   assert.notEqual(rows[399].pos, rows[300].pos, '恢复后应继续移动')
@@ -107,7 +107,7 @@ test('saltline 敌人：玩家死后不再开火，弹道不再伤人', async ()
   const { rows, P } = await run(900, (i, P) => {
     twoFoes(i, P)
     // 第一次出现弹道后让玩家死亡（dead 阶段）
-    if (deadAt < 0 && i > 0 && P.w().query().some((e) => e.b.mechBolt)) { deadAt = i; P.g.phase = 'dead' }
+    if (deadAt < 0 && i > 0 && P.w().query().some((e) => e.b.mechBolt)) { deadAt = i; P.w().vars.sl.phase = 'dead' }
   })
   assert.ok(deadAt > 0, '应在测试时间内开火')
   const hp = rows[deadAt].hp
@@ -119,7 +119,7 @@ test('saltline 敌人：玩家死后不再开火，弹道不再伤人', async ()
   P.clear()
 })
 
-test('saltline 敌人：clear-enemies 清空敌人、弹道与爆炸', async () => {
+test('saltline 敌人：mechClear 清空敌人、弹道与爆炸', async () => {
   const { P, game, rows } = await run(400, twoFoes)
   assert.ok(rows[rows.length - 1].modes.length > 0, '清空前应有敌人')
   P.clear()
