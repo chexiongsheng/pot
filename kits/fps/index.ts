@@ -1,5 +1,5 @@
 /**
- * fps 套件（004 第 17.5 节）：第一人称移动、相机、生命与两个简单的 AI。
+ * fps 套件（004 第 17.5 节）：第一人称移动、相机、生命、枪械与两个简单的 AI。
  * moveFps 逐项照搬 saltline 的玩家控制（games/saltline/src/plugins/player.ts）。
  *
  *   import fps, { damage } from '@pot/kit/fps'
@@ -379,6 +379,266 @@ export const aiPatrol = defineBlock({
   },
 })
 
+// ---------------------------------------------------------------- gunFps
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const norm3 = (v: number[]): Vec3 => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1
+  return [v[0] / l, v[1] / l, v[2] / l]
+}
+const cross3 = (a: number[], b: number[]): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+/** 在 dir 周围半角 spread（弧度）的锥内随机偏转；r 在圆盘上均匀（与 saltline 原版的 jitter 相同，三角函数用 dmath） */
+function jitter(dir: Vec3, spread: number, rand: () => number): Vec3 {
+  const a = rand() * Math.PI * 2
+  const r = Math.sqrt(rand()) * spread
+  const up = Math.abs(dir[1]) > 0.95 ? [1, 0, 0] : [0, 1, 0]
+  const u = norm3(cross3(dir, up))
+  const v = cross3(u, dir)
+  const ca = dmath.cos(a), sa = dmath.sin(a)
+  return norm3([dir[0] + (u[0] * ca + v[0] * sa) * r, dir[1] + (u[1] * ca + v[1] * sa) * r, dir[2] + (u[2] * ca + v[2] * sa) * r])
+}
+
+const GUN_PROPS = {
+  magSize: 30,
+  reserveStart: 150,
+  rpm: 720,
+  damage: 26,
+  weakMultiplier: 2,
+  range: 300,
+  /** 腰射散布（弧度） */
+  spreadHip: 0.0125,
+  spreadAds: 0.0025,
+  spreadMove: 0.02,
+  bloomPerShot: 0.004,
+  bloomMax: 0.03,
+  recoilPitch: 0.55,
+  recoilYaw: 0.22,
+  recoilRecover: 6.5,
+  adsTime: 0.18,
+  reloadTactical: 2.1,
+  reloadEmpty: 2.72,
+  /** 换弹进行到这一刻补进子弹 */
+  reloadMagIn: 1.345,
+  /** 空仓换弹进行到这一刻枪机复位 */
+  reloadBolt: 2.19,
+  /** 命中判定：world 用模拟侧碰撞体（当步发 gunHit）；view 用表现层的场景射线与 w.view 的部件登记，经 emitUI 回写 */
+  hitscan: 'world' as 'world' | 'view',
+  layers: null as string[] | null,
+  viewMask: 0,
+  viewPlanes: null as any[] | null,
+  actions: { fire: 'fire', aim: 'aim', reload: 'reload' },
+}
+
+/** 最近的一发：k 发序号，o 起点，d 方向，r 已报告命中 */
+export interface GunShot {
+  k: number
+  o: Vec3
+  d: Vec3
+  r?: number
+}
+
+const GUN_STATE = {
+  active: true,
+  mag: 0,
+  reserve: 0,
+  reloading: false,
+  reloadT: 0,
+  reloadTotal: 0,
+  /** 开镜程度 0 到 1 */
+  ads: 0,
+  cooldown: 0,
+  bloom: 0,
+  recoilP: 0,
+  recoilY: 0,
+  /** 当前散布（弧度），给准星用 */
+  spread: 0,
+  /** 冲刺收枪程度 0 到 1 */
+  sprintT: 0,
+  /** 这一步扣着扳机（表现用：扳机手指、姿态） */
+  trigger: false,
+  /** 打空后枪机停在后方，空仓换弹拉机柄后复位 */
+  boltLocked: false,
+  /** 计数：开火、空仓扣扳机、开始换弹（表现按变化放声音与动画） */
+  shots: 0,
+  dry: 0,
+  reloads: 0,
+  fired: [] as GunShot[],
+}
+
+export type GunFpsProps = typeof GUN_PROPS
+export type GunFpsState = typeof GUN_STATE
+type Gun = GunFpsProps & GunFpsState
+
+/** 命中事件 gunHit 的载荷；fps 只报告，不扣血 */
+export interface GunHit {
+  entity: any
+  target: any
+  weak: boolean
+  point: Vec3
+  normal: Vec3
+  dir: Vec3
+  /** 已乘弱点倍率 */
+  damage: number
+  shot: number
+}
+
+const RING = 8
+
+function startReload(me: Gun) {
+  if (me.reloading || me.mag >= me.magSize || me.reserve <= 0) return
+  me.reloading = true
+  me.reloadTotal = me.mag === 0 ? me.reloadEmpty : me.reloadTactical
+  me.reloadT = 0
+  me.reloads++
+}
+
+/** 枪：弹匣、射速、散布与后坐、开镜、换弹；开火发 gunFired，命中发 gunHit（不扣血） */
+export const gunFps = defineBlock({
+  name: 'gunFps',
+  about: '第一人称枪械：读 fire、aim、reload 指令；弹匣、射速、散布、后坐、开镜、换弹。每发 w.emit("gunFired", { entity, origin, dir, shot })；命中 w.emit("gunHit", { entity, target, weak, point, normal, dir, damage, shot })，扣血交给接收方。写同一实体的 moveFps.aim 与 cameraFps.kick',
+  props: GUN_PROPS,
+  state: GUN_STATE,
+  order: 2,
+  init(me) {
+    me.mag = me.magSize
+    me.reserve = me.reserveStart
+  },
+  step(me, e, w) {
+    const dt = w.dt
+    const m = e.b.moveFps as (MoveFpsProps & MoveFpsState) | undefined
+    const hp = e.b.health
+    if (!me.active || (hp && !(hp.hp > 0))) {
+      me.trigger = false
+      me.ads = Math.max(0, me.ads - dt / me.adsTime)
+      writeBack(me, e)
+      return
+    }
+    const cmd = w.cmd(e)
+    const act = me.actions
+    const trigger = (me.trigger = cmd.down(act.fire))
+    const sprinting = !!m?.sprinting
+    const wantAds = cmd.down(act.aim) && !sprinting
+    me.ads = clamp(me.ads + ((wantAds && !me.reloading ? 1 : -1) * dt) / me.adsTime, 0, 1)
+    me.sprintT = damp(me.sprintT, sprinting && !trigger && !wantAds && !me.reloading ? 1 : 0, 9, dt)
+    if (cmd.pressed(act.reload)) startReload(me)
+    if (me.reloading) {
+      const before = me.reloadT
+      const t = (me.reloadT += dt)
+      const empty = me.reloadTotal === me.reloadEmpty
+      if (before < me.reloadMagIn && t >= me.reloadMagIn) {
+        const take = Math.min(me.magSize - me.mag, me.reserve)
+        me.mag += take
+        me.reserve -= take
+        if (!empty) me.boltLocked = false
+      }
+      if (empty && before < me.reloadBolt && t >= me.reloadBolt) me.boltLocked = false
+      if (t >= me.reloadTotal) me.reloading = false
+    }
+    // 射击
+    const moving = (m?.speed ?? 0) > 1
+    me.cooldown = Math.max(-0.02, me.cooldown - dt)
+    if (trigger && !me.reloading) {
+      if (me.mag <= 0) {
+        if (cmd.pressed(act.fire)) me.dry++
+        if (me.reserve > 0) startReload(me)
+      } else {
+        if (m) m.sprinting = false
+        const eye = m ? m.curEye : 1.6
+        const yaw = m ? m.yaw : e.rot[1]
+        const pitch = m ? m.pitch : 0
+        let n = 0
+        while (me.cooldown <= 0 && me.mag > 0 && n++ < 3) fire(me, e, w, [e.pos[0], e.pos[1] + eye, e.pos[2]], yaw + me.recoilY, pitch + me.recoilP, moving)
+      }
+    }
+    if (!trigger) me.cooldown = Math.max(0, me.cooldown)
+    // 散布、后坐回复
+    me.bloom = Math.max(0, me.bloom - dt * (trigger ? 0.02 : 0.08))
+    me.spread = baseSpread(me, moving)
+    if (!trigger) {
+      me.recoilP = damp(me.recoilP, 0, me.recoilRecover, dt)
+      me.recoilY = damp(me.recoilY, 0, me.recoilRecover, dt)
+    }
+    writeBack(me, e)
+  },
+  view: {
+    enter(me, e) {
+      reported.set(e.id, me.shots)
+    },
+    update(me, e, _objs, ctx, w) {
+      if (me.hitscan !== 'view') return
+      const last = reported.get(e.id) ?? me.shots
+      if (me.shots === last) return
+      reported.set(e.id, me.shots)
+      for (const s of me.fired) {
+        if (s.k <= last || s.r) continue
+        const hit = ctx.scene.raycast(s.o, s.d, { maxDistance: me.range, mask: me.viewMask, planes: me.viewPlanes ?? undefined })
+        const part = hit && hit.id > 0 ? w.view.partOf(hit.id) : null
+        if (!part || part.entity.id === e.id) continue
+        w.emitUI('gunReport', { entity: e.id, shot: s.k, target: part.entity.id, weak: part.tag === 'weak', point: hit!.point, normal: hit!.normal })
+      }
+    },
+    exit(_me, e) {
+      reported.delete(e.id)
+    },
+  },
+})
+
+/** gunFps.view 已检查到的发序号（表现缓存，按实体 id） */
+const reported = new Map<number, number>()
+
+function baseSpread(me: Gun, moving: boolean) {
+  return lerp(me.spreadHip, me.spreadAds, me.ads) + (moving ? me.spreadMove * (1 - me.ads * 0.7) : 0) + me.bloom
+}
+
+function writeBack(me: Gun, e: any) {
+  const m = e.b.moveFps
+  if (m) m.aim = me.ads
+  const cam = e.b.cameraFps
+  if (cam) cam.kick = [me.recoilP, me.recoilY]
+}
+
+function fire(me: Gun, e: any, w: any, origin: Vec3, yaw: number, pitch: number, moving: boolean) {
+  me.mag--
+  me.cooldown += 60 / me.rpm
+  const dir = jitter(forward(yaw, pitch), baseSpread(me, moving), () => w.rand())
+  me.bloom = Math.min(me.bloomMax, me.bloom + me.bloomPerShot)
+  me.recoilP = Math.max(-10, me.recoilP - me.recoilPitch * (1 - me.ads * 0.35))
+  me.recoilY += (w.rand() - 0.5) * 2 * me.recoilYaw
+  if (me.mag <= 0) me.boltLocked = true
+  const k = ++me.shots
+  const shot: GunShot = { k, o: origin, d: dir }
+  me.fired.push(shot)
+  if (me.fired.length > RING) me.fired.splice(0, me.fired.length - RING)
+  w.emit('gunFired', { entity: e, origin, dir, shot: k })
+  if (me.hitscan !== 'world') return
+  const hit = w.raycast(origin, dir, me.range, { layers: layersOf(me.layers), ignore: e })
+  if (!hit?.entity) return
+  shot.r = 1
+  w.emit('gunHit', { entity: e, target: hit.entity, weak: false, point: hit.point, normal: hit.normal, dir, damage: me.damage, shot: k } satisfies GunHit)
+}
+
+/** view 模式的命中回写（emitUI 进指令与录像）：校验后转成 gunHit */
+function onGunReport(w: any, p: any) {
+  if (!p || typeof p !== 'object') return
+  const shooter = w.get(p.entity)
+  const me = shooter?.b?.gunFps as Gun | undefined
+  if (!me) return
+  const hp = shooter.b.health
+  if (hp && !(hp.hp > 0)) return
+  const shot = me.fired.find((s) => s.k === p.shot)
+  if (!shot || shot.r) return
+  const target = w.get(p.target)
+  if (!target || target.id === shooter.id) return
+  const pt = p.point, nm = p.normal
+  const vec = (v: any) => Array.isArray(v) && v.length === 3 && v.every((x: any) => typeof x === 'number' && Number.isFinite(x))
+  if (!vec(pt) || !vec(nm)) return
+  const dx = pt[0] - shot.o[0], dy = pt[1] - shot.o[1], dz = pt[2] - shot.o[2]
+  if (Math.hypot(dx, dy, dz) > me.range + 1e-3) return
+  shot.r = 1
+  const weak = !!p.weak
+  w.emit('gunHit', { entity: shooter, target, weak, point: [pt[0], pt[1], pt[2]], normal: [nm[0], nm[1], nm[2]], dir: norm3([dx, dy, dz]), damage: me.damage * (weak ? me.weakMultiplier : 1), shot: shot.k } satisfies GunHit)
+}
+
 declare module '@pot/core' {
   interface GameBlockProps {
     moveFps?: Over<typeof MOVE_PROPS>
@@ -386,15 +646,17 @@ declare module '@pot/core' {
     health?: Over<{ max: number; regen: number; regenDelay: number }>
     aiChase?: Over<{ target: string; range: number; speed: number; stopAt: number; sight: boolean; eye: number } & typeof AI_BODY>
     aiPatrol?: Over<{ points: Vec3[]; speed: number; wait: number; loop: boolean; arrive: number } & typeof AI_BODY>
+    gunFps?: Over<typeof GUN_PROPS>
   }
 }
 
 export default defineKit({
   name: 'fps',
-  about: '第一人称：moveFps、cameraFps、health（配 damage 函数）、aiChase、aiPatrol',
-  blocks: [moveFps, cameraFps, health, aiChase, aiPatrol],
+  about: '第一人称：moveFps、cameraFps、health（配 damage 函数）、gunFps（开火 gunFired、命中 gunHit）、aiChase、aiPatrol',
+  blocks: [moveFps, cameraFps, health, gunFps, aiChase, aiPatrol],
   controls: {
     axes: { move: 'move', look: 'look' },
-    actions: { jump: ['space'], sprint: ['leftshift'], crouch: ['c', 'leftcontrol'] },
+    actions: { jump: ['space'], sprint: ['leftshift'], crouch: ['c', 'leftcontrol'], fire: ['mouse0'], aim: ['mouse1'], reload: ['r'] },
   },
+  on: { gunReport: onGunReport },
 })

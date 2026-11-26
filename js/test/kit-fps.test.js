@@ -1,5 +1,5 @@
 /**
- * fps 套件（004 第 17.5 节）：增量输入按帧累积、moveFps、cameraFps、health/damage、aiChase、aiPatrol。
+ * fps 套件（004 第 17.5 节）：增量输入按帧累积、moveFps、cameraFps、health/damage、gunFps、aiChase、aiPatrol。
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -12,11 +12,22 @@ import { defineBlock } from '@pot/core'
 const Looker = defineBlock({
   name: 'looker', about: '累计 look 轴', state: { x: 0, y: 0, steps: 0 },
   step(me, e, w) { const a = w.cmd(e).axis('look'); me.x += a.x; me.y += a.y; me.steps++ },
+})
+const Hitbox = defineBlock({
+  name: 'hitbox', about: '只在表现里的命中体', props: { tag: 'body' },
+  view: { enter(me, e, ctx, w) { const o = ctx.scene.spawn({ shape: 'cube', name: 'hitbox' }); w.view.bindPart(o.id, e, me.tag); return o } },
+})
+const Part = defineBlock({
+  name: 'part', about: '测试：可被射中的部件', props: { tag: '' },
+  view: { enter(me, e, ctx, w) { const o = ctx.scene.spawn({ shape: 'cube', name: 'part' }); w.view.bindPart(o.id, e, me.tag || undefined); return o } },
 })`
 
 function body(tree, extra = '') {
   return `for (const b of fps.blocks) ctx.effect(() => w.registry.addBlock(b))
   ctx.effect(() => w.registry.addBlock(Looker))
+  ctx.effect(() => w.registry.addBlock(Hitbox))
+  for (const [k, f] of Object.entries(fps.on ?? {})) w.on(k, f as any)
+  ctx.effect(() => w.registry.addBlock(Part))
   w.setControls(fps.controls)
   ;(globalThis as any).fpsDamage = damage
   ${extra}
@@ -288,6 +299,140 @@ test('health：扣血、damaged/died 事件、回血、死后不再扣', async (
   steps(g.runtime, 300)
   assert.equal(a().b.health.hp, 0, '死后不回血')
   assert.ok(a(), 'died 不销毁实体')
+})
+
+// ---------------------------------------------------------------- gunFps
+
+const LOG_GUN = `w.on('gunFired', (w, p) => { (w.vars.fired ??= []).push(p.shot) })
+  w.on('gunHit', (w, p) => { (w.vars.hits ??= []).push([p.target.id, p.shot, p.damage, p.weak]) })`
+
+test('gunFps：按住开火按射速出弹，world 模式当步发 gunFired、gunHit；后坐写回 cameraFps.kick，弹道抽 World 随机数', async () => {
+  const g = await start('<entity key="p" at={[0, 0, 0]} moveFps cameraFps gunFps={{ rpm: 600 }} /><entity key="t" at={[0, 1.6, 5]} body={{ size: [2, 2, 2] }} />', LOG_GUN)
+  const me = () => g.at('p').b.gunFps
+  steps(g.runtime, 1)
+  assert.equal(me().mag, 30)
+  assert.equal(me().reserve, 150)
+  const seed = g.w.data.seed
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 30)
+  g.engine.keys.delete('mouse0')
+  steps(g.runtime, 1)
+  const n = me().shots
+  assert.ok(n >= 5 && n <= 6, `0.5 秒 600 rpm：${n} 发`)
+  assert.equal(me().mag, 30 - n)
+  assert.deepEqual(g.w.vars.fired, Array.from({ length: n }, (_, i) => i + 1))
+  const t = g.at('t').id
+  assert.deepEqual(g.w.vars.hits, Array.from({ length: n }, (_, i) => [t, i + 1, 26, false]))
+  assert.ok(me().fired.every((s) => s.r === 1))
+  assert.notEqual(g.w.data.seed, seed, '散布与水平后坐抽 w.rand')
+  assert.ok(me().recoilP < 0, '枪口上跳')
+  assert.ok(me().bloom > 0)
+  assert.deepEqual(g.at('p').b.cameraFps.kick, [me().recoilP, me().recoilY])
+  steps(g.runtime, 120)
+  near(me().recoilP, 0, 0.01, '松开扳机后坐回复')
+  // 开镜：aim 写回 moveFps，散布收窄
+  g.engine.keys.add('mouse1')
+  steps(g.runtime, 20)
+  assert.equal(me().ads, 1)
+  assert.equal(g.at('p').b.moveFps.aim, 1)
+  near(me().spread, 0.0025, 1e-3)
+  g.engine.keys.delete('mouse1')
+})
+
+test('gunFps：打空自动换弹（空仓：1.345 秒补弹，2.19 秒枪机复位），战术换弹，没有备弹时空仓扣扳机', async () => {
+  const g = await start('<entity key="p" moveFps gunFps={{ magSize: 3, reserveStart: 4, rpm: 60000 }} />')
+  const me = () => g.at('p').b.gunFps
+  steps(g.runtime, 1)
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 1)
+  assert.equal(me().shots, 3, '一步最多 3 发')
+  assert.equal(me().mag, 0)
+  assert.equal(me().boltLocked, true)
+  steps(g.runtime, 1)
+  g.engine.keys.delete('mouse0')
+  assert.equal(me().reloading, true)
+  assert.equal(me().reloadTotal, 2.72)
+  assert.equal(me().reloads, 1)
+  steps(g.runtime, 80)
+  assert.equal(me().mag, 0)
+  steps(g.runtime, 1)
+  assert.equal(me().mag, 3)
+  assert.equal(me().reserve, 1)
+  assert.equal(me().boltLocked, true, '空仓换弹补弹时枪机还没复位')
+  steps(g.runtime, 51)
+  assert.equal(me().boltLocked, false)
+  assert.equal(me().reloading, true)
+  steps(g.runtime, 32)
+  assert.equal(me().reloading, false)
+  // 战术换弹
+  me().mag = 1
+  tap(g, 'r')
+  assert.equal(me().reloading, true)
+  assert.equal(me().reloadTotal, 2.1)
+  assert.equal(me().reloads, 2)
+  tap(g, 'mouse0')
+  assert.equal(me().shots, 3, '换弹中不开火')
+  steps(g.runtime, 130)
+  assert.equal(me().reloading, false)
+  assert.equal(me().mag, 2)
+  assert.equal(me().reserve, 0)
+  tap(g, 'r')
+  assert.equal(me().reloading, false, '没有备弹不换弹')
+  me().mag = 0
+  tap(g, 'mouse0')
+  assert.equal(me().dry, 1)
+  assert.equal(me().reloading, false)
+  // 不活跃时不开火
+  me().mag = 2
+  me().active = false
+  tap(g, 'mouse0')
+  assert.equal(me().shots, 3)
+})
+
+test('gunFps：view 模式由表现层射线查部件登记，经 emitUI 回写 gunReport 再转成 gunHit；弱点乘倍率，重复与非法报告忽略', async () => {
+  const extra = `for (const [n, f] of Object.entries(fps.on ?? {})) w.on(n, f as any)
+  ${LOG_GUN}`
+  const tree = `<entity key="p" moveFps cameraFps gunFps={{ hitscan: 'view', rpm: 600 }} />
+    <entity key="t" at={[0, 1.6, 5]} part={{ tag: 'weak' }} />
+    <entity key="u" at={[3, 1.6, 5]} part />`
+  const g = await start(tree, extra)
+  const me = () => g.at('p').b.gunFps
+  steps(g.runtime, 2)
+  const [ot, ou] = g.engine.byName('part').map((o) => o.id)
+  const t = g.at('t').id, u = g.at('u').id, p = g.at('p').id
+  g.engine.nextHit = { id: ot, point: [0, 1.6, 4.5], normal: [0, 0, -1], distance: 4.5 }
+  tap(g, 'mouse0')
+  assert.deepEqual(g.w.vars.fired, [1])
+  assert.equal(g.w.vars.hits, undefined, '命中在表现层，下一步才回写')
+  steps(g.runtime, 1)
+  assert.deepEqual(g.w.vars.hits, [[t, 1, 52, true]])
+  assert.equal(me().fired[0].r, 1)
+  steps(g.runtime, 3)
+  assert.equal(g.w.vars.hits.length, 1, '同一发只报一次')
+  const rep = (o) => g.w.emitUI('gunReport', { entity: p, shot: 1, target: t, weak: true, point: [0, 1.6, 4.5], normal: [0, 0, -1], ...o })
+  rep({})
+  steps(g.runtime, 10)
+  g.engine.nextHit = { id: ou, point: [3, 1.6, 4.5], normal: [0, 0, -1], distance: 5 }
+  tap(g, 'mouse0')
+  steps(g.runtime, 1)
+  assert.deepEqual(g.w.vars.hits, [[t, 1, 52, true], [u, 2, 26, false]], '已报告的发不再算')
+  // 没登记的对象不报告；手工报告：不在环内、打自己、超射程、坐标非法都忽略，合法的才算
+  steps(g.runtime, 10)
+  g.engine.nextHit = { id: 999999, point: [0, 1.6, 9], normal: [0, 0, -1], distance: 9 }
+  tap(g, 'mouse0')
+  steps(g.runtime, 2)
+  assert.equal(me().shots, 3)
+  assert.equal(g.w.vars.hits.length, 2)
+  rep({ shot: 99 })
+  rep({ shot: 3, target: p })
+  rep({ shot: 3, point: [0, 0, 400] })
+  rep({ shot: 3, point: [0, 'x', 1] })
+  rep({ shot: 3, target: 424242 })
+  steps(g.runtime, 1)
+  assert.equal(g.w.vars.hits.length, 2)
+  rep({ shot: 3, target: u, weak: false })
+  steps(g.runtime, 1)
+  assert.deepEqual(g.w.vars.hits[2], [u, 3, 26, false])
 })
 
 // ---------------------------------------------------------------- AI
