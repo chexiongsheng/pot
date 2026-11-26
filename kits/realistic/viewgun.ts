@@ -512,6 +512,8 @@ export const viewGun = defineBlock({
   props: {},
   order: 3,
   view: {
+    // 实测（saltline，Windows）首次约 390 ms：材质、贴图、枪与手的几何
+    cost: 5,
     enter(_me, e, ctx, w) {
       const g = e.b.gunFps as Gun | undefined
       if (!g) return

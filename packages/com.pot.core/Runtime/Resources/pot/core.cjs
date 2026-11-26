@@ -8578,6 +8578,17 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       for (const name in e.b) if (e.b[name] && this._world.registry.block(name)?.view) return true;
       return false;
     }
+    /** 建表现的相对耗时：带表现的积木的 view.cost 之和（缺省各 1），没有表现为 0 */
+    viewCost(e) {
+      let cost = 0;
+      for (const name in e.b) {
+        const view = e.b[name] && this._world.registry.block(name)?.view;
+        if (!view) continue;
+        const c = Number(view.cost);
+        cost += Number.isFinite(c) && c > 0 ? c : 1;
+      }
+      return cost;
+    }
     /** 出现、替换、消失的积木：按积木顺序 enter，定义或属性修订号变了的先 exit */
     _enter(v, e, ordered) {
       const w = this._world;
@@ -11520,15 +11531,30 @@ TS：${r.layout.text}
           const mount = w.data.mounts[unit];
           if (!mount) return;
           const list = [];
-          for (const rec of Object.values(mount.keys)) {
+          let total = 0;
+          for (const [path, rec] of Object.entries(mount.keys)) {
             const e = !rec.dead && w.data.entities[rec.id];
-            if (e && w.view.hasView(e)) list.push(e);
+            const cost = e ? w.view.viewCost(e) : 0;
+            if (!e || cost <= 0) continue;
+            list.push({ e, cost, path });
+            total += cost;
           }
-          const from = def.load ? mid : lo;
+          const from = Math.min(hi, Math.max(lo, loading.progress));
+          const slow = [];
+          let done2 = 0;
           for (let k = 0; k < list.length; k++) {
-            if (w.data.entities[list[k].id] !== list[k]) continue;
-            w.view.warm(list[k]);
-            await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * (k + 1) / list.length);
+            const { e, cost, path } = list[k];
+            if (w.data.entities[e.id] !== e) continue;
+            const t0 = Date.now();
+            w.view.warm(e);
+            const ms = Date.now() - t0;
+            if (ms > 100) slow.push({ path, blocks: Object.keys(e.b).filter((n2) => w.registry.block(n2)?.view).join("、"), ms });
+            done2 += cost;
+            await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * done2 / total);
+          }
+          if (slow.length) {
+            slow.sort((a, b) => b.ms - a.ms);
+            ctx.logger("world").info("预热最慢：%s", slow.slice(0, 3).map((s) => `${s.path}（${s.blocks}）${s.ms} ms`).join("；"));
           }
         };
         const finish = () => {

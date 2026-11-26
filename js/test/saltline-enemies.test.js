@@ -18,7 +18,6 @@ function files() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import mech, { mechClear } from '@pot/kit/mech'
-import { player } from '../lib/types'
 import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks } from '../parts/player'
 import { foeSpawns, spawnFoe } from '../parts/enemies'
@@ -31,7 +30,7 @@ export default defineGame({
     const w = ctx.world as any
     const spawns = foeSpawns(ctx.data.load('tuning.json'), ctx.data.load('level.json'))
     ;(globalThis as any).slProbe = {
-      player: () => player(ctx), w: () => w,
+      player: () => w.query('player')[0], w: () => w,
       spawn: (type: string, pos: number[], pursuit = false) => spawnFoe(w, spawns, type as any, pos as any, pursuit),
       clear: () => mechClear(w),
     }
@@ -60,7 +59,7 @@ async function run(steps, script = () => {}) {
       attack: foes.map((e) => e.b.mechFoe.attack).join(','),
       pos: foes.map((e) => e.pos.map((v) => +v.toFixed(5)).join(' ')).join('|'),
       bolts,
-      hp: +P.player().health.toFixed(5),
+      hp: +P.player().b.health.hp.toFixed(5),
     })
   }
   const errors = game.host.logs.filter((l) => l.level === 'error').map((l) => l.text)

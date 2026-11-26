@@ -25,12 +25,13 @@ export default defineGame({
 
 ## 积木与预制件
 
-- `defineBlock({ name, about, props, state, order, init, step, view })`：`props` 是来自标签的属性及缺省值（只读），`state` 是积木自己的可写状态。`step(me, e, w)` 每个固定步调用，`me` 是属性与状态合在一起的对象，`e` 是实体数据（`e.pos`、`e.rot`、`e.tags`、`e.b`）。`step` 只读写实体数据和 `w`，不碰 `ctx.scene`，随机数用 `w.rand`，不用 `Math.random`、`Date`；三角函数用 `dmath.sin`、`dmath.cos`（`import { dmath } from '@pot/core'`），不用 `Math.sin`、`Math.cos`：不同 JS 引擎、原生实现之间 `Math.sin` 不保证逐位相同。`view` 里可以随便用 `Math`。`view.enter(me, e, ctx, w)`、`update(me, e, objs, ctx, w)`、`exit(me, e, objs, ctx, w)` 的 `ctx` 可用 `scene`、`audio`、`gfx`、`data`、`clock`、`input`、`ui`、`state`；音效、特效、震屏这类表现放在 view 里按状态变化触发，不放在 `step`。
+- `defineBlock({ name, about, props, state, order, init, step, view })`：`props` 是来自标签的属性及缺省值（只读），`state` 是积木自己的可写状态。`step(me, e, w)` 每个固定步调用，`me` 是属性与状态合在一起的对象，`e` 是实体数据（`e.pos`、`e.rot`、`e.tags`、`e.b`）。`step` 只读写实体数据和 `w`，不碰 `ctx.scene`，随机数用 `w.rand`，不用 `Math.random`、`Date`；三角函数用 `dmath.sin`、`dmath.cos`（`import { dmath } from '@pot/core'`），不用 `Math.sin`、`Math.cos`：不同 JS 引擎、原生实现之间 `Math.sin` 不保证逐位相同。`view` 里可以随便用 `Math`。`view.enter(me, e, ctx, w)`、`update(me, e, objs, ctx, w)`、`exit(me, e, objs, ctx, w)` 的 `ctx` 可用 `scene`、`audio`、`gfx`、`data`、`clock`、`input`、`ui`、`state`；音效、特效、震屏这类表现放在 view 里按状态变化触发，不放在 `step`。`view.cost`（缺省 1）是建表现的相对耗时，启动预热按它加权推进进度条，一个实体就要建好几百毫秒的积木给大一点的值。
+- 表现层的资源（材质、着色器、贴图、对象池）要跨实体共用时，按 World 建 WeakMap 缓存，键用 `w.registry`：积木钩子、规则、界面和游戏单元拿到的 `w` 是不同上下文的服务代理，对象身份互不相等，只有 `w.registry` 这类普通数据是同一个。exit 只销毁本实体建的场景对象，共用的资源随 World 一直存在。
 - `definePrefab('coin', { is, tags, about, ...积木 })`：一组积木的组合，返回值可直接当大写标签 `<Coin />`，也可写进 `rule` 的 `a`、`b` 和 `w.spawn`。`is` 继承另一个预制件，积木字段深合并，写 `false` 去掉继承来的积木。
-- 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。
+- 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`、`keep`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。`keep` 见“流程”。
 - 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`、`body`）。游戏同名定义会覆盖系统的。
 - 碰撞在模拟侧：带 `body`（轴对齐的盒、球或竖直胶囊，可设 `layer`、`solid`）的实体进碰撞表。`w.move(e, mover, { radius, height, stepUp, layers, ground })` 做角色移动（`mover` 为 `{ vel, grounded }`，放在积木状态里）；`w.raycast(from, dir, maxDist, { layers, ignore, solid })` 返回最近的 `{ point, normal, dist, entity }` 或 null；`w.overlap({ kind: 'sphere', radius }, at)` 返回重叠的实体。三者都是纯 JS、可复现，玩法判定不要用 `scene.raycast`。
-- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`realistic`（`import realistic from '@pot/kit/realistic'`）提供写实环境 `atmosphere` 和带材质预设的 `surface`，见下文“写实环境”。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
+- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`fps` 还有 `gunFps`（弹匣、射速、散布、后坐、开镜、换弹；开火发 `gunFired`，命中发 `gunHit`，不扣血）与 `@pot/kit/fps/hud` 的 `drawCompass`、`drawCrosshair`（在 `<canvas>` 里调用）。`realistic`（`import realistic from '@pot/kit/realistic'`）提供写实环境 `atmosphere`、带材质预设的 `surface`、目标标记 `beacon`、第一人称枪的样子 `viewGun`（配 `gunFps`），见下文“写实环境”。`harbor`（港口整张图：`harborLevel`、`harborStatics`、关卡碰撞盒）与 `mech`（机械敌人）是 saltline 的风格内容，可作为写场景套件的例子。套件之间靠事件对接（套件的 `on`），也可以声明 `vars`（如 realistic 的 `renderQuality`、harbor 的 `harborRelays`），游戏写它们来驱动套件。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
 - 套件可以带数据文件（着色器、JSON）：`ctx.gfx.shader({ fragment: '@pot/kit/<名字>/shaders/x.frag' })`、`ctx.data.load('@pot/kit/<名字>/x.json')`。套件着色器里的相对 `#include` 留在套件内，游戏的着色器可以写 `#include "@pot/kit/<名字>/..."`。游戏的 `data/kits/<名字>/` 有同名文件时优先读它；`pot build` 把用到的套件资源复制进发布包，`pot eject` 把它们复制到 `data/kits/<名字>/`。
 
 ## 场景树
@@ -55,6 +56,9 @@ export default defineGame({
 - `surface`：`kind`、`scale` 同 `shape`；`material` 为预设名（`wetGround`、`metal`、`concrete`）或材质参数对象；`color` 为 null 时取预设颜色。
 - 想按关卡或天气切换环境：`scene` 不能读 `w.vars`，用流程状态决定写哪个预设，并让 `key` 随之变化（如 `key={'env-' + s.state}`），旧环境会先还原再建新的。
 - 预设与材质是 `presets`、`materials` 导出，可以读来做自己的组合；名字写错时报“未知的预设 X，可用 …”。
+- `atmosphere` 的进阶属性：`chain`（用原版移植的后处理链代替 URP 后处理，游戏驱动的参数如受伤红边用 `setPostValues(w, { uDamage, uLowHealth, uAds })` 写）、`quality`（画质档位表，档位读 `w.vars.renderQuality`）、`shaderRain`（雨由别的积木用着色器画时关掉内置雨滴）、`lightning.sound`（按 `delay` 放雷声）。
+- `beacon={{ radius, color }}`：地面光圈、光柱、点光，状态 `on` 由游戏的积木写。
+- `viewGun`：放在带 `moveFps`、`cameraFps`、`gunFps` 的玩家实体上。命中点的表面种类与雨淋程度用 `setGunEnv(w, { surface, shelter })` 注入（在 `load` 里调）。
 
 ## 加载进度
 
@@ -68,7 +72,7 @@ load: async (ctx, step) => {
 ```
 
 - `step(文字, 0..1)` 报的是本单元内的进度，并在超出帧预算时让一帧；热重载时 `load` 也会执行但不让帧，要写成可重复执行。不要自己等帧。
-- 启动时框架还会逐个预热场景实体的表现（报“生成场景 k/n”），进度条消失后不会再卡一帧。有 `load` 且有 `scene` 时，`load` 占前 80%，预热占后 20%。
+- 启动时框架还会逐个预热场景实体的表现（报“生成场景 k/n”），进度条消失后不会再卡一帧。有 `load` 且有 `scene` 时，`load` 的 `step` 映射到前 80%；预热从 `load` 实际报到的位置接着走到底，按积木的 `view.cost` 加权。`load` 只做同步准备、不报进度时，整条进度条都是预热。预热后日志里有一条“预热最慢：…”，列出单个超过 100 毫秒的实体，用来调 `cost` 或拆分积木。
 - 父单元按顺序挂多个 `defineGame` 子单元时，用 `ctx.loading.within(lo, hi)` 把下一个子单元的进度映射到 `[lo, hi]`，挂完后 `within(0, 1)` 复原（见 `references/api.md` 的 `ctx.loading`）。
 
 ## 规则
@@ -112,27 +116,33 @@ flow: {
 - “进入”一个非叠加状态会清掉 `w.spawn` 的实体、按新状态重新求值 `scene`，然后调 `enter`。从叠加状态回到原状态（不带参数）是“恢复”，场景不动。
 - `w.flow.state` 是当前状态（含叠加），`w.flow.base` 是场景所按的状态。
 - `w.goto` 在步末应用，一步里多次以最后一次为准。流程状态存在 state 里，热重载保留。
+- 标了 `keep` 的实体在“进入”时保留：新状态的场景里还有同一 key 就只更新变了的属性（积木状态不动），没有了才删。每个状态都有、重建又贵的东西（关卡几何、环境、大量静态碰撞盒）标上它，开局和重试就不会卡一两秒。
+- 一局的进度、要跨“进入”保留的东西放 `vars`；“进入”时要重置的放积木状态或在 `init` 里重置（`init` 在实体创建时调用，场景重建时自然执行）。
 
 ## 界面
 
-`ui: (w, ui) => 树` 每帧求值。`ui` 提供：`width`、`height`、`local`（界面本地状态，热重载保留，不属于 World）、`emit(名字, payload)`（进入下一步的指令，可录制回放）、`focused`、`data`、`draw`（原始低层绘制，逃生口）。
+`ui: (w, ui) => 树` 每帧求值。`ui` 提供：`width`、`height`、`local`（界面本地状态，热重载保留，不属于 World）、`emit(名字, payload)`（进入下一步的指令，可录制回放）、`focused`、`data`、`draw`（原始低层绘制，在整棵树之后画）、`input`（读按键、窗口焦点、鼠标锁定，用来做 Esc 快捷键、失焦暂停）、`audio`（界面音效）。
+
+界面每帧重新求值，不能订阅事件。“出现几秒再淡出”的提示（字幕、警告、命中标记）由规则把文字和发生时的 `w.tick` 记进 `vars`，界面按 `(w.tick - at) * w.dt` 算年龄；暂停时 `tick` 不走，提示跟着冻结。改设置也走 `ui.emit`，由规则合并进 `vars`。
 
 规矩：回调（`onPress`、`onChange`、`onSubmit`）只改 `ui.local` 或调 `ui.emit`，不直接改 `w.vars`。界面里读 `w` 可以，写 World 一律经事件。
 
-通用属性：`at`（只对顶层：九宫格名或 `[x, y]`，缺省 `top-left`）、`w`、`h`（像素或 `'50%'`）、`grow`、`pad`、`hidden`、`key`。容器属性：`gap`、`align`（交叉轴 `start` `center` `end` `stretch`）、`justify`（主轴 `start` `center` `end` `between`）。
+通用属性：`at`（只对顶层：九宫格名或 `[x, y]`，缺省 `top-left`）、`w`、`h`（像素或 `'50%'`）、`grow`、`pad`、`hidden`、`opacity`（0 到 1，乘到全部子孙上，做淡入淡出）、`key`。容器属性：`gap`、`align`（交叉轴 `start` `center` `end` `stretch`）、`justify`（主轴 `start` `center` `end` `between`）。
 
 | 标签 | 要点 |
 |---|---|
 | `row`、`column` | 横向、纵向排列，不画东西 |
 | `panel` | 带底色的纵向容器，缺省 `pad` 12、`gap` 8；`bg`、`border`、`radius` |
-| `text` | 子节点的字符串和数字拼起来；`size`、`color`、`bold`、`align`；`wrap` 换行需要确定的宽度（写 `w`，或父容器 `align="stretch"`） |
-| `button` | `emit`、`payload`、`onPress`、`disabled`、`bg`、`color`；点击或焦点上按 Enter、空格触发 |
+| `text` | 子节点的字符串和数字拼起来；`size`、`color`、`bold`、`weight`（字重 100 到 900）、`spacing`（字距，em）、`shadow`、`align`；`wrap` 换行需要确定的宽度（写 `w`，或父容器 `align="stretch"`） |
+| `button` | `emit`、`payload`、`onPress`、`onHover`（指针移入时一次，放提示音）、`disabled`、`bg`、`hoverBg`、`color`、`hoverColor`、`border`，字体属性同 `text`；点击或焦点上按 Enter、空格触发 |
+| `slider` | 受控滑块：`value`、`min`、`max`、`step`、`onChange(新值)`；拖动或焦点上左右键 |
+| `canvas` | 自绘区：`w`、`h`、`draw(d, box)`，`d` 为 `ctx.ui`，`box` 为 `{ x, y, w, h, alpha }`；在布局里占位、按树的顺序画。罗盘、准星、渐变遮罩这类排不出来的东西用它 |
 | `bar` | 进度条：`value`、`max`、`color`、`bg` |
 | `image` | `src` 为低层贴图，`fit`、`tint`、`radius` |
 | `scroll` | 纵向滚动，`h` 必填；滚轮、拖动 |
 | `input` | 受控单行输入：`value`、`onChange(新值)`、`onSubmit(值)`、`placeholder`、`max` |
 
-焦点：按钮和输入框按树的顺序可聚焦，Tab 与方向键移动，Esc 取消。有焦点时键盘和轴不进游戏指令；没有焦点时界面不占键。
+焦点：按钮、滑块和输入框按树的顺序可聚焦，Tab 与方向键移动，Esc 取消。有焦点时键盘和轴不进游戏指令；没有焦点时界面不占键。
 
 函数组件是普通 TS 函数，可以把 `children` 转放到别的标签里：
 

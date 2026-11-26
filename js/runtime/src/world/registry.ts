@@ -28,6 +28,8 @@ export interface BlockDef<P extends object = any, S extends object = any> {
   init?(me: P & S, e: any, w: any): void
   step?(me: P & S, e: any, w: any): void
   view?: {
+    /** 建表现的相对耗时（缺省 1）：启动预热按它加权推进进度条（17.13） */
+    cost?: number
     enter?(me: P & S, e: any, ctx: Context, w: any): any
     update?(me: P & S, e: any, objs: any[], ctx: Context, w: any): void
     exit?(me: P & S, e: any, objs: any[], ctx: Context, w: any): void

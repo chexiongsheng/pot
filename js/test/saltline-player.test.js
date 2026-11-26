@@ -23,7 +23,6 @@ function goldenFiles() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import realistic from '@pot/kit/realistic'
-import { player } from '../lib/types'
 import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks } from '../parts/player'
 export default defineGame({
@@ -31,7 +30,7 @@ export default defineGame({
   blocks: playerBlocks,
   vars: { sl: { phase: 'playing' }, slSettings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } },
   load: (ctx) => {
-    ;(globalThis as any).slPlayer = () => player(ctx)
+    ;(globalThis as any).slPlayer = () => (ctx.world as any).query('player')[0]
   },
   scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
 })`)
@@ -81,7 +80,8 @@ async function runScript() {
     if (teleport) p().pos[1] = -5
     g.runtime.tick(1 / 60)
     const s = p()
-    rows.push([s.pos[0], s.pos[1], s.pos[2], s.grounded ? 1 : 0, s.crouching ? 1 : 0, s.health, s.yaw])
+    const m = s.b.moveFps
+    rows.push([s.pos[0], s.pos[1], s.pos[2], m.grounded ? 1 : 0, m.crouched ? 1 : 0, s.b.health.hp, m.yaw])
     if (process.env.POT_TRACE && i % 10 === 0) console.log(i, rows[i].map((v) => +v.toFixed(3)).join(' '))
   }
   for (const l of g.host.logs) if (l.level === 'error') console.log(l.text)

@@ -360,6 +360,8 @@ export const harborLevel = defineBlock({
   about: '港口整张图（只有表现）：原版地面积水、海面、雨幕、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。level 为关卡数据文件，tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
   props: LEVEL_PROPS,
   view: {
+    // 实测（Windows）约 350 ms：地面遮罩与细节、海面、雨幕、关卡几何、动态网格；harborStatics 每份约 80 ms，缺省 1
+    cost: 4,
     enter(me, e, ctx, w) {
       const S = store(w)
       const old = S.levels.get(e.id)

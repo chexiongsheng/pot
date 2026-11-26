@@ -1,6 +1,6 @@
 ---
 name: pot-game-dev
-description: 用 pot（Unity + Puerts + cordis）开发游戏包时使用：编写 src/plugins/*.ts 游戏单元、src/lib 共享代码、data/*.json 数据，借助 Runner 自带的热重载和 Dev Server 的 CLI/MCP 打开游戏、查看日志、截图、注入输入、读写 state，以及类型检查与发布构建。也用于高层写法：defineGame + TSX 的场景树、积木（defineBlock）、预制件（definePrefab）、规则、流程与界面标签。涉及 pot、Runner、游戏单元、defineGame、TSX、ctx.scene/ctx.state、pot dev/pot open/pot check/pot blocks/pot test/pot build 时触发。
+description: 用 pot（Unity + Puerts + cordis）开发游戏包时使用：编写 src/plugins/*.ts 游戏单元、src/lib 或 src/parts 共享代码、data/*.json 数据，借助 Runner 自带的热重载和 Dev Server 的 CLI/MCP 打开游戏、查看日志、截图、注入输入、读写 state，以及类型检查与发布构建。也用于高层写法：defineGame + TSX 的场景树、积木（defineBlock）、预制件（definePrefab）、规则、流程与界面标签。涉及 pot、Runner、游戏单元、defineGame、TSX、ctx.scene/ctx.state、pot dev/pot open/pot check/pot blocks/pot test/pot build 时触发。
 ---
 
 # pot 游戏开发
@@ -9,7 +9,7 @@ pot 的游戏包是一个目录：`manifest.json` + `src/plugins/*.ts`（每个�
 
 ## 高层写法（新游戏优先用）
 
-新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ kits, vars, controls, blocks, flow, load, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。玩法与风格按需引入套件（`@pot/kit/topdown` 俯视角、`fps` 第一人称、`realistic` 写实环境与材质），耗时的预载写在 `load` 里。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）和 `games/quiz-tsx`（纯界面）。
+新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ kits, vars, controls, blocks, flow, load, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。玩法与风格按需引入套件（`@pot/kit/topdown` 俯视角、`fps` 第一人称与枪械、`realistic` 写实环境、材质与第一人称枪模），耗时的预载写在 `load` 里。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）、`games/quiz-tsx`（纯界面）和 `games/saltline`（完整的写实 FPS：一个 `game.tsx` 加 `src/parts` 里的组件与积木，场景与敌人来自 `harbor`、`mech` 套件）。游戏变大时把组件、积木、界面拆进 `src/parts/*.tsx`，只导出定义，由 `game.tsx` 组装。
 
 五条规矩：
 

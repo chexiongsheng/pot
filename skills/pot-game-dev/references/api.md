@@ -196,7 +196,7 @@ const rgba = c.pixels(true)           // 非预乘 RGBA8；true = 行序从下�
 - `report(text?, progress?)`：只回报不让帧；`frame()`：无条件等下一帧。
 - 只读：`active`（启动中）、`progress`、`text`、`yields`（本次让帧次数）、`window`（当前进度区间）。
 - `within(lo, hi)`：把接下来加载的单元（`defineGame` 的 `load` 和场景预热）的 0..1 进度映射到绝对区间 `[lo, hi]`，要求 `0 <= lo <= hi <= 1`，否则抛错；每次启动重置为 `[0, 1]`。`step`、`report` 自己报的仍是绝对进度。
-- 父单元用 `await ctx.use('子单元')` 可以等子单元的 async apply 完成，按顺序加载并分段回报进度。子单元是 `defineGame` 时，在 `use` 前调 `ctx.loading.within(本段起点, 本段终点)`，全部挂完后 `within(0, 1)`（saltline 的 game 单元）。
+- 父单元用 `await ctx.use('子单元')` 可以等子单元的 async apply 完成，按顺序加载并分段回报进度。子单元是 `defineGame` 时，在 `use` 前调 `ctx.loading.within(本段起点, 本段终点)`，全部挂完后 `within(0, 1)`。入口本身是 `defineGame`、又在 `load` 里挂子单元时，用 `load` 的 `step(文字, p, until)` 划区间，不必自己换算。
 - 启动期间 Runner 显示加载界面（游戏名、进度条、阶段文字、已用秒数）；游戏从没报过进度时显示"加载 单元名"和不确定进度条。
 
 ## ctx.effect(setup, label)

@@ -113,7 +113,7 @@
 - 时间累积（自动曝光、TAA）用 `history: true` 目标，首帧读到透明黑，着色器里把 `prev <= 0` 当作首帧直接取当前值，否则开局会从全黑慢慢亮起来。
 - 深度、世界坐标用 `<pot/post>` 的 `pot_WorldPos`、`pot_IsSky`，不要照搬原版的 `cameraNear/Far` 线性化：Unity 是 reversed Z，且远平面不同。
 - 原版的方向向量（太阳、闪电方向）是 three 坐标，传进来要把 z 取反；太阳屏幕位置用 `pot_WorldToUv(camPos + pot_SunDir * 500)`，z（w）< 0 时在相机后方，要关掉眩光。
-- 链生效时 URP 后处理被关闭，`scene.post` 里的 SSAO、景深、tonemap 全部失效；退路是先查 `ctx.gfx.supported` 和每个着色器的 `ok`，`gfx.post` 出错会抛异常，捕获后再走 `scene.post`（见 saltline 的 `lib/post.ts`）。
+- 链生效时 URP 后处理被关闭，`scene.post` 里的 SSAO、景深、tonemap 全部失效；退路是先查 `ctx.gfx.supported` 和每个着色器的 `ok`，`gfx.post` 出错会抛异常，捕获后再走 `scene.post`（见 realistic 套件的 `kits/realistic/post.ts` 与 `atmosphere` 的 `chain`）。
 - 热重载中途报 `xxx is not defined`（新加了 import 的模块）多半是编辑过程中保存的中间版本，已自动回滚；以最后一次重载或冷启动的日志为准。
 
 ### 移植原版自定义材质补丁（onBeforeCompile）
@@ -137,6 +137,22 @@
 - 会动的网格（门、闸杆、中继）要挡射线：`spawn({ shape: 'mesh:名字', collider: 'mesh', dynamic: true })`。不加 dynamic 时每次移动都会让 PhysX 重建静态碰撞体；只需粗略命中时用 `collider: 'box'` 或 `'convex'` 更省。
 - gfx 没有 polygon offset，贴花沿法线外推几毫米防 z-fighting；网格没有切线，法线贴图用 `dFdx/dFdy` 重建切线框架。
 - 调试命中类效果不要靠模拟鼠标（失焦会触发暂停），给游戏加一个调试事件，在 `eval` 里 `ctx.emit` 后看日志和截图。
+
+### 表现层缓存在界面里读不到（高层写法）
+
+积木的 view 把状态存在 `new WeakMap()` 里，以 `w` 作键，界面或游戏单元按同样的键却读不到（例如渐黑一直是 0）。积木钩子、规则、界面、`ctx.world` 拿到的 `w` 是不同上下文的服务代理，两两不相等，经代理读出的对象属性也会被包一层。键改用 `w.registry`（同一个普通对象）。套件里 `setGunEnv`、`setPostValues` 也是按它存的。
+
+### 界面里的提示一闪就没了，或暂停时还在走（高层写法）
+
+界面树每帧求值，不能在里面订阅事件、存局部变量。提示文字和发生时的 `w.tick` 由规则记进 `vars`，界面按 `(w.tick - at) * w.dt` 算年龄；不要用 `ctx.clock.time`，否则暂停时提示照样淡出。
+
+### 开局、重试一次卡一两秒（高层写法）
+
+流程“进入”会销毁并重建游戏挂载的全部实体，布景积木（整张关卡、后处理链）也跟着重建。给每个状态都有的实体标 `keep`。关卡碰撞盒这类几百个实体同样标上，否则每次进入都重建碰撞表。
+
+### 暂停菜单里改的设置不生效（高层写法）
+
+设置由某个积木在 `step` 里同步给套件时，暂停（叠加状态）中模拟不走，改了也要等继续才生效。改设置用 `ui.emit` 发事件，规则在暂停中照常执行，在规则里直接写到位（例如同时写 `w.vars.renderQuality`）。
 
 ## 工具与环境
 
@@ -220,7 +236,7 @@
 
 ## 启动很慢、窗口像卡死
 
-启动时所有单元的 apply 在一次同步调用里跑完，期间窗口不刷新。做法：把重的单元写成 `async apply`，阶段之间 `await ctx.loading.step('阶段', 进度)`；大循环用 `for` 并在循环体里 step（不要用 `forEach`，回调里不能 await）。父单元按顺序 `await ctx.use('子单元')`。高层写法把耗时工作写进 `defineGame` 的 `load(ctx, step)`（见 `world.md`“加载进度”），场景实体的表现由框架在启动期间预热。注意：
+启动时所有单元的 apply 在一次同步调用里跑完，期间窗口不刷新。做法：把重的单元写成 `async apply`，阶段之间 `await ctx.loading.step('阶段', 进度)`；大循环用 `for` 并在循环体里 step（不要用 `forEach`，回调里不能 await）。父单元按顺序 `await ctx.use('子单元')`。高层写法把耗时工作写进 `defineGame` 的 `load(ctx, step)`（见 `world.md`“加载进度”），场景实体的表现由框架在启动期间预热（按积木的 `view.cost` 加权推进进度条，日志“预热最慢：…”列出单个超过 100 毫秒的实体；一个积木建得太久就拆成几个实体，如 harbor 的 `harborStatics` 按 `chunk`、`of` 分份）。注意：
 - 在 await 之后注册的 `ctx.on('update')`、`ctx.effect` 照常生效，`update` 用到的变量在 await 前后都可访问。
-- 其他单元在启动期间读 `ctx.state` 时，被 await 中的单元可能还没 define 好，读时要判空（saltline 的 `game(ctx)?.`）。
+- 其他单元在启动期间读 `ctx.state` 时，被 await 中的单元可能还没 define 好，读时要判空。
 - 运行时着色器的编译结果缓存在 `persistentDataPath/cache/shaders`（按后端、编译器版本和源码哈希），第二次打开不再编译。怀疑缓存有问题时删掉这个目录即可；启动日志 `[pot] 游戏已启动（X 秒，着色器缓存命中 a/b）` 可以看命中情况。saltline 由此从 9.8 秒降到 3.8 秒。

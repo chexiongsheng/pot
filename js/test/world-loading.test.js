@@ -76,13 +76,14 @@ test('load：积木与 vars 已登记、场景尚未挂载；预热后表现已�
   assert.equal(engine.objects.size, before)
 })
 
-test('load：按帧驱动时让帧，进度映射到区间（load 占前 80%，预热占后 20%）', async () => {
+test('load：按帧驱动时让帧，load 的进度映射到前 80%，预热从 load 报到的位置接着走', async () => {
   const { runtime, reports } = await startFramed(files({ budget: 0 }))
   assert.deepEqual(runtime.failures, [])
   assert.ok(runtime.loading.yields > 0)
   const find = (text) => reports.find(([, t]) => t === text)
   assert.ok(Math.abs(find('读数据')[0] - 0.4) < 1e-9)
-  assert.ok(Math.abs(find('生成场景 1/4')[0] - 0.85) < 1e-9)
+  // 0.4 起，4 个实体各 1/4
+  assert.ok(Math.abs(find('生成场景 1/4')[0] - 0.55) < 1e-9)
   assert.ok(Math.abs(find('生成场景 4/4')[0] - 1) < 1e-9)
   assert.deepEqual(reports[reports.length - 1], [1, '完成'])
 })
@@ -93,6 +94,8 @@ test('loading.within：父单元给子单元划区间；非法区间报错', asy
   const find = (text) => reports.find(([, t]) => t === text)
   assert.ok(Math.abs(find('读数据')[0] - (0.5 + 0.2 * 0.8 * 0.5)) < 1e-9)
   assert.ok(Math.abs(find('生成场景 4/4')[0] - 0.7) < 1e-9)
+  // 子单元从 load 报到的 0.58（0.5 + 0.2 × 0.4）接着走，4 个实体各 1/4
+  assert.ok(Math.abs(find('生成场景 1/4')[0] - (0.58 + 0.12 * 0.25)) < 1e-9)
   assert.throws(() => runtime.loading.within(0.6, 0.2), /0 <= lo <= hi <= 1/)
   assert.throws(() => runtime.loading.within(-0.1, 0.2), /0 <= lo <= hi <= 1/)
 })
@@ -147,4 +150,30 @@ test('defineGame：load 不是函数时报错', async () => {
   const { runtime, host } = await startGame(map)
   const all = JSON.stringify(runtime.failures) + host.logs.map((l) => l.text).join('\n')
   assert.match(all, /load 必须是函数/)
+})
+
+test('预热：load 没报进度时独占整个区间；按 view.cost 加权；最慢的实体记日志', async () => {
+  const map = files({ budget: 0 })
+  map.set(GAME, `import { defineGame, defineBlock } from '@pot/core'
+const heavy = defineBlock({ name: 'heavy', about: '测试', props: {}, view: { cost: 6, enter() { const t = Date.now(); while (Date.now() - t < 120) {} } } })
+const light = defineBlock({ name: 'light', about: '测试', props: {}, view: { enter() {} } })
+export default defineGame({
+  blocks: [heavy, light],
+  load: (ctx) => { ctx.loading.budget = 0 },
+  scene: () => <>
+    <entity key="big" heavy light />
+    {[0, 1, 2].map((i) => <entity key={i} light />)}
+    <entity key="bare" />
+  </>,
+})
+`)
+  const { runtime, reports, host } = await startFramed(map)
+  assert.deepEqual(runtime.failures, [])
+  const scene = reports.filter(([, t]) => /^生成场景/.test(t))
+  // 有表现的 4 个实体，权重 7、1、1、1，共 10；load 没报进度，从 0 开始
+  assert.deepEqual(scene.map(([, t]) => t), ['生成场景 1/4', '生成场景 2/4', '生成场景 3/4', '生成场景 4/4'])
+  assert.ok(Math.abs(scene[0][0] - 0.7) < 1e-9, `第一个是 0.7，实际 ${scene[0][0]}`)
+  assert.ok(Math.abs(scene[1][0] - 0.8) < 1e-9)
+  assert.ok(Math.abs(scene[3][0] - 1) < 1e-9)
+  assert.ok(infos(host).some((t) => /^预热最慢：entity:big（heavy、light）\d+ ms$/.test(t)), infos(host).join('\n'))
 })

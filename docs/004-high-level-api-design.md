@@ -1699,7 +1699,9 @@ M3 收尾（遗留问题）：
 进度区间：
 
 - 低层新增 `ctx.loading.within(lo, hi)`：设置接下来加载的单元可用的进度区间（绝对值），`begin` 时重置为 `[0, 1]`。由多个单元组成、自己报进度的父单元（如 saltline 的 game）在每个 `ctx.use(子单元)` 前调用；只有一个 `defineGame` 单元的游戏不用管。
-- `defineGame` 单元在开始 apply 时读取区间：有 `load` 且有 `scene` 时，`load` 占前 80%、预热占后 20%；只有其中一项时独占整个区间。apply 开始时场景还没挂载，不知道要预热多少实体，所以按有无 `scene` 划分；场景里没有带表现的实体时，后 20% 由下一次回报补齐。
+- `defineGame` 单元在开始 apply 时读取区间：有 `load` 且有 `scene` 时，`load` 的 `step(p)` 映射到前 80%；只有 `load` 时映射到整个区间。apply 开始时场景还没挂载，不知道要预热多少实体，所以按有无 `scene` 划分。
+- 预热从 `load` 实际报到的位置接着走到区间末尾（M3.5 第 10 步改，原为固定从 80% 开始）：`load` 什么都没报（只做同步准备）时预热独占整个区间，进度条不会先跳到 80% 再慢慢走。场景里没有带表现的实体时，剩下的部分由下一次回报补齐。
+- 预热按权重推进（M3.5 第 10 步加）：积木的 `view.cost`（缺省 1）是建表现的相对耗时，实体的权重为它带表现的积木的 `cost` 之和，进度按累计权重算。整张关卡这类一个实体就要建几秒的积木给大的 `cost`，几百个小实体合起来也不会把进度条拉偏。预热结束后，最慢的 3 个实体（单个超过 100 毫秒）记一条 info 日志（实体 key 路径、积木、耗时），用来调 `cost` 与拆分积木。
 - `load` 的 `step(text, p, until?)`：给了 `until` 时，还把接下来在 `load` 里 `ctx.use` 的子单元区间设为本单元内 `p..until` 映射后的绝对区间（相当于替调用者换算好再调 `within`）；`load` 结束后恢复为本单元的区间。游戏入口本身是 `defineGame`、又在 `load` 里挂低层子单元时用它（saltline 第 4 步起的 game.tsx），不必自己换算 80% 的分配。热重载时同样设置区间，只是不回报、不让帧。
 
 约束：
@@ -2057,7 +2059,7 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 7. 武器：`fps` 的枪械积木，`realistic` 的视图模型与命中效果。
 8. 场景渲染积木化：`world.ts` 拆为 `realistic` 与 `harbor` 的表现积木与预制件，在 `game.tsx` 的 `scene` 里组装。
 9. 界面改为 `ui` 树（19.3 D）。
-10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。
+10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。实施中加入：加载进度的修正（17.13 的“M3.5 第 10 步改”）。
 
 ### 19.5 实施记录
 
@@ -2244,3 +2246,21 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 界面上与原版的差别：按钮可用键盘焦点（Tab、方向键、Enter），有焦点框；反转视角开关改为写“开/关”的圆角按钮；标题字号按字数粗估收窄（原来按实测宽度）；大标题行高按 1.3 倍字号排（原版 CSS 0.8），标题与 eyebrow 的间距略大。
   - 验证：`npm test` 302/303（仅 pot_gfx 一致性），玩家金标准与敌人回归不变；`tsc`、`pot check` 通过；冒烟 hash 由 ab615a74 变为 6d0d2fee（vars 多了 `slHud`、删了 `slPanel`）。Node 上跑整个游戏（含界面树）走标题、设置面板、改设置（`slSet` 合并进设置并写 `renderQuality`）、开场字幕、HUD（警告、击杀信息、准星四条线与命中标记、罗盘）、暂停、阵亡、结算，无报错。Runner 实机（重建后）：标题、设置面板、开场字幕与渐黑、HUD、暂停、阵亡、结算的画面与原版布局一致（`shots/s9-*.png`）；Esc 暂停、Esc 继续、面板里 Esc 只关面板不继续都正常；改 `menu.tsx` 热重载正常。
   - 字节数：saltline 的 `src` 共 64582 字节（第 8 步后 64370）。界面两个文件从 29849 降到 25981，但提示改进 vars 后导演多了 5 条规则、玩家多了后处理、声音多了提示音，总量基本持平。fps 的 `hud.ts` 5417 字节。
+
+第 10 步（收尾）：
+
+- 删除 `lib/types.ts`（`player(ctx)` 等把积木状态映射成旧字段名的视图，第 9 步后只剩两个回归测试在用）；测试改为直接读玩家实体（`b.moveFps`、`b.health`）。`src/lib` 目录随之删除，saltline 的 `src` 只剩 `plugins/game.tsx` 与 `parts`。
+- 加载进度（17.13 改）：第 8 步后 saltline 的 `load` 只做同步准备，进度条一开始就跳到 80%，场景耗时全在后 20%，而且按实体个数平分（几百个碰撞盒不建表现，不算；布景十来个实体耗时却差很多）。改为预热从 `load` 实际报到的位置接着走、按积木的 `view.cost` 加权；预热后把最慢的几个实体记进日志。harbor、realistic 的重积木按实测给 `cost`。
+- Skill 与文档：把 M3.5 新增的能力与坑写进 Skill（`keep`、套件资源与 `vars`、`<canvas>`、`<slider>`、`opacity`、字重字距、`ui.input`、`ui.audio`、`view.cost`；表现层缓存按 `w.registry` 作键；界面每帧求值，瞬时提示要进 vars；改设置走界面事件）。
+- 实施：
+  - 加载进度：`view.cost` 进 `BlockDef.view`；`WorldView.viewCost(e)` 为带表现的积木的 `cost` 之和；预热从 `loading.progress`（夹在本单元区间内）接着走，按累计权重回报，单个超过 100 毫秒的实体记进“预热最慢”日志（取前 3 个）。实测 saltline（Windows）：玩家（viewGun 为主）约 350 ms、harborLevel 约 350 ms、harborStatics 前两份 300 ms 与 200 ms、其余几份 6 到 60 ms，atmosphere 约 25 ms；据此 `viewGun` 的 `cost` 取 5、`harborLevel` 取 4，其余缺省 1。改后 saltline 的进度从 0 开始按权重走到 1（原来一开始就跳到 0.8）。`world-loading.test.js` 改 2 例的预期并加 1 例（`load` 没报进度时预热独占、按 `cost` 加权、慢实体日志）。
+  - 两个回归测试不再引用 `lib/types`，结果不变（玩家 840 步、敌人 6 例）。
+  - Skill：`SKILL.md` 列出 saltline 作为完整写实 FPS 的例子与 `src/parts` 的拆法；`world.md` 补 `keep`、`view.cost`、表现层缓存按 `w.registry` 作键、fps 的 `gunFps` 与 `hud`、realistic 的 `beacon`、`viewGun`、`atmosphere` 进阶属性、harbor 与 mech、套件 `vars`、加载进度新规则、界面的 `input`、`audio`、`opacity`、字重字距、`<slider>`、`<canvas>`、瞬时提示进 vars；`pitfalls.md` 加 4 条（表现层缓存读不到、界面提示、开局卡顿与 `keep`、暂停中改设置），“启动很慢”一条补 `view.cost` 与拆分积木；两处指向 saltline 旧文件的引用改为套件。
+  - 字节数（手写源码，不含机械移植的原版代码 `orig/port.ts`、`vendor/three-geo`、`sl-shaders`、`sl-patch` 共约 530KB，也不含数据 JSON）：
+    - 迁移前（e61c2ba）：saltline 的 `src` 404473 字节加 `data/shaders` 50624，共 455097；套件 fps 15182、realistic 11829、topdown 1951，共 28962。合计 484059。
+    - 迁移后：saltline 的 `src` 60955 字节（12 个文件减去删掉的 `lib/types`，没有着色器）；套件 fps 30540、realistic 248519、harbor 96738、mech 89582、topdown 1951，共 467330（含着色器）。合计 528285。
+    - 游戏这一侧减少 87%（455097 → 60955）；总量增加约 9%，多出来的是积木的声明（`about`、`props`、`state`）、按 World 缓存与回收、`setGunEnv` 这类注入接口和更多的注释。数据 JSON 为 13018 字节，前后相同。
+  - Runner 实机（最终代码重建后）：启动 3.8 秒，无报错；标题到开局正常，开局后玩家 1 个、敌人 2 个，场景对象 360、引擎对象 270。第 8、9 步的截图对照仍然成立。
+  - 遗留：
+    - Runner 包里的 `kits.json`（约 1MB）带全部套件；发布包只带用到的套件需要 `pot build` 按游戏的 `kits.json` 生成，留作后续。
+    - `viewGun`、`harborLevel` 的 `cost` 是 Windows 上的实测，手机上比例可能不同。

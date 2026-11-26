@@ -148,6 +148,18 @@ export class WorldView {
     return false
   }
 
+  /** 建表现的相对耗时：带表现的积木的 view.cost 之和（缺省各 1），没有表现为 0 */
+  viewCost(e: EntityData): number {
+    let cost = 0
+    for (const name in e.b) {
+      const view = e.b[name] && this._world.registry.block(name)?.view
+      if (!view) continue
+      const c = Number(view.cost)
+      cost += Number.isFinite(c) && c > 0 ? c : 1
+    }
+    return cost
+  }
+
   /** 出现、替换、消失的积木：按积木顺序 enter，定义或属性修订号变了的先 exit */
   private _enter(v: EntityView, e: EntityData, ordered: BlockDef[]) {
     const w = this._world

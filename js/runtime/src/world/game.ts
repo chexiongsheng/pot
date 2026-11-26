@@ -193,21 +193,37 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
         })
       }
 
-      // 启动加载期提前建好本挂载实体的表现，逐个回报“生成场景 k/n”（17.13）
+      // 启动加载期提前建好本挂载实体的表现，按积木的 view.cost 加权回报“生成场景 k/n”（17.13）；
+      // 从 load 实际报到的位置接着走，load 没报进度时预热独占整个区间
       const warm = async () => {
         const mount = w.data.mounts[unit]
         if (!mount) return
-        const list: EntityData[] = []
-        for (const rec of Object.values(mount.keys)) {
+        const list: { e: EntityData; cost: number; path: string }[] = []
+        let total = 0
+        for (const [path, rec] of Object.entries(mount.keys)) {
           const e = !rec.dead && w.data.entities[rec.id]
-          if (e && w.view.hasView(e)) list.push(e)
+          const cost = e ? w.view.viewCost(e) : 0
+          if (!e || cost <= 0) continue
+          list.push({ e, cost, path })
+          total += cost
         }
-        const from = def.load ? mid : lo
+        const from = Math.min(hi, Math.max(lo, loading.progress))
+        const slow: { path: string; blocks: string; ms: number }[] = []
+        let done = 0
         for (let k = 0; k < list.length; k++) {
+          const { e, cost, path } = list[k]
           // 预热期间实体可能已被别处删掉（例如 load 之外的异步代码）
-          if (w.data.entities[list[k].id] !== list[k]) continue
-          w.view.warm(list[k])
-          await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * (k + 1) / list.length)
+          if (w.data.entities[e.id] !== e) continue
+          const t0 = Date.now()
+          w.view.warm(e)
+          const ms = Date.now() - t0
+          if (ms > 100) slow.push({ path, blocks: Object.keys(e.b).filter((n) => w.registry.block(n)?.view).join('、'), ms })
+          done += cost
+          await loading.step(`生成场景 ${k + 1}/${list.length}`, from + (hi - from) * done / total)
+        }
+        if (slow.length) {
+          slow.sort((a, b) => b.ms - a.ms)
+          ctx.logger('world').info('预热最慢：%s', slow.slice(0, 3).map((s) => `${s.path}（${s.blocks}）${s.ms} ms`).join('；'))
         }
       }
 
