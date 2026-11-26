@@ -720,6 +720,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | M1 内核最小版加 TSX 接入 | jsx 运行时与两遍转译（5.8）；`defineGame`、树求值与 key 对比；World 服务、带模式的积木、固定步调度、帧末变换批量同步、事件与规则、指令层；约 10 个积木；最简的 `ui` 求值（文本） | 用 5.1 的写法重写 hello，对比字节数和 AI 生成所用的 token；热重载后吃掉的金币不回来；存档行为不变 |
 | M2 界面与工具（施工说明见第 16 节） | 界面标签与布局、流程、`ui.local`；补界面的低层缺口；`pot blocks`、`pot check` 的求值校验、类型生成、`pot query world`、覆盖层、`pot test`；Skill 更新 | AI 只凭 Skill 和 `pot blocks` 写出一个新的小游戏和一个界面为主的小游戏 |
 | M3 混用验证与套件 | 模拟侧碰撞、`moveFps`、AI 积木；套件机制（6.12：`defineKit`、`kits`、`@pot/kit/*` 解析与打包、冲突报错）；从 saltline 整理出 `fps` 与写实两个套件，把它的玩家和敌人换成积木，渲染单元保留；`moveTopdown`、`cameraFollow` 迁入 `topdown` 套件 | 行为与现版本一致，代码量明显下降；hello-tsx 改为引入 `topdown` 后行为不变 |
+| M3.5 saltline 全面迁移（施工说明见第 19 节） | 套件资源（着色器等数据文件进套件）；saltline 的模型、贴图、着色器、渲染、特效进 `realistic`，港口场景进 `harbor`，机械敌人进 `mech`，枪械逻辑进 `fps`；导演逻辑改为积木、流程与 `vars`；界面改为 `ui` 树；全游戏只有 `game.tsx` 一个 `defineGame` | `games/saltline` 只剩 TSX 与配置数据；玩家金标准与敌人回归测试通过，实机行为一致；手写源码大幅减少 |
 | M4 C# 积木 | 原生实现注册、列共享与跨语言开销实测、`pot block verify`；移植碰撞和一个移动积木；评估 wasm 物理库 | 同一录像两种实现结果一致，给出性能对比 |
 | M5 联机 | `ctx.net`、房间服务、本地回环驱动与录像回放、权威同步、帧同步、回合制，按此顺序 | 每种驱动各有一个示例游戏和 Node 上的自动化用例 |
 | M6 Web 原生宿主（远期） | `Engine` 子集的 Web 实现、可移植契约的屏蔽层 | hello 的高层版本在不含 Unity 的网页里运行 |
@@ -1992,4 +1993,64 @@ M4 留下的待办：
 - iOS、Android 真机实测（无 JIT 的 TS 耗时、IL2CPP 在 ARM 上与 x64 是否逐位一致，Android 上 clang 可能把乘加合成 FMA）。
 - C# 碰撞只移植了 `move` 与盒的 `overlap`；`dmath` 的三角函数在超大参数时不保证一致。
 - 游戏自带 C# 积木（`extraPackages`）没有打通。
+
+## 19. M3.5 saltline 全面迁移（施工说明）
+
+M3 把 saltline 的玩家和敌人换成了积木，但渲染、武器、界面、导演逻辑仍是低层单元，模型、贴图、着色器都在游戏目录里，手写源码只少了 0.3%。本阶段用 saltline 验证整套架构：游戏目录只留 TSX 与配置数据，风格需要的东西都在套件里。迁移中发现架构说不通的地方随时调整，调整记在 19.5。
+
+判断归属的标准：换一种玩法（例如用同样的套件搭一个大逃杀）还用得上的，进套件；只属于 saltline 这一局玩法的（中继、增援节奏、撤离、结算），留在游戏。
+
+### 19.1 目标结构
+
+```
+games/saltline/
+  manifest.json  tsconfig.json  icon.png
+  data/flow.json  level.json  tuning.json   玩法配置
+  src/plugins/game.tsx                     唯一的单元，唯一的 defineGame
+  src/parts/*.tsx                          本游戏的积木、预制件、界面组件（导演、中继、增援、撤离、hud、菜单）
+```
+
+删除 `src/lib`、`src/vendor`、`data/shaders`。`src/parts` 里的文件只导出定义，不调用 `defineGame`、不注册单元（现在 `player.tsx` 里自带一个 `defineGame`，是 M3 为了逐个替换单元的过渡写法）。
+
+### 19.2 套件划分
+
+| 套件 | 定位 | 从 saltline 移入 |
+|---|---|---|
+| `realistic` | 写实风格：渲染管线、材质、模型工具、特效、音效 | `orig/port`、`vendor/three-geo`、`geo`、`meshes`、`mats`、`sl-shaders`、`sl-patch`、`pac9-mats`、`textures`、`post` 与后处理着色器、`sea`、`apron`、`rain`、`fx`、`decals`、`sfx`、`math`、`palette`，以及第一人称视图模型 `gun`、`hands` 与对应着色器 |
+| `harbor`（依赖 `realistic`） | 港口场景内容：道具模型、关卡构建、关卡碰撞盒 | `level`、`origlevel`、`collision` 的碰撞盒、中继模型 |
+| `mech`（依赖 `fps`、`realistic`） | 机械敌人：模型与行为积木 | `gull`、`hound`、`models`，`enemies` 里的 `slFoe`、`slGull`、`slHound`、`slBolt`（去掉 `sl` 前缀） |
+| `fps` | 第一人称玩法 | 新增枪械逻辑积木（弹匣、射速、散布、换弹、命中射线），saltline 的 `weapon` 逻辑移入 |
+
+套件里的代码不得依赖某个游戏的阶段、事件名或全局状态：敌人“何时追击、打到谁”由属性和事件给出；`decals` 的 `surfaceAt` 依赖 `origlevel`，改为由调用方传入表面查询。小文件（`physics`、`rating` 等）按用途归入，纯属本游戏的留在 `src/parts`。
+
+### 19.3 架构调整
+
+A. 套件资源。套件除代码外还能带数据文件（着色器、JSON）。`ctx.data` 与 `ctx.gfx` 的路径可以写成 `@pot/kit/<名字>/<路径>`，读取次序：游戏的 `data/kits/<名字>/<路径>`（发布时复制的副本，或弹出后的副本），再回退到宿主的套件目录（`host.readKit`）。着色器里 `#include` 的相对路径按包含它的文件解析，可以跨进套件。读者登记与热重载规则同普通数据文件（DataService 按完整路径登记读者，dev agent 收到套件资源的变化时同样强制重载）。`kits.json` 收录 `.vert`、`.frag`、`.glsl`。`pot build` 把游戏用到的套件资源复制到发布包的 `data/kits/`；`pot eject` 同样复制，并把代码里的 `'@pot/kit/<名字>/'` 改写为 `'kits/<名字>/'`。
+
+B. 积木的宿主能力。模拟侧（`init`、`step`）只读写实体与 World，不拿 `ctx`；音效、震屏、特效等表现由 `w.emit` 发事件，表现侧（积木的 `view`、套件或游戏的表现积木）处理。不再用模块级的 `host` 变量（现在 `player.tsx` 的写法）。需要新增的 World 能力在实施时补，记在 19.5。
+
+C. 导演逻辑。开局、中继、增援、撤离、结算写成积木，挂在一个单例实体上；阶段走 `flow`（暂停用叠加状态）；`GameState` 改放 `w.vars`；`lib/bus` 的事件改用 `w.emit` 与 `rules`，事件名与载荷在 `src/parts` 里声明类型。
+
+D. 界面。`hud`、`menu` 从即时模式 `ctx.ui` 改为 `ui` 树；罗盘、准星等自绘部分用 `ui.draw`。
+
+E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realistic`、`harbor`、`mech`，`blocks` 与 `prefabs` 列出 `src/parts` 的定义，`scene` 布置玩家、关卡、环境与导演实体，`ui` 组装界面。
+
+### 19.4 步骤
+
+每一步行为不变（或差异有记录），`npm test` 通过、saltline 的 `pot check` 通过、玩家金标准与敌人回归测试通过后单独提交。第 3、8、9、10 步另在 Runner 里实机验证。
+
+1. 本节文档与第 12 节里程碑行。
+2. 套件资源（19.3 A）：DataService、gfx 预处理、dev agent 热重载、`kits.json`、`pot build`、`pot eject`，补测试。
+3. 资产搬家：`src/lib`、`src/vendor`、`data/shaders` 按 19.2 机械地移入套件，游戏改为从 `@pot/kit/*` 引入，行为不变。回归测试的引用路径同步改。
+4. 单一 `defineGame`：`player`、`enemies`、`collision` 改为 `src/parts` 里只导出定义的模块，由 `game.tsx` 组装；渲染、武器、界面、导演暂时仍是低层单元，由 `game.tsx` 的 `load` 里 `ctx.use` 挂载。
+5. 敌人行为进 `mech`，去掉对 saltline 阶段和事件的依赖。
+6. 导演逻辑（19.3 C）。
+7. 武器：`fps` 的枪械积木，`realistic` 的视图模型与命中效果。
+8. 场景渲染积木化：`world.ts` 拆为 `realistic` 与 `harbor` 的表现积木与预制件，在 `game.tsx` 的 `scene` 里组装。
+9. 界面改为 `ui` 树（19.3 D）。
+10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。
+
+### 19.5 实施记录
+
+（每步完成后补写：架构调整、遇到的问题、数字。）
 
