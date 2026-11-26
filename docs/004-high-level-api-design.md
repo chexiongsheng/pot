@@ -1374,6 +1374,7 @@ export default defineGame({ kits: [topdown], ... })
 - `defineGame` 的 `kits`：先按 `requires` 展开闭包（深度优先，依赖在前，去重），再按顺序登记，全部在游戏的 `blocks`、`prefabs` 之前。`controls` 的合并顺序为套件（展开后的顺序）、游戏，按动作名覆盖。
 - 两个套件登记了同名的积木或预制件时报错“积木 X 同时由套件 a 和 b 提供”，除非游戏自己的 `blocks`/`prefabs` 也有这个名字（游戏覆盖二者）。套件与系统同名时套件覆盖系统，不报错。
 - `vars`（M3.5 第 5 步加）：套件需要的全局变量及初值，套件的积木读写 `w.vars` 里的这些键（游戏借此把开关交给套件，例如 mech 的 `mechFrozen`）。合并顺序同 `controls`：套件按展开后的顺序、游戏最后，同名以后者的初值为准；两个套件声明了同一个键时报错“变量 X 同时由套件 a 和 b 声明”，除非游戏的 `vars` 也有这个键。合并结果再按原规则补进 `WorldData.vars`（已有的键保留）。键名建议带套件名前缀。
+- `on`（M3.5 第 7 步加）：`{ 事件名: (w, payload) => void }`，套件对 World 事件的处理器，`defineGame` 在登记完该套件的积木与预制件后用 `w.on` 挂上，早于游戏在 `load`、`setupScene` 里挂的处理器（同一事件的处理器按套件展开顺序、游戏最后执行；`<rule>` 照旧先于全部处理器）。用途是套件之间用事件对接而不互相 import 实现，例如 mech 的 `on.gunHit` 把 fps 的命中换算成敌人受伤。值必须是函数，否则 `defineKit` 报错。
 - 登记表的条目带来源 `source`：`system`、`kit:<名字>`、`game`。`registry.sourceOf(kind, name)` 返回栈顶的来源。
 - 树求值遇到未知的积木或预制件时，查全局套件目录：有套件提供这个名字就报“未知的积木 X，它属于套件 fps，请加到 defineGame 的 kits”，否则沿用原来的报错。
 
@@ -2137,3 +2138,24 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 流程验证（临时探针单元暴露 world，用 `emitUI` 驱动全流程，未提交）：标题按开始进入 intro，待生成 8 个，鼠标锁定；6 秒后 playing，场上 3 个敌人；暂停后 flow 为 `paused`、敌人位置不变、鼠标解锁；继续回到 `play`，`t` 接着走；生命归零进入 dead，鼠标解锁；重试后重试次数为 1、已切断的中继保留；重新开始后重试次数归零、中继全部 live；返回标题。全程无错误与警告。
 - 验收：`npm test` 279/280（仅 pot_gfx 一致性），玩家金标准与敌人回归 6 例通过；`tsc`、saltline 的 `tsc`、`pot check`、`pot test`（冒烟 300 步，hash 9cc30054）通过。`git grep` 确认游戏与套件里没有 `GameState`、`wirePlayer`、`wireEnemies`、`GAME`、`phaseTime` 与旧的 `saltline/*` 导演事件。Runner 实机留到第 8 步一起做。
 - 字节数：游戏 `plugins` + `parts` 共 103992 字节（第 5 步 99061），其中 `parts` 22219（`director.tsx` 11660、`player.tsx` 5198、`state.ts` 3119、`enemies.ts` 1352、`level.tsx` 890），`plugins` 81773（`game.tsx` 1826，仍是低层单元的 weapon 27439、world 22866、menu 17443、hud 12199）；`lib` 5275。略涨是因为 `state.ts` 的类型声明与事件表，以及导演拆出 step、view 与两条规则后的样板；导演逻辑本身没有变短，主要收获是状态进了 `w.vars`、阶段进了 flow、单元间事件改成带类型的 World 事件。mech 套件 88514 字节。
+
+第 7 步（武器）：
+
+- 目标。低层单元 `plugins/weapon.ts`（约 27KB）拆成两半：枪的规则（弹匣、射速、散布、后坐、换弹、开火与命中判定）是 fps 的积木 `gunFps`，在模拟里跑、进存档与录像；枪的样子（视图模型、双手、弹簧姿态、枪口火焰、曳光、弹孔、水花、枪声）是 realistic 的积木 `viewGun`，只有 view。敌人受伤由 mech 用套件事件对接，saltline 只剩属性与两条规则。
+- 架构调整（框架）：
+  - `KitDef.on`（见 17.2）：套件之间靠事件对接。fps 不认识 mech，mech 不 import fps 的枪；fps 发 `gunHit`，mech 的 `on.gunHit` 接。
+  - `WorldView` 的部件登记：`w.view.bindPart(objectId, 实体或 id, tag?)`、`unbindPart(objectId)`、`partOf(objectId)`（返回 `{ entity, tag }`，没登记或实体已不在时为 null）。积木表现把它建的场景对象（如敌人的命中体）登记到实体上，别的积木的表现做场景射线后就能知道打中了谁；实体的表现退出时自动注销它的全部部件。约定 `tag: 'weak'` 表示弱点。mech 原来自己维护的“部件到敌人”映射（`look.ts` 的 `S.parts`、`partOwner`）改用它。
+- `gunFps`（fps，order 2，排在 `moveFps` 与各 order 1 积木之后）：
+  - 属性：`mag`、`reserve`、`rpm`、`damage`、`weakMultiplier`、`range`、`spread`、`spreadAds`、`spreadMove`、`bloomPerShot`、`bloomMax`、`recoilPitch`、`recoilYaw`、`recoilRecover`、`adsTime`、`reloadTactical`、`reloadEmpty`、`reloadMagIn`（补弹时刻，1.345 秒）、`reloadBolt`（空仓换弹的枪机复位时刻，2.19 秒）、`hitscan`（`'world'` 或 `'view'`）、`layers`（world 模式的碰撞层）、`viewMask`、`viewPlanes`（view 模式的场景射线参数）、`actions`（缺省 `{ fire: 'fire', aim: 'aim', reload: 'reload' }`）。fps 的 `controls.actions` 加 `fire: ['mouse0']`、`aim: ['mouse1']`、`reload: ['r']`。
+  - 状态：`active`、`mag`、`reserve`、`reloading`、`reloadT`、`reloadTotal`、`ads`、`cooldown`、`bloom`、`recoilP`、`recoilY`、`spread`、`sprintT`、`boltLocked`，计数 `shots`、`dry`、`reloads`（表现据计数变化放声音与动画），以及最近 8 发的环 `fired`（每项 `{ k: 发序号, o: 起点, d: 方向 }`）。
+  - 每步：不活跃或生命归零时只让 `ads` 回落。否则按指令求扳机与开镜（冲刺中不开镜），`ads`、`sprintT` 阻尼趋近；按换弹键或空仓扣扳机开始换弹，到 `reloadMagIn` 补弹、空仓时到 `reloadBolt` 解锁枪机；冷却到了且冲刺收枪程度 `sprintT < 0.45` 时开火，开火打断冲刺（写 `moveFps.sprinting = false`），一步最多补 3 发。散布用 `w.rand` 在锥内抖动（与原版相同的公式），然后更新 bloom 与后坐。每发 `w.emit('gunFired', { entity, origin, dir })`。最后写同一实体的 `moveFps.aim = ads`、`cameraFps.kick = [recoilP, recoilY]`，fps 套件内部的积木直接互相读写。
+  - 命中判定两种模式：`'world'` 在模拟里用 `w.raycast` 打碰撞体，命中实体就当步发 `gunHit`，用于命中体就是碰撞体的游戏。`'view'` 用于命中体只存在于表现里的游戏（saltline 的敌人命中体挂在动画骨骼上，模拟侧没有）：`gunFps.view` 对每个新的发序号做一次场景射线，打中登记过的部件就 `w.emitUI('gunReport', { entity, shot, target, weak, point, normal })`；套件的 `on.gunReport` 校验射手还活着、`shot` 在环里且没报告过、目标还在、距离不超过 `range`，然后发 `gunHit`。回写走 `emitUI`，进下一步的指令与录像，回放时不需要表现也能重现命中；无画面运行时没有表现，也就没有命中。
+  - `gunHit` 的载荷：`{ entity: 射手, target, weak, point, normal, dir, damage: damage × (weak ? weakMultiplier : 1), shot }`。fps 只报告命中，不扣血：扣谁的血、怎么换算交给接收方（有 `health` 的普通目标可以由游戏一条规则调 `damage`）。
+- mech：`mechHit(w, target, n, dir?, weak?)` 的第二个参数改为敌人实体，`n` 已含弱点倍率。套件 `on.gunHit`：目标带 `mechFoe` 时调 `mechHit`，再发 `mechHurt { ...MechHit, by: 射手 }`；`on.gunFired`：调 `mechHear(w, origin)`。`look.ts` 的命中体改用 `w.view.bindPart(part, e.id, weak ? 'weak' : 'body')`。
+- realistic 的 `viewGun`（只有 view）：从 weapon.ts 原样迁来视图模型（pac9 各部件与湿润材质）、双手与换弹动作、镜片与红点、枪口火焰与闪光、8 条曳光、5 组弹簧、开镜 fov 与姿态公式，弹孔与命中特效（`createDecals`、`createFx`，二者补 `destroy`，`exit` 时回收）。它只按结构读同一实体的 `gunFps`、`moveFps`、`cameraFps`（type-only 引入 fps 的类型，不引入实现），按计数放枪声、换弹声、空仓声。命中效果自己再打一次场景射线：`partOf` 有结果就是打中目标（光点与火花），否则按表面放弹孔、碎屑或水花。可见条件为 `cameraFps.active` 且生命大于 0，叠加状态下冻结。场景相关的查询由游戏注入：`setGunEnv(w, { surface(point, normal, tag), shelter(camPos) })`，前者返回表面种类（金属、木头、混凝土、水），后者给雨淋程度，harbor 提供实现，saltline 在 `load` 里设置。
+- saltline：`Player` 加 `gunFps={{ ...tuning.weapon, hitscan: 'view', viewMask, viewPlanes }}` 与 `viewGun`；`slControl` 写 `gunFps.active`（playing 且活着）；`Director` 加 `<rule on="gunFired">`（战绩开枪数）与 `<rule on="mechHurt">`（命中数，击杀时发 `slKill`）。hud 的命中标记与命中、击杀音效改听 `mechHurt`；`weapon(ctx)` 改读玩家的 `gunFps`。删除 `weapon.ts`、`WEAPON` 状态与 `saltline/debug`、`saltline/hitmarker` 两个事件，`load` 不再挂 weapon。
+- 预计的差异：
+  - 开火从渲染帧改到固定步，随机数从 `Math.random` 改为 `w.rand`，冒烟 hash 会变；玩家金标准不开枪，应当不变。
+  - 命中晚一步（经指令回写），无画面运行与 `pot test` 里打不中敌人。
+  - 不再要求鼠标锁定才能开火（由菜单保证游戏中总是锁定）。
+  - 命中标记、命中与击杀音效由事件驱动，在命中的下一步出现。

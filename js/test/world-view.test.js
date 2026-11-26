@@ -9,7 +9,7 @@ import type { Context } from '@pot/core'
 export const look = defineBlock({
   name: 'look', about: '方块外观', props: { color: '${color}' },
   view: {
-    enter(me, e, ctx, w) { w.vars.enters = (w.vars.enters ?? 0) + 1; return ctx.scene.spawn({ shape: 'cube', name: 'look', color: me.color, scale: 0.5 }) },
+    enter(me, e, ctx, w) { w.vars.enters = (w.vars.enters ?? 0) + 1; const o = ctx.scene.spawn({ shape: 'cube', name: 'look', color: me.color, scale: 0.5 }); w.view.bindPart(o.id, e, e.pos[0] > 1 ? 'weak' : undefined); return o },
     exit(me, e, objs, ctx, w) { w.vars.exits = (w.vars.exits ?? 0) + 1 },
   },
 })
@@ -55,10 +55,23 @@ test('实体出现时 enter 创建场景对象，消失时 exit 并回收；对�
   assert.equal(world(runtime).view.objectCount, 2)
   assert.equal(runtime.root.scene.list('game').length, 2, 'query objects game 能查到')
   assert.equal(runtime.root.scene.list('(host)').length, 0)
+  const view = world(runtime).view
+  const [oa, ob] = looks(engine).map((o) => o.id)
+  const pa = view.partOf(oa)
+  const pb = view.partOf(ob)
+  assert.equal(pa.entity, byPath(runtime, 'box:a'))
+  assert.equal(pa.tag, undefined)
+  assert.equal(pb.entity, byPath(runtime, 'box:b'))
+  assert.equal(pb.tag, 'weak')
+  assert.equal(view.partOf(123456), null)
   world(runtime).destroy(byPath(runtime, 'box:b'))
   frames(runtime, 2)
   assert.equal(looks(engine).length, 1)
   assert.equal(world(runtime).vars.exits, 1)
+  assert.equal(view.partOf(ob), null, '实体消失后部件注销')
+  assert.equal(view._parts.size, 1)
+  view.unbindPart(oa)
+  assert.equal(view.partOf(oa), null)
 })
 
 test('变换：位置按 fixedAlpha 插值、旋转转四元数、缩放乘以创建时的缩放；一帧只调用一次 setTransforms', async () => {

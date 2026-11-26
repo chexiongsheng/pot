@@ -117,6 +117,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
         const source = `kit:${kit.name}`
         for (const block of kit.blocks) ctx.effect(() => w.registry.addBlock(block, source), `world.block(${block.name})`)
         for (const prefab of kit.prefabs) ctx.effect(() => w.registry.addPrefab(prefab, source), `world.prefab(${prefab.prefab})`)
+        if (kit.on) for (const name of Object.keys(kit.on)) w.on(name, kit.on[name])
       }
       for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, 'game'), `world.block(${block.name})`)
       for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, 'game'), `world.prefab(${prefab.prefab})`)

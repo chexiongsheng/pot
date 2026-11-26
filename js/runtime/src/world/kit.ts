@@ -20,8 +20,12 @@ export interface KitDef {
   controls?: Controls
   /** 套件的积木要读写的 w.vars 键及初值 */
   vars?: Record<string, any>
+  /** 套件对 World 事件的处理器，defineGame 用 w.on 挂上，早于游戏的处理器 */
+  on?: Record<string, KitHandler>
   requires?: Kit[]
 }
+
+export type KitHandler = (w: any, payload: any) => void
 
 export interface Kit {
   readonly name: string
@@ -30,6 +34,7 @@ export interface Kit {
   readonly prefabs: readonly Prefab<any>[]
   readonly controls?: Controls
   readonly vars?: Readonly<Record<string, any>>
+  readonly on?: Readonly<Record<string, KitHandler>>
   readonly requires: readonly Kit[]
 }
 
@@ -55,6 +60,12 @@ export function defineKit(def: KitDef): Kit {
   if (def.vars !== undefined && (!def.vars || typeof def.vars !== 'object' || Array.isArray(def.vars))) {
     throw new Error(`${where}：vars 必须是对象`)
   }
+  if (def.on !== undefined) {
+    if (!def.on || typeof def.on !== 'object' || Array.isArray(def.on)) throw new Error(`${where}：on 必须是 { 事件名: 处理函数 } 对象`)
+    for (const [name, fn] of Object.entries(def.on)) {
+      if (typeof fn !== 'function') throw new Error(`${where}：on.${name} 必须是函数`)
+    }
+  }
   if (def.requires !== undefined && (!Array.isArray(def.requires) || !def.requires.every(isKit))) {
     throw new Error(`${where}：requires 必须是 defineKit 结果的数组`)
   }
@@ -65,6 +76,7 @@ export function defineKit(def: KitDef): Kit {
     prefabs: Object.freeze([...(def.prefabs ?? [])]),
     controls: def.controls,
     vars: def.vars ? Object.freeze({ ...def.vars }) : undefined,
+    on: def.on ? Object.freeze({ ...def.on }) : undefined,
     requires: Object.freeze([...(def.requires ?? [])]),
   }
   Object.defineProperty(kit, KIT, { value: true })

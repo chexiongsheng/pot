@@ -7451,6 +7451,12 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (def.vars !== void 0 && (!def.vars || typeof def.vars !== "object" || Array.isArray(def.vars))) {
       throw new Error(`${where2}：vars 必须是对象`);
     }
+    if (def.on !== void 0) {
+      if (!def.on || typeof def.on !== "object" || Array.isArray(def.on)) throw new Error(`${where2}：on 必须是 { 事件名: 处理函数 } 对象`);
+      for (const [name, fn] of Object.entries(def.on)) {
+        if (typeof fn !== "function") throw new Error(`${where2}：on.${name} 必须是函数`);
+      }
+    }
     if (def.requires !== void 0 && (!Array.isArray(def.requires) || !def.requires.every(isKit))) {
       throw new Error(`${where2}：requires 必须是 defineKit 结果的数组`);
     }
@@ -7461,6 +7467,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       prefabs: Object.freeze([...def.prefabs ?? []]),
       controls: def.controls,
       vars: def.vars ? Object.freeze({ ...def.vars }) : void 0,
+      on: def.on ? Object.freeze({ ...def.on }) : void 0,
       requires: Object.freeze([...def.requires ?? []])
     };
     Object.defineProperty(kit, KIT, { value: true });
@@ -8443,6 +8450,27 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       __publicField(this, "_sunKey");
       __publicField(this, "_sun", null);
       __publicField(this, "_camera");
+      /** 场景对象 id 到实体（部件登记，见 bindPart） */
+      __publicField(this, "_parts", /* @__PURE__ */ new Map());
+    }
+    /**
+     * 部件登记（004 第 19.5 节第 7 步）：把积木表现建的场景对象（如命中体）记到实体上，
+     * 别的积木做场景射线后用 partOf 知道打中了谁。实体的表现退出时自动注销。tag 'weak' 约定为弱点。
+     */
+    bindPart(objectId, entity2, tag) {
+      const id = typeof entity2 === "number" ? entity2 : entity2?.id;
+      if (typeof objectId !== "number" || typeof id !== "number") throw new Error("w.view.bindPart(场景对象 id, 实体或实体 id, tag?)");
+      this._parts.set(objectId, tag === void 0 ? { entity: id } : { entity: id, tag });
+    }
+    unbindPart(objectId) {
+      this._parts.delete(objectId);
+    }
+    /** 场景对象属于哪个实体；没登记或实体已不在时为 null */
+    partOf(objectId) {
+      const part = this._parts.get(objectId);
+      if (!part) return null;
+      const e = this._world.data.entities[part.entity];
+      return e ? { entity: e, tag: part.tag } : null;
     }
     /** 当前登记的场景对象数（测试与开发工具用） */
     get objectCount() {
@@ -8470,6 +8498,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (seen.has(id)) continue;
         for (const rec of v.blocks.values()) this._exit(rec, v.e);
         this._entities.delete(id);
+        this._dropParts(id);
       }
       for (const def of ordered) {
         const update = def.view?.update;
@@ -8533,6 +8562,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
           });
         }
       }
+    }
+    /** 注销实体的全部部件 */
+    _dropParts(entity2) {
+      if (!this._parts.size) return;
+      for (const [obj, part] of this._parts) if (part.entity === entity2) this._parts.delete(obj);
     }
     /** 改记场景对象的展示归属 */
     _label(id, unit) {
@@ -11312,6 +11346,7 @@ TS：${r.layout.text}
           const source = `kit:${kit.name}`;
           for (const block of kit.blocks) ctx.effect(() => w.registry.addBlock(block, source), `world.block(${block.name})`);
           for (const prefab of kit.prefabs) ctx.effect(() => w.registry.addPrefab(prefab, source), `world.prefab(${prefab.prefab})`);
+          if (kit.on) for (const name of Object.keys(kit.on)) w.on(name, kit.on[name]);
         }
         for (const block of def.blocks ?? []) ctx.effect(() => w.registry.addBlock(block, "game"), `world.block(${block.name})`);
         for (const prefab of def.prefabs ?? []) ctx.effect(() => w.registry.addPrefab(prefab, "game"), `world.prefab(${prefab.prefab})`);

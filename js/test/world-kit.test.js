@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { startGame, run } = require('./helpers')
+const { startGame, run, frames } = require('./helpers')
 
 const GAME = 'src/plugins/game.tsx'
 
@@ -111,6 +111,36 @@ export default defineGame({ kits: [vb], vars: { shared: 9, own: true }, scene: (
   assert.equal(vars.onlyA, 'a')
   assert.deepEqual(vars.onlyB, [1, 2])
   assert.equal(vars.own, true)
+})
+
+test('kits：on 按套件展开顺序挂处理器，早于游戏的处理器；值不是函数时报错', async () => {
+  const extra = {
+    'oa/index.ts': "import { defineKit } from '@pot/core'\nexport default defineKit({ name: 'oa', on: { ping(w, p) { w.vars.log.push('oa:' + p.n) } } })\n",
+    'ob/index.ts': "import { defineKit } from '@pot/core'\nimport oa from '@pot/kit/oa'\nexport default defineKit({ name: 'ob', requires: [oa], on: { ping(w, p) { w.vars.log.push('ob:' + p.n) } } })\n",
+    'oc/index.ts': "import { defineKit } from '@pot/core'\nexport default defineKit({ name: 'oc', on: { ping: 1 as any } })\n",
+  }
+  const begin = async (source, ok = true) => {
+    const { files, kits } = setup(source)
+    for (const [k, v] of Object.entries(extra)) kits.set(k, v)
+    const ctx = await startGame(files, { setupHost: (host) => { host.kits = kits } })
+    if (ok) assert.deepEqual(ctx.runtime.failures, [])
+    return ctx
+  }
+  const { runtime } = await begin(`import { defineGame } from '@pot/core'
+import ob from '@pot/kit/ob'
+export default defineGame({ kits: [ob], vars: { log: [] }, load(ctx) {
+  ctx.world.on('ping', (w, p) => { w.vars.log.push('game:' + p.n) })
+  ctx.world.emit('ping', { n: 1 })
+}, scene: () => <entity key="e" /> })
+`)
+  frames(runtime, 3)
+  assert.deepEqual(w(runtime).vars.log, ['oa:1', 'ob:1', 'game:1'])
+
+  const bad = await begin(`import { defineGame } from '@pot/core'
+import oc from '@pot/kit/oc'
+export default defineGame({ kits: [oc], scene: () => <entity key="e" /> })
+`, false)
+  assert.match(String(bad.runtime.failures[0].error), /defineKit\(oc\)：on\.ping 必须是函数/)
 })
 
 test('kits：只 import 没写进 kits 时提示属于哪个套件', async () => {
