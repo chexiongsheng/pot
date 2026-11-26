@@ -113,8 +113,9 @@ export function director(ctx: Context, g: GameState) {
     }
   })
 
-  on(ctx, 'saltline/alert', (pos) => {
-    const p = player(ctx)
+  // mech 转入交战时发 World 事件 mechAlert（在固定步末尾分发）
+  ;(ctx.world as any).on('mechAlert', (_w: any, ev: { pos: Vec3 }) => {
+    const p = player(ctx), pos = ev.pos
     if (g.phase !== 'playing' || !p) return
     if (!g.alerted) {
       g.alerted = true

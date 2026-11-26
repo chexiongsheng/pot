@@ -175,7 +175,8 @@ function normalize(spec: EntitySpec) {
 const same = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b)
 
 export class WorldService extends Service {
-  static inject = ['clock', 'state', 'input', 'scene', 'ui']
+  /** audio、gfx、data 给积木的 view 用（表现层要放音效、建材质、读资源）；它们都在 world 之前装好 */
+  static inject = ['clock', 'state', 'input', 'scene', 'ui', 'audio', 'gfx', 'data']
   readonly registry = new Registry()
   /** 表现（15.10） */
   readonly view: WorldView

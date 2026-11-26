@@ -1,5 +1,5 @@
 /**
- * saltline 入口：唯一的 defineGame。玩家、敌人、关卡碰撞的定义来自 src/parts；
+ * saltline 入口：唯一的 defineGame。敌人的积木、预制件与表现来自 mech 套件，玩家、关卡碰撞的定义来自 src/parts；
  * 渲染（world）、武器、界面（hud、menu）暂时仍是低层单元，由 load 依次挂载，导演最后接上（004 第 19.4 节第 4 步）。
  */
 import { defineGame } from '@pot/core'
@@ -9,14 +9,12 @@ import harbor from '@pot/kit/harbor'
 import mech from '@pot/kit/mech'
 import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks, wirePlayer } from '../parts/player'
-import { enemyBlocks, enemyPrefabs, wireEnemies } from '../parts/enemies'
+import { wireEnemies } from '../parts/enemies'
 import { defineGameState, director } from '../parts/director'
 
 export default defineGame({
   kits: [fps, realistic, harbor, mech],
-  vars: { tokenGap: 0 },
-  blocks: [...playerBlocks, ...enemyBlocks],
-  prefabs: enemyPrefabs,
+  blocks: playerBlocks,
   load: async (ctx, step) => {
     const g = defineGameState(ctx)
     // world 自己报绝对进度（到 0.73），区间要盖住它

@@ -24,8 +24,6 @@ export interface Events {
   'saltline/kill'(type: EnemyType, weak: boolean, pos: Vec3): void
   'saltline/spawn'(type: EnemyType, pos: Vec3, pursuit: boolean): void
   'saltline/clear-enemies'(): void
-  /** 敌人发现玩家 */
-  'saltline/alert'(pos: Vec3): void
   'saltline/relay-cut'(index: number): void
   'saltline/radio'(text: string): void
   'saltline/warn'(text: string): void

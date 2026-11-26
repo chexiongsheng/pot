@@ -91,9 +91,9 @@ export const WEAPON = 'saltline/weapon'
 export const game = (ctx: Context) => ctx.state.get<GameState>(GAME)
 export const weapon = (ctx: Context) => ctx.state.get<WeaponState>(WEAPON)
 
-/** 敌人摘要（标签 enemy 的实体，enemies.tsx）：mode 为 patrol/combat/search/dying 等 */
+/** 敌人摘要（标签 enemy 的实体，mech 套件的 mechFoe）：mode 为 patrol/combat/search/dying 等 */
 export function foes(ctx: Context): { mode: string; pos: Vec3; kind: EnemyType }[] {
-  return (ctx.world as any).query('enemy').map((e: any) => ({ mode: e.b.slFoe.mode, pos: e.pos, kind: e.b.slFoe.kind }))
+  return (ctx.world as any).query('enemy').filter((e: any) => e.b.mechFoe).map((e: any) => ({ mode: e.b.mechFoe.mode, pos: e.pos, kind: e.b.mechFoe.kind }))
 }
 
 /** 玩家实体（标签 player）；还没加载时为 undefined */

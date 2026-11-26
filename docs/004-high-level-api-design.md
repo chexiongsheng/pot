@@ -1008,7 +1008,7 @@ interface Cmd {
 实施时补充的约定（M1）：
 
 - 表现由 `WorldService` 自己的 `update` 处理器驱动（先清扫，再表现）。`WorldService` 装在 `PluginsService` 之前，它的处理器先于游戏单元的 `update`，所以自然在 `ui` 之前。
-- `view.enter`、`update`、`exit` 收到的 `ctx` 是 `WorldService` 构造时的 ctx，用它 `scene.spawn` 的对象生命周期归内核，不随单元回收；`scene.objects` 里的展示归属改记为实体所属挂载的单元（`w.spawn` 的实体记为 `(world)`，平行光记为给出 `stage` 的单元），`pot query objects game` 能查到；实体消失或积木定义被替换时，`exit` 之后由内核逐个 `destroy`。积木定义没变（例如只改了 `game.tsx`，积木在别的模块里）时对象保留，不重建。
+- `view.enter`、`update`、`exit` 收到的 `ctx` 是 `WorldService` 构造时的 ctx，用它 `scene.spawn` 的对象生命周期归内核，不随单元回收；`scene.objects` 里的展示归属改记为实体所属挂载的单元（`w.spawn` 的实体记为 `(world)`，平行光记为给出 `stage` 的单元），`pot query objects game` 能查到；实体消失或积木定义被替换时，`exit` 之后由内核逐个 `destroy`。积木定义没变（例如只改了 `game.tsx`，积木在别的模块里）时对象保留，不重建。这个 ctx 能用的服务是 World 声明 inject 的那些：`clock`、`state`、`input`、`scene`、`ui`、`audio`、`gfx`、`data`（后三个是 M3.5 第 5 步加的，见 19.5）。
 - 跟随实体的对象位置与实体位置相同，不保留创建时的位置偏移；需要偏移的效果在 `view.update` 里自己摆放、不要从 `enter` 返回。
 - `sun` 写成对象时缺省 `rot: [50, -30, 0]`、`intensity: 1`、`color: '#ffffff'`；`stage` 去掉 `sun`（或整个 `stage`）时平行光销毁，背景与相机保持最后一次的值。`camera` 的 `at`、`look` 任一变化时两者一起重新应用（`lookAt` 依赖位置）。
 - 欧拉角换算新增在 `scene.ts`：`eulerToQuaternion`（`q = qY * qX * qZ`，即 Unity 的 `Quaternion.Euler`）与 `slerpQuaternion`（取短弧）。
@@ -2095,4 +2095,15 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 调参：`mechFoe.sense`（视距、视锥、丢失、搜索、听觉半径、令牌数）、`mechGull` 与 `mechHound` 的各项（射击、移动、扑击、爆炸）都是属性，缺省值等于 saltline 原来的 tuning.json；地面 `mechFoe.ground = { y, maxX, sea }`（maxX 以外为海面 sea）与射线层 `mechFoe.layers` 也是属性。saltline 生成敌人时把 tuning.json 的值作为覆盖传入。
   - 表现进积木的 `view`：`mechFoe.view` 建、拆模型，驱动动画与特效，按状态戳出音效：`fired` 步号变了播开火声（音高在模拟里用 `w.rand` 算好放进状态，随机序列不变），`attack` 从 idle 进入 telegraph 播预警声，受击计数 `hits` 变了做受击动画；`mechBolt.view`、`mechBoom.view` 画弹道和爆炸，爆炸 enter 时播爆炸声。表现用的模型、命中部件到实体的映射、材质放在套件模块的 Map 里，只是表现缓存，不是状态。
   - 积木排序的变化：套件积木登记在游戏积木之前，`mechGull`、`mechHound`（order 1）现在排在 `slFeedback`（order 1）前面。二者只通过玩家位置相关（落水救援会挪玩家），只影响落水那一步敌人看到的玩家位置，可以接受。
-
+- 实施（5a，8d550f8）：KitDef 加 `vars`，`mergeKitVars` 按套件顺序、游戏最后合并，两个套件声明同一个键时报错（17.2）。
+- 实施（5b）：mech 的代码按职责分三个文件：`foe.ts` 是模拟（五个积木、四个预制件、`mechHit`、`mechHear`、`mechClear`），`look.ts` 是表现（三个 view、模型与部件映射、材质），`target.ts` 是按标签找目标与眼高、胸高、生命的读法。`mechBoom` 只有 view，没有 step，寿命交给系统积木 `lifetime`。`enemies.tsx` 只剩 `wireEnemies`：把 tuning.json 映射成覆盖后 `w.spawn`，接 `clear-enemies`、枪声与子弹三个事件，约 1.8KB。`saltline/alert` 从事件表删掉，导演改听 `mechAlert`；`lib/types` 的 `foes()` 改读 `mechFoe`。
+- 与设计的出入：开火声没有放在 `mechFoe.view` 按 `fired` 播，而是放在 `mechBolt.view.enter`（音高仍由模拟写进 `mechBolt.pitch`），一发弹道一声，写法更直接。
+- 架构调整（框架）：积木 view 拿到的是 World 服务构造时的 ctx，cordis 下只能访问 World 声明过 inject 的服务，view 里 `ctx.audio`、`ctx.gfx` 报“cannot get property without inject”。表现层放音效、建材质、读资源是常规需求，所以 `WorldService.inject` 加上 `audio`、`gfx`、`data`（Runtime 里它们都在 world 之前装好，不会卡住 world）。积木作者在 view 里可以直接用 `ctx.scene`、`ctx.audio`、`ctx.gfx`、`ctx.data`、`ctx.clock`、`ctx.input`、`ctx.ui`、`ctx.state`。
+- 已知差异（都只在表现层或时序上，模拟结果不变）：
+  - 弹道在同一步内生成又销毁时不会出声（view 没有 enter 的机会）。
+  - 预警声、爆炸声从模拟挪到表现，暂停时不再补播。
+  - 玩家受伤反馈改走 `damaged` 事件，在当步事件分发时生效，不再在伤害调用处立刻生效；`mechAlert` 同样在步末分发。在步外调用 `mechHit`（子弹事件处理）时，它触发的 `mechAlert` 到下一步才分发。
+  - 热重载 mech 套件时，旧模块 Map 里的材质不回收（只建一次，量很小）。
+  - 旧存档里带 `slFoe` 等已删积木的实体会残留（`pot restart --reset` 可清）；`foes()` 改为只取带 `mechFoe` 的实体，残留实体不再让 hud 报错。存档迁移不在本阶段处理。
+- 验收：`npm test` 279/280（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归 5 例通过；`tsc`、saltline 的 `tsc`、`pot check`、`pot test`（冒烟 hash 7ba010f7，积木名变了，哈希随之变化）通过。Runner 实机（重建后，清空存档）：开局 8 个敌人按 `mechFoe` 生成，靠近后转入交战，“发现敌情”提示、玩家掉血与红屏、阵亡结算都正常；猎犬的烘焙材质与灯光正常（`shots/step5b-hound.png`），重置后没有新的错误日志。
+- 字节数：游戏 `plugins` + `parts` 共 99061 字节（第 4 步 127153），其中 `parts` 19340（第 4 步 47382），`enemies.tsx` 1789。mech 套件 88304 字节（`foe` 24231、`look` 10884、`target` 1150、`index` 1789，其余是第 3 步搬来的模型与动画）。

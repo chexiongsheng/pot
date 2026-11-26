@@ -14,13 +14,15 @@ import { game, playerEntity, weapon } from '../lib/types'
 let host: Context
 let T: any
 
-/** 每步最先：把游戏阶段、设置、瞄准程度写进套件积木 */
+/** 每步最先：把游戏阶段、设置、瞄准程度写进套件积木与 mech 的 w.vars */
 const slControl = defineBlock({
   name: 'slControl',
-  about: 'saltline：按游戏阶段开关移动与相机，同步灵敏度、瞄准、fov',
+  about: 'saltline：按游戏阶段开关移动与相机，同步灵敏度、瞄准、fov；暂停与标题时冻结机甲，只在 playing 敌对',
   order: -1,
-  step(_me, e) {
+  step(_me, e, w) {
     const g = game(host), m = e.b.moveFps, c = e.b.cameraFps, h = e.b.health
+    w.vars.mechFrozen = !g || g.phase === 'paused' || g.phase === 'title'
+    w.vars.mechHostile = g?.phase === 'playing'
     if (!g) { m.active = c.active = false; h.regen = 0; return }
     m.active = (g.phase === 'playing' || g.phase === 'intro') && h.hp > 0
     c.active = g.phase !== 'title' && g.phase !== 'complete'
@@ -96,10 +98,15 @@ export function wirePlayer(ctx: Context) {
   })
 
   on(ctx, 'saltline/damage-player', (amount) => {
-    const e = playerEntity(ctx)
-    if (game(ctx)?.phase !== 'playing' || !damage(ctx.world, e, amount)) return
-    e.b.slFeedback.hurt = Math.min(1, e.b.slFeedback.hurt + 0.35 + amount / 40)
-    e.b.cameraFps.shake = Math.min(1, e.b.cameraFps.shake + amount / 25)
+    if (game(ctx)?.phase === 'playing') damage(ctx.world, playerEntity(ctx), amount)
+  })
+
+  // 受伤反馈：落水救援与敌人（mech 直接调 damage）都走 fps 的 damaged
+  ;(ctx.world as any).on('damaged', (_w: any, ev: any) => {
+    const e = ev.entity
+    if (!e.tags.includes('player') || !e.b.slFeedback) return
+    e.b.slFeedback.hurt = Math.min(1, e.b.slFeedback.hurt + 0.35 + ev.amount / 40)
+    e.b.cameraFps.shake = Math.min(1, e.b.cameraFps.shake + ev.amount / 25)
     ctx.audio.play(sfx('hurt'), { volume: 0.7, pitch: 0.9 + Math.random() * 0.2 })
   })
 

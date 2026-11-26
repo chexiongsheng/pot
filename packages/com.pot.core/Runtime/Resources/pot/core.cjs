@@ -10367,7 +10367,8 @@ TS：${r.layout.text}
       return { attached: [...this._attached.keys()], detached: [...this._detached] };
     }
   };
-  __publicField(WorldService, "inject", ["clock", "state", "input", "scene", "ui"]);
+  /** audio、gfx、data 给积木的 view 用（表现层要放音效、建材质、读资源）；它们都在 world 之前装好 */
+  __publicField(WorldService, "inject", ["clock", "state", "input", "scene", "ui", "audio", "gfx", "data"]);
 
   // runtime/src/jsx-runtime.ts
   var jsx_runtime_exports = {};

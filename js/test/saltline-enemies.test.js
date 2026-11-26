@@ -1,5 +1,5 @@
 /**
- * saltline 敌人回归（004 第 17.7 节）：敌人迁移后的行为与旧版只是近似一致，这里在真实关卡上锁定当前行为：
+ * saltline 敌人回归（004 第 17.7 节）：敌人迁移后的行为与旧版只是近似一致，这里在真实关卡上锁定当前行为（第 5 步起积木在 mech 套件）：
  * 同样的输入两次结果逐步相同；鸥在视野内会交战、开火、打掉玩家血量；暂停时冻结；玩家死后不再开火；
  * clear-enemies 清空敌人、弹道与爆炸。
  */
@@ -10,23 +10,22 @@ const { startGame, readGameFiles } = require('./helpers')
 
 const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 
-/** 测试入口：GAME 状态固定为 playing，用 src/parts 组装关卡碰撞、玩家与敌人，导出几个探针 */
+/** 测试入口：GAME 状态固定为 playing，引入 fps、mech 套件，用 src/parts 组装关卡碰撞、玩家与敌人接线，导出几个探针 */
 function files() {
   const f = readGameFiles(GAME_DIR)
   f.set('manifest.json', JSON.stringify({ id: 'saltline.enemies', plugins: ['probe'] }))
   f.set('src/plugins/probe.tsx', `
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
+import mech from '@pot/kit/mech'
 import { GAME, player } from '../lib/types'
 import { emit } from '../lib/bus'
 import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks, wirePlayer } from '../parts/player'
-import { enemyBlocks, enemyPrefabs, wireEnemies } from '../parts/enemies'
+import { wireEnemies } from '../parts/enemies'
 export default defineGame({
-  kits: [fps],
-  vars: { tokenGap: 0 },
-  blocks: [...playerBlocks, ...enemyBlocks],
-  prefabs: enemyPrefabs,
+  kits: [fps, mech],
+  blocks: playerBlocks,
   load: (ctx) => {
     const g = ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', resume: 'playing', pending: [], stats: { shots: 0, hits: 0, kills: 0, weak: 0 }, relays: [], settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
     wirePlayer(ctx)
@@ -55,10 +54,10 @@ async function run(steps, script = () => {}) {
     game.runtime.tick(1 / 60)
     const w = P.w()
     const foes = w.query('enemy')
-    const bolts = w.query().filter((e) => e.b.slBolt).length
+    const bolts = w.query().filter((e) => e.b.mechBolt).length
     rows.push({
-      modes: foes.map((e) => e.b.slFoe.mode).join(','),
-      attack: foes.map((e) => e.b.slFoe.attack).join(','),
+      modes: foes.map((e) => e.b.mechFoe.mode).join(','),
+      attack: foes.map((e) => e.b.mechFoe.attack).join(','),
       pos: foes.map((e) => e.pos.map((v) => +v.toFixed(5)).join(' ')).join('|'),
       bolts,
       hp: +P.player().health.toFixed(5),
@@ -108,7 +107,7 @@ test('saltline 敌人：玩家死后不再开火，弹道不再伤人', async ()
   const { rows, P } = await run(900, (i, P) => {
     twoFoes(i, P)
     // 第一次出现弹道后让玩家死亡（dead 阶段）
-    if (deadAt < 0 && i > 0 && P.w().query().some((e) => e.b.slBolt)) { deadAt = i; P.g.phase = 'dead' }
+    if (deadAt < 0 && i > 0 && P.w().query().some((e) => e.b.mechBolt)) { deadAt = i; P.g.phase = 'dead' }
   })
   assert.ok(deadAt > 0, '应在测试时间内开火')
   const hp = rows[deadAt].hp
@@ -126,6 +125,6 @@ test('saltline 敌人：clear-enemies 清空敌人、弹道与爆炸', async () 
   P.clear()
   game.runtime.tick(1 / 60) // 销毁在本步末尾生效
   const w = P.w()
-  assert.equal(w.query().filter((e) => e.b.slFoe || e.b.slBolt || e.b.lifetime).length, 0)
-  assert.equal(w.vars.tokenGap, 0)
+  assert.equal(w.query().filter((e) => e.b.mechFoe || e.b.mechBolt || e.b.mechBoom || e.b.lifetime).length, 0)
+  assert.equal(w.vars.mechTokenGap, 0)
 })
