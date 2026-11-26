@@ -84,6 +84,35 @@ export default defineGame({ kits: [a, b], blocks: [glow], scene: () => <entity k
   assert.equal(w(runtime).registry.sourceOf('block', 'glow'), 'game')
 })
 
+test('kits：vars 按套件、游戏的顺序合并；两个套件声明同一个键报错，游戏声明了就不报', async () => {
+  const extra = {
+    'va/index.ts': "import { defineKit } from '@pot/core'\nexport default defineKit({ name: 'va', vars: { shared: 1, onlyA: 'a' } })\n",
+    'vb/index.ts': "import { defineKit } from '@pot/core'\nimport va from '@pot/kit/va'\nexport default defineKit({ name: 'vb', requires: [va], vars: { shared: 2, onlyB: [1, 2] } })\n",
+  }
+  const begin = async (source, ok = true) => {
+    const { files, kits } = setup(source)
+    for (const [k, v] of Object.entries(extra)) kits.set(k, v)
+    const ctx = await startGame(files, { setupHost: (host) => { host.kits = kits } })
+    if (ok) assert.deepEqual(ctx.runtime.failures, [])
+    return ctx
+  }
+  const bad = await begin(`import { defineGame } from '@pot/core'
+import vb from '@pot/kit/vb'
+export default defineGame({ kits: [vb], scene: () => <entity key="e" /> })
+`, false)
+  assert.match(String(bad.runtime.failures[0].error), /变量 shared 同时由套件 va 和 vb 声明/)
+
+  const { runtime } = await begin(`import { defineGame } from '@pot/core'
+import vb from '@pot/kit/vb'
+export default defineGame({ kits: [vb], vars: { shared: 9, own: true }, scene: () => <entity key="e" /> })
+`)
+  const vars = w(runtime).vars
+  assert.equal(vars.shared, 9)
+  assert.equal(vars.onlyA, 'a')
+  assert.deepEqual(vars.onlyB, [1, 2])
+  assert.equal(vars.own, true)
+})
+
 test('kits：只 import 没写进 kits 时提示属于哪个套件', async () => {
   const { host } = await start(`import { defineGame } from '@pot/core'
 import base from '@pot/kit/base'

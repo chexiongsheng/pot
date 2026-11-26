@@ -7448,6 +7448,9 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     if (def.prefabs !== void 0 && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
       throw new Error(`${where2}：prefabs 必须是 definePrefab 结果的数组`);
     }
+    if (def.vars !== void 0 && (!def.vars || typeof def.vars !== "object" || Array.isArray(def.vars))) {
+      throw new Error(`${where2}：vars 必须是对象`);
+    }
     if (def.requires !== void 0 && (!Array.isArray(def.requires) || !def.requires.every(isKit))) {
       throw new Error(`${where2}：requires 必须是 defineKit 结果的数组`);
     }
@@ -7457,6 +7460,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       blocks: Object.freeze([...def.blocks ?? []]),
       prefabs: Object.freeze([...def.prefabs ?? []]),
       controls: def.controls,
+      vars: def.vars ? Object.freeze({ ...def.vars }) : void 0,
       requires: Object.freeze([...def.requires ?? []])
     };
     Object.defineProperty(kit, KIT, { value: true });
@@ -7498,6 +7502,29 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
       for (const p of kit.prefabs) check("预制件", prefabs, ownPrefabs, kit, p.prefab);
     }
     return errors;
+  }
+  function mergeKitVars(kits, own) {
+    const errors = [];
+    const owner = /* @__PURE__ */ new Map();
+    const out = {};
+    let any = false;
+    for (const kit of kits) {
+      if (!kit.vars) continue;
+      for (const key of Object.keys(kit.vars)) {
+        const other = owner.get(key);
+        if (other !== void 0 && other !== kit.name && !(own && key in own)) {
+          errors.push(`变量 ${key} 同时由套件 ${other} 和 ${kit.name} 声明；在游戏的 vars 里声明它来决定初值`);
+        }
+        owner.set(key, kit.name);
+        out[key] = kit.vars[key];
+        any = true;
+      }
+    }
+    if (own) {
+      Object.assign(out, own);
+      any = true;
+    }
+    return { vars: any ? out : void 0, errors };
   }
   function mergeControls(kits, own) {
     const list = [...kits.map((k) => k.controls), own].filter(Boolean);
@@ -11270,6 +11297,8 @@ TS：${r.layout.text}
     }
     const kits = expandKits(def.kits ?? []);
     const conflicts = kitConflicts(kits, (def.blocks ?? []).map((b) => b.name), (def.prefabs ?? []).map((p) => p.prefab));
+    const merged = mergeKitVars(kits, def.vars);
+    conflicts.push(...merged.errors);
     if (conflicts.length) throw new Error(`defineGame：${conflicts.join("；")}`);
     const controls = mergeControls(kits, def.controls);
     const flow = def.flow === void 0 ? void 0 : checkFlow(def.flow);
@@ -11292,7 +11321,7 @@ TS：${r.layout.text}
             if (w.controls === applied) w.setControls(void 0);
           };
         }, "world.controls");
-        w.mergeVars(def.vars);
+        w.mergeVars(merged.vars);
         const loading = ctx.loading;
         const starting = loading.active;
         const [lo, hi] = loading.window;

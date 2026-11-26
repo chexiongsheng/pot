@@ -562,7 +562,7 @@ export default defineGame({
 
 规则：
 
-- 套件的入口默认导出 `defineKit({ name, about, blocks, prefabs, controls, requires })` 的结果，另外可以具名导出预制件句柄、函数组件、`stage` 预设（普通对象）和界面组件。
+- 套件的入口默认导出 `defineKit({ name, about, blocks, prefabs, controls, vars, requires })` 的结果，另外可以具名导出预制件句柄、函数组件、`stage` 预设（普通对象）和界面组件。
 - 登记顺序：系统在栈底，`kits` 按列出顺序登记在其上，游戏的 `blocks`、`prefabs` 和树里直接引用的句柄在最上。同名时上层覆盖下层，套件可以有意覆盖系统积木（如风格套件换掉 `shape` 的材质）。
 - 两个套件之间同名直接报错，报出两个套件的名字，不按引入顺序静默覆盖；游戏自己也登记了这个名字时不报错，视为游戏明确做了选择。
 - 只 import 了句柄、没把套件列进 `kits`：句柄引用的预制件照常自动登记（15.4），但它用到的套件积木没有登记，求值报“未知的积木 X，它属于套件 fps，请加到 kits”。
@@ -1373,6 +1373,7 @@ export default defineGame({ kits: [topdown], ... })
 - `defineKit` 返回冻结的句柄，并登记到全局的套件目录（名字到句柄），供报错与 `pot blocks` 使用。重复 `defineKit` 同名时以后者为准（热重载）。
 - `defineGame` 的 `kits`：先按 `requires` 展开闭包（深度优先，依赖在前，去重），再按顺序登记，全部在游戏的 `blocks`、`prefabs` 之前。`controls` 的合并顺序为套件（展开后的顺序）、游戏，按动作名覆盖。
 - 两个套件登记了同名的积木或预制件时报错“积木 X 同时由套件 a 和 b 提供”，除非游戏自己的 `blocks`/`prefabs` 也有这个名字（游戏覆盖二者）。套件与系统同名时套件覆盖系统，不报错。
+- `vars`（M3.5 第 5 步加）：套件需要的全局变量及初值，套件的积木读写 `w.vars` 里的这些键（游戏借此把开关交给套件，例如 mech 的 `mechFrozen`）。合并顺序同 `controls`：套件按展开后的顺序、游戏最后，同名以后者的初值为准；两个套件声明了同一个键时报错“变量 X 同时由套件 a 和 b 声明”，除非游戏的 `vars` 也有这个键。合并结果再按原规则补进 `WorldData.vars`（已有的键保留）。键名建议带套件名前缀。
 - 登记表的条目带来源 `source`：`system`、`kit:<名字>`、`game`。`registry.sourceOf(kind, name)` 返回栈顶的来源。
 - 树求值遇到未知的积木或预制件时，查全局套件目录：有套件提供这个名字就报“未知的积木 X，它属于套件 fps，请加到 defineGame 的 kits”，否则沿用原来的报错。
 
@@ -2082,3 +2083,16 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 两个回归测试的入口改为 `defineGame` 组装同样的 parts，不再 `ctx.use('collision')` 等。
 - 验收：`npm test` 278/279（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归 5 例不变；`tsc`、`pot check`、`pot test`（hash 3fb0ba35）通过。Runner 实机：挂载单元只剩 `game`，关卡盒 559 个、玩家 1 个，开局画面与第 3 步一致（`shots/s4-start.png`）；改 `parts/player.tsx` 触发“热重载 game”，玩家实体 id 与生命保留，无新错误。热重载后阶段变成 paused，是 Runner 窗口在后台时导演的“失焦自动暂停”，迁移前即如此。
 - 字节数：游戏 `plugins` + `parts` 共 127153 字节（game.tsx 1579，parts 47382，仍是低层单元的 world、weapon、hud、menu 78192）。这一步只是重组，不追求变小。
+
+第 5 步（敌人行为进 mech）：
+
+- 设计。mech 的积木改名 `mechFoe`、`mechGull`、`mechHound`、`mechBolt`，预制件 `gull`、`hound`、`bolt`、`boom` 随套件登记。套件不知道 saltline 的阶段和事件，靠下面几样东西接上：
+  - 套件 `vars`（17.2）：`mechFrozen`（为 true 时敌人、弹道整体不动，表现也停）、`mechHostile`（为 false 时不感知目标、不开新的连发、不造成伤害）、`mechTokenGap`（攻击令牌间隔，原游戏的 `tokenGap`）。saltline 的 `slControl`（order -1，每步最先）按阶段写前两个：paused、title 时冻结，只有 playing 时敌对。暂停改为 flow 叠加状态是第 6 步的事。
+  - 目标：`mechFoe.target`（标签，缺省 `player`），取第一个匹配的实体。眼高、胸高取目标的 `moveFps.curEye` 与 `moveFps.curHeight × 0.6`（没有 moveFps 时为 1.6 与 1.08），生命取 `health.hp`。
+  - 伤害：弹道、扑击、爆炸都直接调 fps 的 `damage(w, 目标, n, 来源)`；爆炸另给目标的 `cameraFps.shake` 加值。玩家的受伤反馈（红屏、震屏、受伤音效）由游戏 `w.on('damaged')` 处理；落水救援仍走游戏自己的 `saltline/damage-player`。
+  - 事件：转入交战时 `w.emit('mechAlert', { entity, pos })`，导演用 `w.on` 监听。
+  - 导出函数：`mechHit(w, part, damage, from, weakMultiplier)` 由场景对象 id 找到敌人、扣血、受击击退、转入交战，死亡时转入 dying，返回 `{ kind, weak, killed, pos }`（不是敌人时返回 null），saltline 的子弹处理据此发 `saltline/kill` 与命中标记；`mechHear(w, pos)` 是枪声的听觉警觉；`mechClear(w)` 清掉敌人、弹道、爆炸并把令牌间隔归零。生成直接用 `w.spawn('gull' | 'hound', 覆盖)`。
+  - 调参：`mechFoe.sense`（视距、视锥、丢失、搜索、听觉半径、令牌数）、`mechGull` 与 `mechHound` 的各项（射击、移动、扑击、爆炸）都是属性，缺省值等于 saltline 原来的 tuning.json；地面 `mechFoe.ground = { y, maxX, sea }`（maxX 以外为海面 sea）与射线层 `mechFoe.layers` 也是属性。saltline 生成敌人时把 tuning.json 的值作为覆盖传入。
+  - 表现进积木的 `view`：`mechFoe.view` 建、拆模型，驱动动画与特效，按状态戳出音效：`fired` 步号变了播开火声（音高在模拟里用 `w.rand` 算好放进状态，随机序列不变），`attack` 从 idle 进入 telegraph 播预警声，受击计数 `hits` 变了做受击动画；`mechBolt.view`、`mechBoom.view` 画弹道和爆炸，爆炸 enter 时播爆炸声。表现用的模型、命中部件到实体的映射、材质放在套件模块的 Map 里，只是表现缓存，不是状态。
+  - 积木排序的变化：套件积木登记在游戏积木之前，`mechGull`、`mechHound`（order 1）现在排在 `slFeedback`（order 1）前面。二者只通过玩家位置相关（落水救援会挪玩家），只影响落水那一步敌人看到的玩家位置，可以接受。
+

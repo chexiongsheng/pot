@@ -1,5 +1,5 @@
 /**
- * 套件（004 第 6.12、17.2 节）：一组积木、预制件与键位映射，经 import 引入、写进 defineGame 的 kits 后登记。
+ * 套件（004 第 6.12、17.2 节）：一组积木、预制件、键位映射与全局变量，经 import 引入、写进 defineGame 的 kits 后登记。
  * - 登记栈从下到上：系统、套件（按 requires 展开后的顺序）、游戏。
  * - 两个套件之间同名报错，除非游戏自己也登记了这个名字（游戏覆盖二者）；套件覆盖系统不报错。
  * - defineKit 把套件记进全局目录，只用于报错提示（“它属于套件 X”）与 pot blocks。
@@ -18,6 +18,8 @@ export interface KitDef {
   blocks?: BlockDef<any, any>[]
   prefabs?: Prefab<any>[]
   controls?: Controls
+  /** 套件的积木要读写的 w.vars 键及初值 */
+  vars?: Record<string, any>
   requires?: Kit[]
 }
 
@@ -27,6 +29,7 @@ export interface Kit {
   readonly blocks: readonly BlockDef<any, any>[]
   readonly prefabs: readonly Prefab<any>[]
   readonly controls?: Controls
+  readonly vars?: Readonly<Record<string, any>>
   readonly requires: readonly Kit[]
 }
 
@@ -49,6 +52,9 @@ export function defineKit(def: KitDef): Kit {
   if (def.prefabs !== undefined && (!Array.isArray(def.prefabs) || !def.prefabs.every(isPrefab))) {
     throw new Error(`${where}：prefabs 必须是 definePrefab 结果的数组`)
   }
+  if (def.vars !== undefined && (!def.vars || typeof def.vars !== 'object' || Array.isArray(def.vars))) {
+    throw new Error(`${where}：vars 必须是对象`)
+  }
   if (def.requires !== undefined && (!Array.isArray(def.requires) || !def.requires.every(isKit))) {
     throw new Error(`${where}：requires 必须是 defineKit 结果的数组`)
   }
@@ -58,6 +64,7 @@ export function defineKit(def: KitDef): Kit {
     blocks: Object.freeze([...(def.blocks ?? [])]),
     prefabs: Object.freeze([...(def.prefabs ?? [])]),
     controls: def.controls,
+    vars: def.vars ? Object.freeze({ ...def.vars }) : undefined,
     requires: Object.freeze([...(def.requires ?? [])]),
   }
   Object.defineProperty(kit, KIT, { value: true })
@@ -103,6 +110,31 @@ export function kitConflicts(kits: readonly Kit[], gameBlocks: Iterable<string>,
     for (const p of kit.prefabs) check('预制件', prefabs, ownPrefabs, kit, p.prefab)
   }
   return errors
+}
+
+/** 合并 vars：套件按顺序、游戏最后；两个套件声明同一个键时报错（游戏也声明了的除外） */
+export function mergeKitVars(kits: readonly Kit[], own: Record<string, any> | undefined): { vars: Record<string, any> | undefined; errors: string[] } {
+  const errors: string[] = []
+  const owner = new Map<string, string>()
+  const out: Record<string, any> = {}
+  let any = false
+  for (const kit of kits) {
+    if (!kit.vars) continue
+    for (const key of Object.keys(kit.vars)) {
+      const other = owner.get(key)
+      if (other !== undefined && other !== kit.name && !(own && key in own)) {
+        errors.push(`变量 ${key} 同时由套件 ${other} 和 ${kit.name} 声明；在游戏的 vars 里声明它来决定初值`)
+      }
+      owner.set(key, kit.name)
+      out[key] = kit.vars[key]
+      any = true
+    }
+  }
+  if (own) {
+    Object.assign(out, own)
+    any = true
+  }
+  return { vars: any ? out : undefined, errors }
 }
 
 /** 合并键位：套件按顺序、游戏最后，按动作名（轴名）覆盖 */

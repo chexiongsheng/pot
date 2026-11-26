@@ -8,7 +8,7 @@ import type { UIService } from '../ui'
 import type { PotChild, Prefab } from './node'
 import { isPrefab } from './node'
 import type { BlockDef } from './registry'
-import { expandKits, isKit, kitConflicts, mergeControls } from './kit'
+import { expandKits, isKit, kitConflicts, mergeControls, mergeKitVars } from './kit'
 import type { Kit } from './kit'
 import { checkFlow } from './flow'
 import type { FlowDef } from './flow'
@@ -103,6 +103,8 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
   }
   const kits = expandKits(def.kits ?? [])
   const conflicts = kitConflicts(kits, (def.blocks ?? []).map((b) => b.name), (def.prefabs ?? []).map((p) => p.prefab))
+  const merged = mergeKitVars(kits, def.vars)
+  conflicts.push(...merged.errors)
   if (conflicts.length) throw new Error(`defineGame：${conflicts.join('；')}`)
   const controls = mergeControls(kits, def.controls)
   const flow = def.flow === undefined ? undefined : checkFlow(def.flow)
@@ -127,7 +129,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
           if (w.controls === applied) w.setControls(undefined)
         }
       }, 'world.controls')
-      w.mergeVars(def.vars)
+      w.mergeVars(merged.vars)
       const loading = ctx.loading
       const starting = loading.active
       const [lo, hi] = loading.window
