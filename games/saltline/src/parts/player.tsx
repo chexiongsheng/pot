@@ -7,6 +7,7 @@ import { damage } from '@pot/kit/fps'
 import { levelBoxes } from '@pot/kit/harbor/physics'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { sfx } from '@pot/kit/realistic/sfx'
+import { setPostValues } from '@pot/kit/realistic'
 import { ENEMY_LAYER, LEVEL_LAYER } from '@pot/kit/realistic/layers'
 import { phaseOf, slEmit, type Settings } from './state'
 
@@ -28,15 +29,15 @@ const slControl = defineBlock<typeof CONTROL_PROPS>({
     h.regen = m.active ? me.regen : 0
     m.sensitivity = s.sensitivity
     m.invertY = s.invertY
-    w.vars.renderQuality = s.quality
     c.fov = s.fov ?? me.fov
   },
 })
 
 const FEEDBACK_PROPS = { seaY: -1.6, rescueDamage: 0, rescued: '' }
 
-/** 表现侧已播过的计数（不进存档） */
-const heard = new WeakMap<object, Map<number, { steps: number; lands: number; hits: number }>>()
+/** 表现侧已播过的计数与后处理参数（不进存档） */
+interface Heard { steps: number; lands: number; hits: number; low: number; post: string; time: number; frame: number }
+const heard = new WeakMap<object, Map<number, Heard>>()
 function heardOf(w: any) {
   let m = heard.get(w)
   if (!m) heard.set(w, (m = new Map()))
@@ -46,7 +47,7 @@ function heardOf(w: any) {
 /** 移动之后：受伤红屏衰减、落地与脚步计数、落水救援；音效在 view 里按计数变化播 */
 const slFeedback = defineBlock<typeof FEEDBACK_PROPS, { hurt: number; lastStep: number; steps: number; lands: number; hits: number }>({
   name: 'slFeedback',
-  about: 'saltline：落地与脚步声、受伤红屏与受伤声、落水救援',
+  about: 'saltline：落地与脚步声、受伤红屏与受伤声、落水救援；表现层写后处理的受伤红边、低血量与开镜',
   order: 1,
   props: FEEDBACK_PROPS,
   state: { hurt: 0, lastStep: 0, steps: 0, lands: 0, hits: 0 },
@@ -73,12 +74,28 @@ const slFeedback = defineBlock<typeof FEEDBACK_PROPS, { hurt: number; lastStep: 
     }
   },
   view: {
-    enter(me, e, _ctx, w) {
-      heardOf(w).set(e.id, { steps: me.steps, lands: me.lands, hits: me.hits })
+    enter(me, e, ctx, w) {
+      heardOf(w).set(e.id, { steps: me.steps, lands: me.lands, hits: me.hits, low: 0, post: '', time: ctx.clock.time, frame: ctx.clock.frame })
     },
     update(me, e, _objs, ctx, w) {
       const h = heardOf(w).get(e.id)
       if (!h) return
+      const c = ctx.clock
+      const dt = h.frame === c.frame - 1 ? Math.min(0.1, Math.max(0, c.time - h.time)) : 0
+      h.frame = c.frame
+      h.time = c.time
+      // 受伤红边、低血量去饱和与暗角、开镜边缘柔化：交给后处理链（realistic 的 setPostValues）
+      const ph = phaseOf(w), hp = e.b.health
+      const live = ph === 'playing' || ph === 'intro' || ph === 'paused' || ph === 'dead'
+      const low = live && hp ? Math.max(0, Math.min(1, (0.55 - hp.hp / hp.max) / (0.55 - 0.12))) : 0
+      if (ph !== 'paused') h.low += (low * low * (3 - 2 * low) - h.low) * Math.min(1, dt * 4)
+      const damageV = live ? Math.max(0, Math.min(1, me.hurt)) : 0
+      const ads = live ? Math.max(0, Math.min(1, e.b.gunFps?.ads ?? 0)) : 0
+      const key = [damageV, h.low, ads].map((v) => Math.round(v * 200)).join(',')
+      if (key !== h.post) {
+        h.post = key
+        setPostValues(w, { uDamage: damageV, uLowHealth: h.low, uAds: ads })
+      }
       const m = e.b.moveFps
       if (me.lands !== h.lands) ctx.audio.play(sfx('step'), { volume: 0.6, pitch: 0.8 })
       if (me.steps !== h.steps) ctx.audio.play(sfx('step'), { volume: m.crouched ? 0.15 : m.sprinting ? 0.5 : 0.3, pitch: 0.85 + Math.random() * 0.3 })

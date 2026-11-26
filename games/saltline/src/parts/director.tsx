@@ -9,7 +9,7 @@ import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '@pot/kit/realistic/math'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { foeSpawns, spawnFoe, type FoeSpawns } from './enemies'
-import { findPlayer, freshSl, phaseOf, slEmit, type EnemyType, type Sl, type SubPhase } from './state'
+import { findPlayer, freshSl, phaseOf, slEmit, type EnemyType, type Settings, type Sl, type SlHud, type SubPhase } from './state'
 
 const PROPS = {
   /** flow.json */
@@ -76,15 +76,16 @@ function cutRelay(me: Me, w: any, sl: Sl, i: number) {
 
 // ---- 表现（不进存档）：标题镜头时间、已播的切断数、滴答声间隔、渐黑 ----
 interface Look { frame: number; time: number; dt: number; state: string; titleT: number; cut: number; tickT: number; fade: number }
+/** 按 w.registry 存：积木钩子与界面拿到的 World 是不同上下文的服务代理，registry 是同一个对象 */
 const looks = new WeakMap<object, Look>()
 function look(w: any): Look {
-  let L = looks.get(w)
-  if (!L) looks.set(w, (L = { frame: -1, time: 0, dt: 0, state: '', titleT: 0, cut: 0, tickT: 0, fade: 0 }))
+  let L = looks.get(w.registry)
+  if (!L) looks.set(w.registry, (L = { frame: -1, time: 0, dt: 0, state: '', titleT: 0, cut: 0, tickT: 0, fade: 0 }))
   return L
 }
 
 /** 当前渐黑（0..1），hud 画 */
-export const directorFade = (w: any) => looks.get(w)?.fade ?? 0
+export const directorFade = (w: any) => looks.get(w.registry)?.fade ?? 0
 
 const ss = (a: number, c: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t) }
 
@@ -102,6 +103,12 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number; bid: number }
       sl.relays = sl.relays.map((r) => (r === 'cutting' ? 'live' : r))
     } else {
       Object.assign(sl, freshSl(me.relays.length))
+    }
+    // 进入流程状态时清掉警告、消息、击杀信息（无线电字幕保留）
+    const hud: SlHud | undefined = w.vars.slHud
+    if (hud) {
+      hud.warn.at = hud.message.at = -1e9
+      hud.feed = []
     }
     if (f.state === 'title') return
     Object.assign(sl, { pending: [], interact: -1, progress: 0, hint: -1, pursuitT: 0, lowWarned: false, warnT: 0 })
@@ -271,7 +278,16 @@ function titleCamera(ctx: Context, F: any, L: Look, dt: number, now: number) {
   return Math.max(1 - ss(0, 1.8, L.titleT), ss(V - 1.6, V, L.titleT))
 }
 
-/** 导演实体与两条规则；属性来自 flow.json、关卡点位与 tuning.json */
+/** 菜单改设置：只收认识的键与对的类型；画质同时写给 realistic */
+function applySettings(w: any, patch: Partial<Settings>) {
+  const s: Settings = w.vars.slSettings
+  if (!patch || typeof patch !== 'object') return
+  for (const k of ['sensitivity', 'volume', 'fov', 'quality'] as const) if (typeof patch[k] === 'number' && Number.isFinite(patch[k])) s[k] = patch[k]!
+  if (typeof patch.invertY === 'boolean') s.invertY = patch.invertY
+  w.vars.renderQuality = s.quality
+}
+
+/** 导演实体与规则（敌情、战绩、HUD 提示、设置）；属性来自 flow.json、关卡点位与 tuning.json */
 export function Director({ data }: { data: SceneArgs['data'] }) {
   const flow = data.load('flow.json')
   const level = data.load<LevelData>('level.json')
@@ -297,6 +313,8 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
   const fired = (w: any) => { (w.vars.sl as Sl).stats.shots++ }
   const hurt = (w: any, h: { kind: EnemyType; weak: boolean; killed: boolean }) => {
     ;(w.vars.sl as Sl).stats.hits++
+    const m = (w.vars.slHud as SlHud).marker
+    Object.assign(m, { at: w.tick, kill: !!h.killed, weak: !!h.weak, n: m.n + 1 })
     if (h.killed) slEmit(w, 'slKill', { kind: h.kind, weak: h.weak })
   }
   return <>
@@ -307,6 +325,14 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
     <rule on="gunFired" do={fired} />
     <rule on="mechHurt" do={hurt} />
     <rule on="slKill" do={kill} />
+    <rule on="slRadio" do={(w: any, text: string) => { const r = (w.vars.slHud as SlHud).radio; Object.assign(r, { text, at: w.tick, n: r.n + 1 }) }} />
+    <rule on="slWarn" do={(w: any, text: string) => { (w.vars.slHud as SlHud).warn = { text, at: w.tick } }} />
+    <rule on="slMessage" do={(w: any, text: string) => { (w.vars.slHud as SlHud).message = { text, at: w.tick } }} />
+    <rule on="slFeed" do={(w: any, f: { text: string; weak: boolean }) => {
+      const hud: SlHud = w.vars.slHud
+      hud.feed = [{ text: f.weak ? `${f.text} · 弱点命中` : f.text, weak: !!f.weak, at: w.tick }, ...hud.feed].slice(0, 5)
+    }} />
+    <rule on="slSet" do={applySettings} />
   </>
 }
 

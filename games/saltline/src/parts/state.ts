@@ -50,12 +50,35 @@ export function freshSl(relayCount: number): Sl {
   }
 }
 
+/**
+ * HUD 的瞬时提示（无线电字幕、敌情警告、消息、命中标记、击杀信息）：文字与发生时的 tick，界面按 tick 差算年龄
+ * （暂停时 tick 不走，提示冻结）；n 是序号，提示音按它的变化放
+ */
+export interface SlHud {
+  radio: { text: string; at: number; n: number }
+  warn: { text: string; at: number }
+  message: { text: string; at: number }
+  marker: { at: number; kill: boolean; weak: boolean; n: number }
+  feed: { text: string; weak: boolean; at: number }[]
+}
+
+const NEVER = -1e9
+
+export function freshHud(): SlHud {
+  return {
+    radio: { text: '', at: NEVER, n: 0 }, warn: { text: '', at: NEVER }, message: { text: '', at: NEVER },
+    marker: { at: NEVER, kill: false, weak: false, n: 0 }, feed: [],
+  }
+}
+
+/** 提示的年龄（秒） */
+export const ageOf = (w: any, at: number) => (w.tick - at) * w.dt
+
 /** defineGame 的 vars */
 export const slVars = {
   sl: freshSl(0),
   slSettings: { sensitivity: 1, invertY: false, volume: 0.8, fov: 74, quality: 2 } as Settings,
-  /** 菜单子面板：'' | settings | controls | about */
-  slPanel: '',
+  slHud: freshHud(),
 }
 
 /** 合成的阶段：flow 为 play 时取子阶段，否则取 flow 状态名（title、paused） */
@@ -71,6 +94,8 @@ export interface SlEvents {
   slMessage: string
   slFeed: { text: string; weak: boolean }
   slKill: { kind: EnemyType; weak: boolean }
+  /** 菜单改设置（界面事件，暂停中也分发） */
+  slSet: Partial<Settings>
 }
 
 export function slEmit<K extends keyof SlEvents>(w: any, name: K, payload: SlEvents[K]) {

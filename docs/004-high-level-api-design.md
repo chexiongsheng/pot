@@ -2237,3 +2237,10 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 鼠标锁定、Esc 暂停与继续、失焦暂停仍在菜单里做（与原 menu 单元相同），用 `ui.input` 判断、`ui.emit` 发流程事件。
   - `lib/palette` 移到 `parts/palette.ts`，`lib/rating` 并入菜单。
 - 预计的差异：元素由布局排，位置与原来可能差几像素；按钮有键盘焦点框；冒烟 hash 会变（vars 多了 `slHud`）。
+- 实施：
+  - 框架（提交 193684f）：按上面实现。量字接口 `Measurer` 的第三个参数由 `bold` 改为字体 `{ bold, weight, spacing }`，换行与按钮、输入框的尺寸都按它量；带字距的文字由 `ctx.ui` 逐字提交。按钮的 `hoverColor`（悬停文字颜色）实施时顺手加了。滑块按下即获得焦点，焦点上左右键改值、不移动焦点。测试在 `ui-tags.test.js` 加 3 例（字重字距与投影、`opacity` 累乘、canvas 的框；滑块拖动对齐 step、方向键与夹紧；按钮悬停底色与描边、`onHover` 只调一次、`ui.audio`、`ui.input`）。hello-tsx、quiz-tsx 的 `pot test` 哈希不变。
+  - 一处老问题：导演表现层的状态（渐黑、标题镜头计时）按 World 存在 WeakMap 里，键是积木钩子拿到的 `w`；而界面与普通单元拿到的 `w` 是另一个上下文的服务代理，对象身份不同（实测：积木钩子、界面、`ctx.world` 三者两两不等，经代理读出的对象属性也会被包一层；只有 `w.registry` 这类普通数据是同一个对象）。所以第 6 步以来原 hud 单元读到的渐黑一直是 0：标题首尾的淡入淡出、开场与阵亡的渐黑都没画出来。导演的缓存改按 `w.registry` 存后正常。约定（与 `setGunEnv`、`setPostValues` 相同）：表现层按 World 建的 WeakMap 缓存，若要被界面或游戏单元读到，键用 `w.registry`。写进 Skill 的坑点。
+  - saltline：`parts/hud.tsx`（10260 字节）、`parts/menu.tsx`（15721）代替 `plugins/hud.ts`（12363）、`plugins/menu.ts`（17486）；`parts/ambience.ts` 改名 `parts/audio.ts`（`slAudio`）；`lib/palette` 移到 `parts/palette.ts`，`lib/rating` 并入菜单，`vars.slPanel` 删除。`game.tsx` 的 `load` 只剩注册音效与 `setGunEnv`，不再挂任何单元，`plugins` 只剩 `game.tsx`。
+  - 界面上与原版的差别：按钮可用键盘焦点（Tab、方向键、Enter），有焦点框；反转视角开关改为写“开/关”的圆角按钮；标题字号按字数粗估收窄（原来按实测宽度）；大标题行高按 1.3 倍字号排（原版 CSS 0.8），标题与 eyebrow 的间距略大。
+  - 验证：`npm test` 302/303（仅 pot_gfx 一致性），玩家金标准与敌人回归不变；`tsc`、`pot check` 通过；冒烟 hash 由 ab615a74 变为 6d0d2fee（vars 多了 `slHud`、删了 `slPanel`）。Node 上跑整个游戏（含界面树）走标题、设置面板、改设置（`slSet` 合并进设置并写 `renderQuality`）、开场字幕、HUD（警告、击杀信息、准星四条线与命中标记、罗盘）、暂停、阵亡、结算，无报错。Runner 实机（重建后）：标题、设置面板、开场字幕与渐黑、HUD、暂停、阵亡、结算的画面与原版布局一致（`shots/s9-*.png`）；Esc 暂停、Esc 继续、面板里 Esc 只关面板不继续都正常；改 `menu.tsx` 热重载正常。
+  - 字节数：saltline 的 `src` 共 64582 字节（第 8 步后 64370）。界面两个文件从 29849 降到 25981，但提示改进 vars 后导演多了 5 条规则、玩家多了后处理、声音多了提示音，总量基本持平。fps 的 `hud.ts` 5417 字节。

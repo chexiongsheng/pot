@@ -1,11 +1,12 @@
 /**
- * 环境声（只有表现）：雨声、低鸣、交战紧张感三条循环音，按阶段与是否交战调音量；设置里的总音量变化时调 ctx.audio.volume。
+ * 声音（只有表现）：雨声、低鸣、交战紧张感三条循环音，按阶段与是否交战调音量；设置里的总音量变化时调 ctx.audio.volume；
+ * 无线电、命中、击杀的提示音（按 w.vars.slHud 里的序号变化放）。
  */
 import { defineBlock, type LoopHandle } from '@pot/core'
 import { registerSfx, sfx } from '@pot/kit/realistic'
-import { phaseOf, type Settings, type Sl } from './state'
+import { phaseOf, type Settings, type Sl, type SlHud } from './state'
 
-interface Mix { rain: LoopHandle; drone: LoopHandle; tension: LoopHandle; tensionVol: number; volume: number; time: number; frame: number; dt: number }
+interface Mix { rain: LoopHandle; drone: LoopHandle; tension: LoopHandle; tensionVol: number; volume: number; time: number; frame: number; dt: number; radio: number; marker: number }
 const mixes = new WeakMap<object, Map<number, Mix>>()
 const of = (w: object) => {
   let m = mixes.get(w)
@@ -23,9 +24,9 @@ function stop(m: Mix) {
   }
 }
 
-export const slAmbience = defineBlock({
-  name: 'slAmbience',
-  about: 'saltline 环境声：雨声、低鸣、交战紧张感（暂停时压低），以及总音量（slSettings.volume）',
+export const slAudio = defineBlock({
+  name: 'slAudio',
+  about: 'saltline 声音：雨声、低鸣、交战紧张感（暂停时压低），总音量（slSettings.volume），无线电、命中、击杀的提示音',
   props: {},
   view: {
     enter(_me, e, ctx, w) {
@@ -37,6 +38,7 @@ export const slAmbience = defineBlock({
         drone: ctx.audio.loop(sfx('drone'), { volume: 0.25 }),
         tension: ctx.audio.loop(sfx('tension'), { volume: 0 }),
         tensionVol: 0, volume: -1, time: ctx.clock.time, frame: ctx.clock.frame, dt: 0,
+        radio: w.vars.slHud?.radio.n ?? 0, marker: w.vars.slHud?.marker.n ?? 0,
       })
     },
     update(_me, e, _objs, ctx, w) {
@@ -60,6 +62,16 @@ export const slAmbience = defineBlock({
         m.volume = vol
         ctx.audio.volume(vol)
       }
+      // 提示音
+      const hud: SlHud | undefined = w.vars.slHud
+      if (hud && hud.radio.n !== m.radio) {
+        m.radio = hud.radio.n
+        ctx.audio.play(sfx('radio'), { volume: 0.5 })
+      }
+      if (hud && hud.marker.n !== m.marker) {
+        m.marker = hud.marker.n
+        ctx.audio.play(sfx(hud.marker.kill ? 'kill' : 'hit'), { volume: 0.5, pitch: hud.marker.weak ? 1.25 : 1 })
+      }
     },
     exit(_me, e, _objs, _ctx, w) {
       const all = of(w), m = all.get(e.id)
@@ -72,6 +84,6 @@ export const slAmbience = defineBlock({
 
 declare module '@pot/core' {
   interface GameBlockProps {
-    slAmbience?: boolean
+    slAudio?: boolean
   }
 }

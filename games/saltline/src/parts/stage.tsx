@@ -1,6 +1,6 @@
 /**
  * 布景（004 第 19.5 节第 8 步）：环境（realistic 的 atmosphere：黄昏、雨、原版后处理链、画质档位、闪电与雷声）、
- * 港口整张图（harbor 的 harborLevel、harborStatics）、撤离点信标（realistic 的 beacon，导演写 on）、环境声（slAmbience）。
+ * 港口整张图（harbor 的 harborLevel、harborStatics）、撤离点信标（realistic 的 beacon，导演写 on）、声音（slAudio）。
  * 全部标 keep：开局、重试、回标题时不重建。
  */
 import type { SceneArgs } from '@pot/core'
@@ -22,6 +22,6 @@ export function Stage({ data }: { data: SceneArgs['data'] }) {
     <entity key="harbor" keep harborLevel={{ tex }} />
     {Array.from({ length: STATIC_CHUNKS }, (_, i) => <entity key={`statics${i}`} keep harborStatics={{ chunk: i, of: STATIC_CHUNKS, tex }} />)}
     <entity key="extraction" keep tags={['extraction']} at={ex.pos} beacon={{ radius: ex.radius }} />
-    <entity key="ambience" keep slAmbience />
+    <entity key="audio" keep slAudio />
   </>
 }
