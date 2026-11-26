@@ -5,6 +5,8 @@
 import type { Context } from 'cordis'
 import type { DataService } from '../data'
 import type { UIService } from '../ui'
+import type { InputService } from '../input'
+import type { AudioService } from '../audio'
 import type { PotChild, Prefab } from './node'
 import { isPrefab } from './node'
 import type { BlockDef } from './registry'
@@ -28,6 +30,10 @@ export interface GameUI {
   readonly focused: string | null
   /** 原始的 ctx.ui：在树之后画任意即时模式内容 */
   draw: UIService
+  /** 原始的 ctx.input（只读用）：按键快捷键、窗口焦点、鼠标锁定。改 World 仍经 emit */
+  input: InputService
+  /** 原始的 ctx.audio：界面音效 */
+  audio: AudioService
   /** 数据文件（与 scene 的 s.data 相同；每次 load 都重新解析，界面里频繁用时自己缓存） */
   data: DataService
 }
@@ -169,6 +175,8 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
             emit,
             get focused() { return local.$focus ?? null },
             draw: ctx.ui,
+            input: ctx.input,
+            audio: ctx.audio,
             data: ctx.data,
           }
           let tree: PotChild

@@ -1139,6 +1139,7 @@ flow?: {
 | `ui.focused` | 当前焦点控件的 key 路径，没有时为 `null` |
 | `ui.draw` | 原始的 `ctx.ui`，逃生口：在树之后画任意即时模式内容 |
 | `ui.data` | 数据文件，与 `scene` 的 `s.data` 相同（第 7 步补充，16.15） |
+| `ui.input`、`ui.audio` | 原始的 `ctx.input`、`ctx.audio`（M3.5 第 9 步补充）：与 `draw` 一样是表现层的逃生口，用来做按键快捷键（Esc）、失焦暂停、鼠标锁定、按钮音效。要改 World 仍只能经 `ui.emit` |
 
 界面里的回调（`onPress`、`onChange`、`onSubmit`）只应改 `ui.local` 或调 `ui.emit`，不直接改 World。M2 不强制，`pot check` 也不查，写进 Skill 的规矩里。
 
@@ -1168,6 +1169,10 @@ flow?: {
 | `<image>` | `src`（`Texture`）、`w`、`h`、`fit`（`fill`、`contain`、`cover`）、`tint`、`radius` | 不写宽高时用贴图尺寸 |
 | `<scroll>` | 容器属性；`h` 必填 | 纵向滚动，内容超出时裁剪；滚轮和拖动滚动；位置按路径记在 `ui.local` |
 | `<input>` | `value`、`onChange`、`onSubmit`、`placeholder`、`w`（200）、`size`、`max` | 单行输入框，受控：显示 `value`，键入时以新值调 `onChange`；Enter 调 `onSubmit` |
+| `<slider>` | `value`、`min`（0）、`max`（1）、`step`（范围的 1/20）、`onChange`、`w`（200）、`h`（20）、`color`、`bg` | 滑块（M3.5 第 9 步补充）：可获得焦点；按下后拖动按鼠标横坐标取值，焦点上左右方向键按 `step` 增减；值变了才调 `onChange` |
+| `<canvas>` | `w`、`h`、`draw(d, box)` | 自绘区（M3.5 第 9 步补充）：在布局里占位，按树的顺序调 `draw`，`d` 为 `ctx.ui`，`box` 为 `{ x, y, w, h, alpha }`（`alpha` 为累乘后的 `opacity`，自己乘到颜色上）。不参与命中检测。罗盘、准星、渐变遮罩这类排不出来的东西用它 |
+
+M3.5 第 9 步补充：`<text>`、`<button>` 加 `weight`（字重 100 到 900，优先于 `bold`）、`spacing`（字距，单位 em）、`shadow`（1 像素投影），量字时一并计入；`<button>` 加 `border`（同 `panel`）、`hoverBg`（悬停时的底色，缺省为在 `bg` 上叠一层白）、`onHover`（指针移入时调一次）。通用属性加 `opacity`（0 到 1，乘到自身与全部子孙的绘制上）。
 
 布局是弹性布局的子集，每帧两遍：自底向上量内容尺寸，自顶向下分配位置。顶层节点各自独立排布在屏幕上。没有换行、绝对定位子节点、`z` 序（后画的在上）。
 
@@ -2214,3 +2219,21 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
     - 加载进度：`defineGame` 的 `load` 占前 80%、预热占后 20%（17.13），saltline 的 `load` 现在只挂界面，耗时几乎全在预热，进度条会很快走到 80% 再慢慢走完；`harborLevel` 的 enter 是一整块（材质编译、地面、海面、雨幕、动态网格），加载界面在这一块里不刷新。可以让 `load` 的 `step` 报一个预计占比，或者把 `harborLevel` 再拆成几个实体，第 10 步再看。
     - 套件资源随 World 缓存（材质、着色器、贴图）不在热重载套件模块时释放，与 mech、viewGun 相同。
   - 字节数：saltline 的 `src` 共 64370 字节（第 7 步后约 83KB，少了 world.ts 22866 与 bus.ts，多了 stage 1434、ambience 2569）；harbor 的 `scene.ts` 20604，realistic 的 `index.ts` 由约 12KB 增到 20176。
+
+第 9 步（界面）：
+
+- 目标。低层单元 `plugins/hud.ts`（约 12KB）、`plugins/menu.ts`（约 17KB）改为 `game.tsx` 的 `ui` 树（`parts/hud.tsx`、`parts/menu.tsx`），`plugins` 只剩 `game.tsx`，`load` 不再挂任何单元。
+- 架构调整（框架，见 16.3、16.4 的“M3.5 第 9 步补充”）：
+  - `<text>`、`<button>` 的 `weight`、`spacing`、`shadow`；通用属性 `opacity`。原版菜单的标题、按钮都用字重与字距，HUD 与菜单大量淡入淡出。
+  - `<canvas>`。19.3 D 原写“罗盘、准星等自绘部分用 `ui.draw`”，但 `ui.draw` 在整棵树之后画：HUD 的渐黑要盖住罗盘，菜单的渐变遮罩要垫在文字下面，顺序不对。改为在树里占位、按树的顺序画的标签。
+  - `<slider>`：设置面板的灵敏度、视野、音量。
+  - `<button>` 的 `border`、`hoverBg`、`onHover`：原版菜单的次按钮是半透明底加描边，悬停变色并放一声提示音。
+  - `GameUI` 的 `input`、`audio`。
+- fps 套件加 `@pot/kit/fps/hud`：`drawCompass(d, opts)`（方位刻度、四向文字、目标标记、威胁短条）与 `drawCrosshair(d, opts)`（按散布张开的十字、中心点、命中标记），颜色由参数给。第一人称射击通用，换一种玩法（大逃杀）也用得上；saltline 的 `<canvas>` 调用它们。
+- saltline：
+  - HUD 的瞬时提示（无线电字幕、敌情警告、消息、命中标记、击杀信息）原来是 hud 单元的局部变量，靠 `w.on` 收事件。界面树每帧求值、不能订阅事件，改为导演的规则记进 `w.vars.slHud`（文字与发生时的 `tick`），界面按 `(w.tick - at) × w.dt` 算年龄。暂停时 `tick` 不走，提示冻结（与原版相同）；进入流程状态时导演清掉警告、消息、击杀信息（原 `onFlowEnter`），字幕保留。
+  - 后处理参数（受伤红边、低血量、开镜）改由 `slFeedback` 的表现写；无线电、命中、击杀的提示音由环境声积木一并放（`slAmbience` 改名 `slAudio`，按 `slHud` 里的序号变化放）。
+  - 设置：菜单改设置走 `ui.emit('slSet', 补丁)`，导演的规则合并进 `w.vars.slSettings` 并写 `renderQuality`（暂停中事件照常分发）。原来菜单直接改 vars，不进录像，画质还要另写一份。打开哪个面板记在 `ui.local.panel`（原 `vars.slPanel`，它是界面本地状态，不该在 World 里）。
+  - 鼠标锁定、Esc 暂停与继续、失焦暂停仍在菜单里做（与原 menu 单元相同），用 `ui.input` 判断、`ui.emit` 发流程事件。
+  - `lib/palette` 移到 `parts/palette.ts`，`lib/rating` 并入菜单。
+- 预计的差异：元素由布局排，位置与原来可能差几像素；按钮有键盘焦点框；冒烟 hash 会变（vars 多了 `slHud`）。

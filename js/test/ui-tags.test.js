@@ -174,3 +174,82 @@ test('放错树：界面里写实体标签、场景里写界面标签都报错�
   assert.ok(logs.some((t) => /<button> 是界面标签，放错了树/.test(t)), logs.join('\n'))
   assert.ok(logs.some((t) => /^warn .*列表里的 <text> 缺少 key/.test(t)), logs.join('\n'))
 })
+
+// M3.5 第 9 步：字重与字距、opacity、canvas、slider、按钮样式与 onHover、GameUI 的 input 与 audio
+const EXTRA = `import { defineGame } from '@pot/core'
+export default defineGame({
+  vars: { vol: 0.5 },
+  scene: () => <rule on="vol" do={(w, v) => { w.vars.vol = v }} />,
+  ui: (w, ui) => <>
+    <column at={[100, 100]} gap={10} opacity={0.5}>
+      <text weight={900} spacing={0.2} shadow>AB</text>
+      <slider value={w.vars.vol} min={0} max={1} step={0.25} w={200} onChange={(v) => ui.emit('vol', v)} />
+      <button bg="#000000" hoverBg="#ff0000" border="#00ff00" onHover={() => { ui.local.hovers = (ui.local.hovers ?? 0) + 1; ui.audio.play('blip') }}>Go</button>
+      <canvas w={40} h={20} draw={(d, box) => { d.rect(box.x, box.y, box.w, box.h, '#123456', { alpha: box.alpha }); ui.local.box = [box.x, box.y, box.w, box.h, box.alpha] }} />
+    </column>
+    <text at={[0, 0]} hidden={!ui.input.key('q')}>Q</text>
+  </>,
+})
+`
+
+test('界面补充：字重与字距进量字与绘制；opacity 乘到子孙；canvas 按布局给框', async () => {
+  const ctx = await start(EXTRA)
+  const { engine, runtime } = ctx
+  const r = records(engine)
+  const t = r.find((x) => x[0] === 't' && x[9] === 'A')
+  assert.ok(t, '有文字记录（带字距时逐字提交）')
+  assert.equal(t[5].slice(6), '80', '文字的 alpha 乘了 opacity')
+  assert.ok((Number(t[8]) & 2) === 2, '投影')
+  assert.ok((Number(t[8]) >> 4) === 9, '字重 900')
+  const box = local(runtime).box
+  assert.equal(box[2], 40)
+  assert.equal(box[4], 0.5, 'canvas 拿到累乘的 alpha')
+  assert.ok(r.some((x) => x[0] === 'r' && x[5] === '12345680'), 'canvas 画的东西')
+})
+
+test('slider：拖动按横坐标取值并对齐 step，值变了才 emit；焦点上左右方向键增减', async () => {
+  const ctx = await start(EXTRA)
+  const { engine, runtime } = ctx
+  const sl = (() => { const lines = records(engine); return lines })()
+  // 布局：文字 AB 高 = 16 × 1.3 = 20.8，slider 在 y = 100 + 20.8 + 10 = 130.8，高 20
+  engine.mousePos = [100 + 200 * 0.8, 140]
+  engine.keys.add('mouse0')
+  frames(runtime, 3)
+  engine.keys.delete('mouse0')
+  frames(runtime, 2)
+  assert.equal(w(runtime).vars.vol, 0.75, '0.8 对齐到 0.75')
+  assert.equal(local(runtime).$focus, 'column#0/slider#0')
+  tap(ctx, 'rightarrow')
+  frames(runtime, 1)
+  assert.equal(w(runtime).vars.vol, 1)
+  tap(ctx, 'rightarrow')
+  frames(runtime, 1)
+  assert.equal(w(runtime).vars.vol, 1, '夹在 max')
+  tap(ctx, 'leftarrow')
+  frames(runtime, 1)
+  assert.equal(w(runtime).vars.vol, 0.75)
+  assert.equal(local(runtime).$focus, 'column#0/slider#0', '左右键不移动焦点')
+  assert.ok(sl.length > 0)
+})
+
+test('button：hoverBg、border；onHover 移入时调一次；ui.audio、ui.input 可用', async () => {
+  const ctx = await start(EXTRA)
+  const { engine, runtime } = ctx
+  // 按钮在 slider 之后：y = 130.8 + 20 + 10 = 160.8
+  engine.mousePos = [110, 170]
+  frames(runtime, 3)
+  assert.equal(local(runtime).hovers, 1, '移入只调一次')
+  const r = records(engine)
+  assert.ok(r.some((x) => x[0] === 'r' && x[5] === 'ff000080'), '悬停底色（乘了 opacity）')
+  assert.ok(r.some((x) => x[0] === 'b' && x[5] === '00ff0080'), '描边')
+  assert.deepEqual((engine.played ?? []).map((p) => p.name), ['blip'])
+  engine.mousePos = [600, 600]
+  frames(runtime, 1)
+  engine.mousePos = [110, 170]
+  frames(runtime, 1)
+  assert.equal(local(runtime).hovers, 2, '移出再移入又调一次')
+  assert.ok(!records(engine).some((x) => x[0] === 't' && x[9] === 'Q'))
+  engine.keys.add('q')
+  frames(runtime, 1)
+  assert.ok(records(engine).some((x) => x[0] === 't' && x[9] === 'Q'), 'ui.input 读到按键')
+})

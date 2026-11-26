@@ -7114,22 +7114,22 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   }
   var fixedPx = (value) => typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : void 0;
   var visible = (el) => !el.props.hidden;
-  function wrapText(text, maxW, size, bold, m) {
+  function wrapText(text, maxW, size, font, m) {
     const out = [];
     for (const para of text.split("\n")) {
       const tokens = para.match(/[\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]|[^\s\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]+|\s+/g) ?? [""];
       let line = "";
       for (const token of tokens) {
         const next = line + token;
-        if (!line || m.width(next, size, bold) <= maxW) {
+        if (!line || m.width(next, size, font) <= maxW) {
           line = next;
           continue;
         }
         out.push(line.replace(/\s+$/, ""));
         line = /^\s+$/.test(token) ? "" : token;
-        while (line && m.width(line, size, bold) > maxW && line.length > 1) {
+        while (line && m.width(line, size, font) > maxW && line.length > 1) {
           let i = line.length - 1;
-          while (i > 1 && m.width(line.slice(0, i), size, bold) > maxW) i--;
+          while (i > 1 && m.width(line.slice(0, i), size, font) > maxW) i--;
           out.push(line.slice(0, i));
           line = line.slice(i);
         }
@@ -7266,8 +7266,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   // runtime/src/world/ui-tags.ts
   var LEAF_SIZE = 16;
   function fontOf(el) {
-    return { size: Number(el.props.size) || LEAF_SIZE, bold: !!el.props.bold };
+    const p = el.props;
+    const font = { bold: !!p.bold };
+    if (p.weight !== void 0) font.weight = p.weight;
+    if (Number(p.spacing)) font.spacing = Number(p.spacing);
+    return { size: Number(p.size) || LEAF_SIZE, font };
   }
+  var textFont = (font) => font.weight !== void 0 ? { weight: font.weight } : { bold: !!font.bold };
+  var fixed = (v, fallback) => typeof v === "number" ? v : fallback;
   var LAYOUTS = {
     column: { container: "column" },
     row: { container: "row" },
@@ -7275,26 +7281,26 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     scroll: { container: "column" },
     text: {
       intrinsic(el, m, width) {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const [t, r, b, l] = padding(el, LAYOUTS);
-        const lh = m.lineHeight(size, bold);
-        const lines = el.props.wrap && width !== void 0 ? wrapText(el.text, Math.max(1, width - l - r), size, bold, m) : el.text.split("\n");
+        const lh = m.lineHeight(size, font);
+        const lines = el.props.wrap && width !== void 0 ? wrapText(el.text, Math.max(1, width - l - r), size, font, m) : el.text.split("\n");
         el.lines = lines;
-        const w = Math.max(0, ...lines.map((line) => m.width(line, size, bold)));
+        const w = Math.max(0, ...lines.map((line) => m.width(line, size, font)));
         return { w: w + l + r, h: lines.length * lh + t + b };
       }
     },
     button: {
       defaults: { pad: [8, 16] },
       intrinsic(el, m) {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const [t, r, b, l] = padding(el, LAYOUTS);
-        return { w: m.width(el.text, size, bold) + l + r, h: m.lineHeight(size, bold) + t + b };
+        return { w: m.width(el.text, size, font) + l + r, h: m.lineHeight(size, font) + t + b };
       }
     },
     bar: {
       intrinsic(el) {
-        return { w: typeof el.props.w === "number" ? el.props.w : 120, h: typeof el.props.h === "number" ? el.props.h : 10 };
+        return { w: fixed(el.props.w, 120), h: fixed(el.props.h, 10) };
       }
     },
     image: {
@@ -7311,9 +7317,19 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     input: {
       defaults: { pad: [6, 10] },
       intrinsic(el, m) {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const [t, , b] = padding(el, LAYOUTS);
-        return { w: typeof el.props.w === "number" ? el.props.w : 200, h: m.lineHeight(size, bold) + t + b };
+        return { w: fixed(el.props.w, 200), h: m.lineHeight(size, font) + t + b };
+      }
+    },
+    slider: {
+      intrinsic(el) {
+        return { w: fixed(el.props.w, 200), h: fixed(el.props.h, 20) };
+      }
+    },
+    canvas: {
+      intrinsic(el) {
+        return { w: fixed(el.props.w, 0), h: fixed(el.props.h, 0) };
       }
     }
   };
@@ -7321,48 +7337,53 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   var TEXT_TAGS = /* @__PURE__ */ new Set(["text", "button"]);
   var UI_TAG_NAMES = Object.keys(LAYOUTS);
   var FOCUS = "#ffd54f";
-  function drawElement(el, ui, s, m) {
+  function drawBorder(ui, border, x, y2, w, h, radius, alpha) {
+    if (!border) return;
+    const b = typeof border === "string" || Array.isArray(border) ? { color: border, width: 1 } : border;
+    ui.border(x, y2, w, h, b.color, b.width ?? 1, { radius, alpha });
+  }
+  function drawElement(el, ui, s, m, alpha = 1) {
     const p = el.props;
     const { x, y: y2, w, h } = el;
     switch (el.tag) {
       case "panel": {
         const radius = prop(el, LAYOUTS, "radius");
         const bg = prop(el, LAYOUTS, "bg");
-        if (bg) ui.rect(x, y2, w, h, bg, { radius });
-        if (p.border) {
-          const border = typeof p.border === "string" ? { color: p.border, width: 1 } : p.border;
-          ui.border(x, y2, w, h, border.color, border.width ?? 1, { radius });
-        }
+        if (bg) ui.rect(x, y2, w, h, bg, { radius, alpha });
+        drawBorder(ui, p.border, x, y2, w, h, radius, alpha);
         return;
       }
       case "text": {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const [t, r, , l] = padding(el, LAYOUTS);
-        const lh = m.lineHeight(size, bold);
+        const lh = m.lineHeight(size, font);
         const lines = el.lines ?? [el.text];
         const align = p.align === "center" || p.align === "right" ? p.align : "left";
         lines.forEach((line, i) => {
-          ui.text(line, x + l, y2 + t + i * lh, { size, bold, color: p.color ?? "#ffffff", w: Math.max(0, w - l - r), h: lh, align, valign: "middle" });
+          ui.text(line, x + l, y2 + t + i * lh, { size, ...textFont(font), spacing: font.spacing, shadow: !!p.shadow, color: p.color ?? "#ffffff", alpha, w: Math.max(0, w - l - r), h: lh, align, valign: "middle" });
         });
         return;
       }
       case "button": {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const radius = p.radius ?? 6;
-        const alpha = p.disabled ? 0.45 : 1;
-        ui.rect(x, y2, w, h, p.bg ?? "#3a7bd5", { radius, alpha });
-        if (!p.disabled && s.pressed) ui.rect(x, y2, w, h, "#000000", { radius, alpha: 0.2 });
-        else if (!p.disabled && s.hover) ui.rect(x, y2, w, h, "#ffffff", { radius, alpha: 0.12 });
-        if (s.focused) ui.border(x - 2, y2 - 2, w + 4, h + 4, FOCUS, 2, { radius: radius + 2 });
-        ui.text(el.text, x, y2, { size, bold, color: p.color ?? "#ffffff", w, h, align: "center", valign: "middle", alpha });
+        const a = alpha * (p.disabled ? 0.45 : 1);
+        const hot = !p.disabled && s.hover && !s.pressed;
+        ui.rect(x, y2, w, h, hot && p.hoverBg ? p.hoverBg : p.bg ?? "#3a7bd5", { radius, alpha: a });
+        if (!p.disabled && s.pressed) ui.rect(x, y2, w, h, "#000000", { radius, alpha: 0.2 * alpha });
+        else if (hot && !p.hoverBg) ui.rect(x, y2, w, h, "#ffffff", { radius, alpha: 0.12 * alpha });
+        drawBorder(ui, p.border, x, y2, w, h, radius, a);
+        if (s.focused) ui.border(x - 2, y2 - 2, w + 4, h + 4, FOCUS, 2, { radius: radius + 2, alpha });
+        const color = hot && p.hoverColor ? p.hoverColor : p.color ?? "#ffffff";
+        ui.text(el.text, x, y2, { size, ...textFont(font), spacing: font.spacing, shadow: !!p.shadow, color, w, h, align: "center", valign: "middle", alpha: a });
         return;
       }
       case "bar": {
         const max = Number(p.max ?? 1) || 1;
         const ratio = Math.max(0, Math.min(1, Number(p.value ?? 0) / max));
         const radius = p.radius ?? h / 2;
-        ui.rect(x, y2, w, h, p.bg ?? "#ffffff33", { radius });
-        if (ratio > 0) ui.rect(x, y2, w * ratio, h, p.color ?? "#4caf50", { radius });
+        ui.rect(x, y2, w, h, p.bg ?? "#ffffff33", { radius, alpha });
+        if (ratio > 0) ui.rect(x, y2, w * ratio, h, p.color ?? "#4caf50", { radius, alpha });
         return;
       }
       case "image": {
@@ -7370,7 +7391,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         if (!src) return;
         const sw = Number(src.width) || 1, sh = Number(src.height) || 1;
         const fit = p.fit ?? "fill";
-        const opts = { tint: p.tint, radius: p.radius };
+        const opts = { tint: p.tint, radius: p.radius, alpha };
         if (fit === "contain") {
           const k = Math.min(w / sw, h / sh);
           const dw = sw * k, dh = sh * k;
@@ -7383,20 +7404,43 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
         return;
       }
       case "input": {
-        const { size, bold } = fontOf(el);
+        const { size, font } = fontOf(el);
         const [t, r, b, l] = padding(el, LAYOUTS);
         const radius = p.radius ?? 4;
-        ui.rect(x, y2, w, h, p.bg ?? "#0e1016", { radius });
-        ui.border(x, y2, w, h, s.focused ? "#4fc3f7" : "#ffffff40", s.focused ? 2 : 1, { radius });
+        ui.rect(x, y2, w, h, p.bg ?? "#0e1016", { radius, alpha });
+        ui.border(x, y2, w, h, s.focused ? "#4fc3f7" : "#ffffff40", s.focused ? 2 : 1, { radius, alpha });
         const value = String(p.value ?? "");
         const innerW = Math.max(0, w - l - r);
         ui.clip(x + l, y2 + t, innerW, Math.max(0, h - t - b));
-        const tw = m.width(value, size, bold);
+        const tw = m.width(value, size, font);
         const shift = s.focused ? Math.max(0, tw + 2 - innerW) : 0;
-        if (value) ui.text(value, x + l - shift, y2, { size, bold, color: p.color ?? "#ffffff", w: tw + 4, h, valign: "middle" });
-        else if (p.placeholder) ui.text(String(p.placeholder), x + l, y2, { size, bold, color: "#ffffff66", w: innerW, h, valign: "middle" });
-        if (s.focused && Math.floor(s.frame / 30) % 2 === 0) ui.rect(x + l - shift + tw + 1, y2 + t, 2, Math.max(0, h - t - b), "#ffffff");
+        if (value) ui.text(value, x + l - shift, y2, { size, ...textFont(font), color: p.color ?? "#ffffff", w: tw + 4, h, valign: "middle", alpha });
+        else if (p.placeholder) ui.text(String(p.placeholder), x + l, y2, { size, ...textFont(font), color: "#ffffff66", w: innerW, h, valign: "middle", alpha });
+        if (s.focused && Math.floor(s.frame / 30) % 2 === 0) ui.rect(x + l - shift + tw + 1, y2 + t, 2, Math.max(0, h - t - b), "#ffffff", { alpha });
         ui.unclip();
+        return;
+      }
+      case "slider": {
+        const min = Number(p.min ?? 0), max = Number(p.max ?? 1);
+        const k = max === min ? 0 : Math.max(0, Math.min(1, (Number(p.value ?? min) - min) / (max - min)));
+        const a = alpha * (p.disabled ? 0.45 : 1);
+        const track = 4, ty = y2 + (h - track) / 2;
+        const color = p.color ?? "#4fc3f7";
+        ui.rect(x, ty, w, track, p.bg ?? "#ffffff40", { radius: track / 2, alpha: a });
+        if (k > 0) ui.rect(x, ty, w * k, track, color, { radius: track / 2, alpha: a });
+        const kw = 14, kh = Math.min(h, 16);
+        const kx = x + w * k - kw / 2, ky = y2 + (h - kh) / 2;
+        ui.rect(kx, ky, kw, kh, p.knob ?? "#ffffff", { radius: 3, alpha: a });
+        if (s.focused) ui.border(kx - 2, ky - 2, kw + 4, kh + 4, FOCUS, 2, { radius: 4, alpha });
+        return;
+      }
+      case "canvas": {
+        if (typeof p.draw !== "function") throw new Error("<canvas> 需要 draw(d, box) 回调");
+        try {
+          p.draw(ui, { x, y: y2, w, h, alpha });
+        } catch (error) {
+          throw new Error(`<canvas> 的 draw 出错：${error?.message ?? error}`);
+        }
         return;
       }
     }
@@ -7413,12 +7457,14 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     column: { about: "纵向排列子元素，本身不画东西", props: { gap: "间距", align: "start|center|end|stretch", justify: "start|center|end|between", pad: "内边距" } },
     row: { about: "横向排列子元素，本身不画东西", props: { gap: "间距", align: "start|center|end|stretch", justify: "start|center|end|between", pad: "内边距" } },
     panel: { about: "带底色的纵向容器（缺省 pad 12、gap 8）", props: { bg: "底色", border: "描边颜色或 { color, width }", radius: "圆角" } },
-    text: { about: "文字；子节点里的字符串和数字拼起来", props: { size: "字号（16）", color: "颜色", bold: "粗体", wrap: "按宽度换行（需要确定宽度）", align: "left|center|right" } },
-    button: { about: "按钮：点击或焦点上按 Enter/空格时 ui.emit(emit, payload) 并调 onPress", props: { emit: "事件名", payload: "事件参数", onPress: "回调（只改 ui.local 或 ui.emit）", disabled: "禁用", bg: "底色", color: "文字颜色", size: "字号" } },
+    text: { about: "文字；子节点里的字符串和数字拼起来", props: { size: "字号（16）", color: "颜色", bold: "粗体", weight: "字重 100 到 900（优先于 bold）", spacing: "字距（em）", shadow: "1 像素投影", wrap: "按宽度换行（需要确定宽度）", align: "left|center|right" } },
+    button: { about: "按钮：点击或焦点上按 Enter/空格时 ui.emit(emit, payload) 并调 onPress", props: { emit: "事件名", payload: "事件参数", onPress: "回调（只改 ui.local 或 ui.emit）", onHover: "指针移入时调一次（放提示音等）", disabled: "禁用", bg: "底色", hoverBg: "悬停底色", color: "文字颜色", hoverColor: "悬停文字颜色", border: "描边颜色或 { color, width }", size: "字号", weight: "字重", spacing: "字距（em）" } },
     bar: { about: "进度条", props: { value: "当前值", max: "最大值（1）", color: "前景色", bg: "底色", w: "宽（120）", h: "高（10）" } },
     image: { about: "贴图（低层 Texture）", props: { src: "Texture", fit: "fill|contain|cover", tint: "染色", radius: "圆角" } },
     scroll: { about: "纵向滚动容器，内容超出时裁剪；滚轮、拖动滚动", props: { h: "高（必填）", gap: "间距" } },
-    input: { about: "单行输入框（受控）：显示 value，键入时 onChange(新值)，Enter 时 onSubmit(值)", props: { value: "当前值", onChange: "回调", onSubmit: "回调", placeholder: "占位文字", max: "最大长度", w: "宽（200）", size: "字号" } }
+    input: { about: "单行输入框（受控）：显示 value，键入时 onChange(新值)，Enter 时 onSubmit(值)", props: { value: "当前值", onChange: "回调", onSubmit: "回调", placeholder: "占位文字", max: "最大长度", w: "宽（200）", size: "字号" } },
+    slider: { about: "滑块（受控）：拖动或焦点上左右方向键改值，值变了调 onChange(新值)", props: { value: "当前值", min: "最小值（0）", max: "最大值（1）", step: "步长（缺省为范围的 1/20，只用于方向键；给了时拖动也对齐）", onChange: "回调", color: "已选部分颜色", bg: "轨道颜色", knob: "滑钮颜色", w: "宽（200）", h: "高（20）" } },
+    canvas: { about: "自绘区：在布局里占位，按树的顺序调 draw(d, box)；d 为 ctx.ui，box 为 { x, y, w, h, alpha }", props: { draw: "回调", w: "宽", h: "高" } }
   };
   var UI_COMMON_PROPS = {
     at: "只对顶层节点：九宫格位置名或 [x, y]（top-left）",
@@ -7426,7 +7472,8 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     h: '高：像素或 "50%"',
     grow: "主轴上分剩余空间的权重",
     pad: "内边距：数、[上下, 左右] 或 [上, 右, 下, 左]",
-    hidden: "为真时不占位、不绘制"
+    hidden: "为真时不占位、不绘制",
+    opacity: "不透明度 0 到 1，乘到自身与全部子孙上"
   };
 
   // runtime/src/world/kit.ts
@@ -11056,27 +11103,31 @@ TS：${r.layout.text}
     const widths = /* @__PURE__ */ new Map();
     const heights = /* @__PURE__ */ new Map();
     let current2;
+    const fontKey = (f) => `${f.bold ? 1 : 0}|${f.weight ?? ""}|${f.spacing ?? 0}`;
+    const fontOpts = (f) => f.weight !== void 0 ? { weight: f.weight } : { bold: !!f.bold };
     const m = {
-      width(text, size, bold) {
+      width(text, size, font) {
         if (!text) return 0;
-        const k = `${size}|${bold ? 1 : 0}|${text}`;
+        const k = `${size}|${fontKey(font)}|${text}`;
         let w = widths.get(k);
         if (w === void 0) {
-          w = current2.measure(text, size, bold).width;
+          w = current2.measure(text, size, fontOpts(font), font.spacing ?? 0).width;
           if (widths.size > 4096) widths.clear();
           widths.set(k, w);
         }
         return w;
       },
-      lineHeight(size, bold) {
-        const k = `${size}|${bold ? 1 : 0}`;
+      lineHeight(size, font) {
+        const k = `${size}|${font.bold ? 1 : 0}|${font.weight ?? ""}`;
         let h = heights.get(k);
-        if (h === void 0) heights.set(k, h = current2.measure("国Mg", size, bold).height);
+        if (h === void 0) heights.set(k, h = current2.measure("国Mg", size, fontOpts(font)).height);
         return h;
       }
     };
     let prevDown = false;
     let pressTarget = null;
+    let prevHover = null;
+    let sliding = null;
     let drag = null;
     const prevKeys = {};
     let frame = 0;
@@ -11186,7 +11237,7 @@ TS：${r.layout.text}
       };
       placed.forEach(walk);
       const byPath = new Map(order.map((el) => [el.path, el]));
-      const focusables = order.filter((el) => el.tag === "button" && !el.props.disabled || el.tag === "input");
+      const focusables = order.filter((el) => (el.tag === "button" || el.tag === "slider") && !el.props.disabled || el.tag === "input");
       const contains = (el, x, y2) => !!el.clip && x >= el.clip.x && x <= el.clip.x + el.clip.w && y2 >= el.clip.y && y2 <= el.clip.y + el.clip.h;
       const activate = (el) => {
         if (el.props.disabled) return;
@@ -11197,6 +11248,21 @@ TS：${r.layout.text}
           report(`${sourcePrefix(el.source)}<button> 的回调出错：${error?.message ?? error}`);
         }
       };
+      const sliderValue = (el, raw) => {
+        const p = el.props;
+        const min = Number(p.min ?? 0), max = Number(p.max ?? 1);
+        let v = Math.max(Math.min(min, max), Math.min(Math.max(min, max), raw));
+        if (Number(p.step) > 0) v = min + Math.round((v - min) / Number(p.step)) * Number(p.step);
+        return v;
+      };
+      const setSlider = (el, value) => {
+        if (el.props.disabled || value === Number(el.props.value)) return;
+        try {
+          el.props.onChange?.(value);
+        } catch (error) {
+          report(`${sourcePrefix(el.source)}<slider> 的回调出错：${error?.message ?? error}`);
+        }
+      };
       let hover = null;
       let pressedNow = false;
       const input = env.input;
@@ -11205,23 +11271,40 @@ TS：${r.layout.text}
         const down = input.key("mouse0");
         for (let i = order.length - 1; i >= 0; i--) {
           const el = order[i];
-          if ((el.tag === "button" || el.tag === "input" || el.tag === "scroll") && contains(el, mouse.x, mouse.y)) {
+          if ((el.tag === "button" || el.tag === "input" || el.tag === "scroll" || el.tag === "slider") && contains(el, mouse.x, mouse.y)) {
             hover = el;
             break;
           }
         }
+        if (hover && hover.path !== prevHover && hover.tag === "button" && !hover.props.disabled && hover.props.onHover) {
+          try {
+            hover.props.onHover();
+          } catch (error) {
+            report(`${sourcePrefix(hover.source)}<button> 的 onHover 出错：${error?.message ?? error}`);
+          }
+        }
+        prevHover = hover?.path ?? null;
         if (down && !prevDown) {
           pressTarget = hover?.path ?? null;
-          if (hover && (hover.tag === "input" || hover.tag === "button" && !hover.props.disabled)) local.$focus = hover.path;
+          if (hover && (hover.tag === "input" || (hover.tag === "button" || hover.tag === "slider") && !hover.props.disabled)) local.$focus = hover.path;
           else local.$focus = null;
           drag = hover?.tag === "scroll" ? { path: hover.path, y: mouse.y, scroll: scrolls[hover.path] ?? 0 } : null;
+          sliding = hover?.tag === "slider" && !hover.props.disabled ? hover.path : null;
         }
         if (down && drag) scrolls[drag.path] = drag.scroll - (mouse.y - drag.y);
+        if (down && sliding) {
+          const el = byPath.get(sliding);
+          if (el) {
+            const min = Number(el.props.min ?? 0), max = Number(el.props.max ?? 1);
+            setSlider(el, sliderValue(el, min + (el.w > 0 ? (mouse.x - el.x) / el.w : 0) * (max - min)));
+          }
+        }
         if (!down && prevDown) {
           const target = pressTarget ? byPath.get(pressTarget) : void 0;
           if (target && hover === target && target.tag === "button") activate(target);
           pressTarget = null;
           drag = null;
+          sliding = null;
         }
         pressedNow = down;
         prevDown = down;
@@ -11256,12 +11339,18 @@ TS：${r.layout.text}
         if (edge.tab) move(input.key("leftshift") || input.key("rightshift") ? -1 : 1);
         else if (focus) {
           const isInput = focus.tag === "input";
+          const isSlider = focus.tag === "slider";
           if (edge.escape) {
             local.$focus = null;
             focus = void 0;
+          } else if (isSlider && (edge.leftarrow || edge.rightarrow)) {
+            const p = focus.props;
+            const min = Number(p.min ?? 0), max = Number(p.max ?? 1);
+            const step = Number(p.step) > 0 ? Number(p.step) : Math.abs(max - min) / 20;
+            setSlider(focus, sliderValue(focus, Number(p.value ?? min) + (edge.rightarrow ? step : -step)));
           } else if (edge.downarrow || !isInput && edge.rightarrow) move(1);
           else if (edge.uparrow || !isInput && edge.leftarrow) move(-1);
-          else if (!isInput && (edge.return || edge.keypadenter || edge.space)) activate(focus);
+          else if (!isInput && !isSlider && (edge.return || edge.keypadenter || edge.space)) activate(focus);
         }
         if (focus && focus.tag === "input") {
           const typed = input.text();
@@ -11290,22 +11379,25 @@ TS：${r.layout.text}
         const v = scrolls[el.path] ?? 0;
         if (v < 0 || v > max) scrolls[el.path] = Math.max(0, Math.min(max, v));
       }
-      const draw = (el) => {
+      const draw = (el, parentAlpha) => {
         if (!visible(el) || !el.clip) return;
+        const op = el.props.opacity;
+        const alpha = parentAlpha * (op === void 0 ? 1 : Math.max(0, Math.min(1, Number(op) || 0)));
+        if (alpha <= 1e-3) return;
         const state = { hover: hover === el, pressed: hover === el && pressedNow && pressTarget === el.path, focused: local.$focus === el.path, frame };
         try {
-          drawElement(el, ui, state, m);
+          drawElement(el, ui, state, m, alpha);
         } catch (error) {
           report(`${sourcePrefix(el.source)}${error?.message ?? error}`);
         }
         if (el.tag === "scroll") {
           ui.clip(el.x, el.y, el.w, el.h);
-          el.children.forEach(draw);
+          el.children.forEach((c) => draw(c, alpha));
           ui.unclip();
           drawScrollbar(el, ui, scrolls[el.path] ?? 0);
-        } else el.children.forEach(draw);
+        } else el.children.forEach((c) => draw(c, alpha));
       };
-      placed.forEach(draw);
+      placed.forEach((el) => draw(el, 1));
     };
   }
 
@@ -11407,6 +11499,8 @@ TS：${r.layout.text}
                 return local.$focus ?? null;
               },
               draw: ctx.ui,
+              input: ctx.input,
+              audio: ctx.audio,
               data: ctx.data
             };
             let tree;

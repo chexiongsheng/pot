@@ -10,7 +10,7 @@ import type { PotChild, PotNode, SourcePos } from './node'
 import type { UIService } from '../ui'
 import type { InputService } from '../input'
 import { layoutRoot, visible } from './ui-layout'
-import type { LayoutEnv, Measurer, UIElement } from './ui-layout'
+import type { Font, LayoutEnv, Measurer, UIElement } from './ui-layout'
 import { CONTAINERS, LAYOUTS, TEXT_TAGS, drawElement, drawScrollbar } from './ui-tags'
 import { similar } from './tree'
 
@@ -68,27 +68,32 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
   const widths = new Map<string, number>()
   const heights = new Map<string, number>()
   let current: UIService
+  const fontKey = (f: Font) => `${f.bold ? 1 : 0}|${f.weight ?? ''}|${f.spacing ?? 0}`
+  const fontOpts = (f: Font) => (f.weight !== undefined ? { weight: f.weight } : { bold: !!f.bold })
   const m: Measurer = {
-    width(text, size, bold) {
+    width(text, size, font) {
       if (!text) return 0
-      const k = `${size}|${bold ? 1 : 0}|${text}`
+      const k = `${size}|${fontKey(font)}|${text}`
       let w = widths.get(k)
       if (w === undefined) {
-        w = current.measure(text, size, bold).width
+        w = current.measure(text, size, fontOpts(font), font.spacing ?? 0).width
         if (widths.size > 4096) widths.clear()
         widths.set(k, w)
       }
       return w
     },
-    lineHeight(size, bold) {
-      const k = `${size}|${bold ? 1 : 0}`
+    lineHeight(size, font) {
+      const k = `${size}|${font.bold ? 1 : 0}|${font.weight ?? ''}`
       let h = heights.get(k)
-      if (h === undefined) heights.set(k, h = current.measure('国Mg', size, bold).height)
+      if (h === undefined) heights.set(k, h = current.measure('国Mg', size, fontOpts(font)).height)
       return h
     },
   }
   let prevDown = false
   let pressTarget: string | null = null
+  let prevHover: string | null = null
+  /** 正在拖动的滑块 */
+  let sliding: string | null = null
   let drag: { path: string; y: number; scroll: number } | null = null
   const prevKeys: Record<string, boolean> = {}
   let frame = 0
@@ -209,7 +214,7 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
     }
     placed.forEach(walk)
     const byPath = new Map(order.map((el) => [el.path, el]))
-    const focusables = order.filter((el) => (el.tag === 'button' && !el.props.disabled) || el.tag === 'input')
+    const focusables = order.filter((el) => ((el.tag === 'button' || el.tag === 'slider') && !el.props.disabled) || el.tag === 'input')
     const contains = (el: UIElement, x: number, y: number) => !!el.clip && x >= el.clip.x && x <= el.clip.x + el.clip.w && y >= el.clip.y && y <= el.clip.y + el.clip.h
 
     const activate = (el: UIElement) => {
@@ -222,6 +227,23 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
       }
     }
 
+    /** 滑块取值：夹在 [min, max]，给了 step 时对齐到 step */
+    const sliderValue = (el: UIElement, raw: number) => {
+      const p = el.props
+      const min = Number(p.min ?? 0), max = Number(p.max ?? 1)
+      let v = Math.max(Math.min(min, max), Math.min(Math.max(min, max), raw))
+      if (Number(p.step) > 0) v = min + Math.round((v - min) / Number(p.step)) * Number(p.step)
+      return v
+    }
+    const setSlider = (el: UIElement, value: number) => {
+      if (el.props.disabled || value === Number(el.props.value)) return
+      try {
+        el.props.onChange?.(value)
+      } catch (error: any) {
+        report(`${sourcePrefix(el.source)}<slider> 的回调出错：${error?.message ?? error}`)
+      }
+    }
+
     let hover: UIElement | null = null
     let pressedNow = false
     const input = env.input
@@ -230,23 +252,41 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
       const down = input.key('mouse0')
       for (let i = order.length - 1; i >= 0; i--) {
         const el = order[i]
-        if ((el.tag === 'button' || el.tag === 'input' || el.tag === 'scroll') && contains(el, mouse.x, mouse.y)) {
+        if ((el.tag === 'button' || el.tag === 'input' || el.tag === 'scroll' || el.tag === 'slider') && contains(el, mouse.x, mouse.y)) {
           hover = el
           break
         }
       }
+      // 指针移入按钮：onHover 调一次
+      if (hover && hover.path !== prevHover && hover.tag === 'button' && !hover.props.disabled && hover.props.onHover) {
+        try {
+          hover.props.onHover()
+        } catch (error: any) {
+          report(`${sourcePrefix(hover.source)}<button> 的 onHover 出错：${error?.message ?? error}`)
+        }
+      }
+      prevHover = hover?.path ?? null
       if (down && !prevDown) {
         pressTarget = hover?.path ?? null
-        if (hover && (hover.tag === 'input' || (hover.tag === 'button' && !hover.props.disabled))) local.$focus = hover.path
+        if (hover && (hover.tag === 'input' || ((hover.tag === 'button' || hover.tag === 'slider') && !hover.props.disabled))) local.$focus = hover.path
         else local.$focus = null
         drag = hover?.tag === 'scroll' ? { path: hover.path, y: mouse.y, scroll: scrolls[hover.path] ?? 0 } : null
+        sliding = hover?.tag === 'slider' && !hover.props.disabled ? hover.path : null
       }
       if (down && drag) scrolls[drag.path] = drag.scroll - (mouse.y - drag.y)
+      if (down && sliding) {
+        const el = byPath.get(sliding)
+        if (el) {
+          const min = Number(el.props.min ?? 0), max = Number(el.props.max ?? 1)
+          setSlider(el, sliderValue(el, min + (el.w > 0 ? (mouse.x - el.x) / el.w : 0) * (max - min)))
+        }
+      }
       if (!down && prevDown) {
         const target = pressTarget ? byPath.get(pressTarget) : undefined
         if (target && hover === target && target.tag === 'button') activate(target)
         pressTarget = null
         drag = null
+        sliding = null
       }
       pressedNow = down
       prevDown = down
@@ -283,12 +323,18 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
       if (edge.tab) move(input.key('leftshift') || input.key('rightshift') ? -1 : 1)
       else if (focus) {
         const isInput = focus.tag === 'input'
+        const isSlider = focus.tag === 'slider'
         if (edge.escape) {
           local.$focus = null
           focus = undefined
+        } else if (isSlider && (edge.leftarrow || edge.rightarrow)) {
+          const p = focus.props
+          const min = Number(p.min ?? 0), max = Number(p.max ?? 1)
+          const step = Number(p.step) > 0 ? Number(p.step) : Math.abs(max - min) / 20
+          setSlider(focus, sliderValue(focus, Number(p.value ?? min) + (edge.rightarrow ? step : -step)))
         } else if (edge.downarrow || (!isInput && edge.rightarrow)) move(1)
         else if (edge.uparrow || (!isInput && edge.leftarrow)) move(-1)
-        else if (!isInput && (edge.return || edge.keypadenter || edge.space)) activate(focus)
+        else if (!isInput && !isSlider && (edge.return || edge.keypadenter || edge.space)) activate(focus)
       }
       // 输入框键入
       if (focus && focus.tag === 'input') {
@@ -320,22 +366,25 @@ export function createUIRenderer(onError: (message: string) => void, onWarn?: (m
       if (v < 0 || v > max) scrolls[el.path] = Math.max(0, Math.min(max, v))
     }
 
-    // 绘制
-    const draw = (el: UIElement) => {
+    // 绘制（opacity 沿树累乘；完全透明的子树不画）
+    const draw = (el: UIElement, parentAlpha: number) => {
       if (!visible(el) || !el.clip) return
+      const op = el.props.opacity
+      const alpha = parentAlpha * (op === undefined ? 1 : Math.max(0, Math.min(1, Number(op) || 0)))
+      if (alpha <= 0.001) return
       const state = { hover: hover === el, pressed: hover === el && pressedNow && pressTarget === el.path, focused: local.$focus === el.path, frame }
       try {
-        drawElement(el, ui, state, m)
+        drawElement(el, ui, state, m, alpha)
       } catch (error: any) {
         report(`${sourcePrefix(el.source)}${error?.message ?? error}`)
       }
       if (el.tag === 'scroll') {
         ui.clip(el.x, el.y, el.w, el.h)
-        el.children.forEach(draw)
+        el.children.forEach((c) => draw(c, alpha))
         ui.unclip()
         drawScrollbar(el, ui, scrolls[el.path] ?? 0)
-      } else el.children.forEach(draw)
+      } else el.children.forEach((c) => draw(c, alpha))
     }
-    placed.forEach(draw)
+    placed.forEach((el) => draw(el, 1))
   }
 }

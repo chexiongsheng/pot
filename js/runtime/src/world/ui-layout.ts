@@ -34,11 +34,18 @@ export interface UIElement {
   contentH?: number
 }
 
+/** 量字用的字体：粗体、字重（100 到 900，优先于 bold）、字距（em） */
+export interface Font {
+  bold?: boolean
+  weight?: number | 'normal' | 'bold'
+  spacing?: number
+}
+
 export interface Measurer {
-  /** 单行文字的宽 */
-  width(text: string, size: number, bold: boolean): number
+  /** 单行文字的宽（含字距） */
+  width(text: string, size: number, font: Font): number
   /** 行高 */
-  lineHeight(size: number, bold: boolean): number
+  lineHeight(size: number, font: Font): number
 }
 
 export interface TagLayout {
@@ -94,23 +101,23 @@ const fixedPx = (value: unknown) => (typeof value === 'number' && Number.isFinit
 export const visible = (el: UIElement) => !el.props.hidden
 
 /** 把文字按宽度断行：中日韩字符可在任意处断，其他在空格处断，单词超宽时按字符断 */
-export function wrapText(text: string, maxW: number, size: number, bold: boolean, m: Measurer): string[] {
+export function wrapText(text: string, maxW: number, size: number, font: Font, m: Measurer): string[] {
   const out: string[] = []
   for (const para of text.split('\n')) {
     const tokens = para.match(/[\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]|[^\s\u2e80-\u9fff\uac00-\ud7af\uff00-\uffef]+|\s+/g) ?? ['']
     let line = ''
     for (const token of tokens) {
       const next = line + token
-      if (!line || m.width(next, size, bold) <= maxW) {
+      if (!line || m.width(next, size, font) <= maxW) {
         line = next
         continue
       }
       out.push(line.replace(/\s+$/, ''))
       line = /^\s+$/.test(token) ? '' : token
       // 单个 token 比整行还宽：按字符切
-      while (line && m.width(line, size, bold) > maxW && line.length > 1) {
+      while (line && m.width(line, size, font) > maxW && line.length > 1) {
         let i = line.length - 1
-        while (i > 1 && m.width(line.slice(0, i), size, bold) > maxW) i--
+        while (i > 1 && m.width(line.slice(0, i), size, font) > maxW) i--
         out.push(line.slice(0, i))
         line = line.slice(i)
       }

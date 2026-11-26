@@ -1,3 +1,4 @@
+import type { UIService } from '../ui'
 /**
  * 标签的类型（004 第 5.7 节）。实体标签的属性是六个保留属性，加每个系统积木名对应的可选覆盖。
  * M1：系统标签之外的名字也放行（索引签名），游戏自写的积木名、预制件名不报错；
@@ -74,7 +75,12 @@ export interface UIBoxProps {
   grow?: number
   pad?: number | [number, number] | [number, number, number, number]
   hidden?: boolean
+  /** 不透明度 0 到 1，乘到自身与全部子孙上 */
+  opacity?: number
 }
+
+/** 字重 100 到 900（优先于 bold） */
+export type UIWeight = number | 'normal' | 'bold'
 
 export interface UIContainerProps extends UIBoxProps {
   gap?: number
@@ -93,6 +99,11 @@ export interface TextProps extends UIBoxProps {
   size?: number
   color?: Color
   bold?: boolean
+  weight?: UIWeight
+  /** 字距，单位 em */
+  spacing?: number
+  /** 1 像素投影 */
+  shadow?: boolean
   wrap?: boolean
   align?: 'left' | 'center' | 'right'
   children?: PotChild
@@ -102,13 +113,40 @@ export interface ButtonProps extends UIBoxProps {
   emit?: string
   payload?: any
   onPress?: () => void
+  /** 指针移入时调一次 */
+  onHover?: () => void
   disabled?: boolean
   size?: number
   bold?: boolean
+  weight?: UIWeight
+  spacing?: number
+  shadow?: boolean
   color?: Color
+  hoverColor?: Color
   bg?: Color
+  /** 悬停时的底色；不写时在 bg 上叠一层白 */
+  hoverBg?: Color
+  border?: Color | { color: Color; width?: number }
   radius?: number
   children?: PotChild
+}
+
+export interface SliderProps extends UIBoxProps {
+  value: number
+  min?: number
+  max?: number
+  /** 步长：方向键每次的增减（缺省为范围的 1/20）；给了时拖动也对齐 */
+  step?: number
+  onChange?: (value: number) => void
+  disabled?: boolean
+  color?: Color
+  bg?: Color
+  knob?: Color
+}
+
+export interface CanvasProps extends UIBoxProps {
+  /** d 为 ctx.ui；box.alpha 为沿树累乘的 opacity */
+  draw: (d: UIService, box: { x: number; y: number; w: number; h: number; alpha: number }) => void
 }
 
 export interface BarProps extends UIBoxProps {
@@ -152,5 +190,7 @@ export interface PotIntrinsicElements {
   bar: BarProps
   image: ImageProps
   input: InputProps
+  slider: SliderProps
+  canvas: CanvasProps
   [tag: string]: any
 }
