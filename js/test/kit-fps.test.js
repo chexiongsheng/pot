@@ -435,6 +435,138 @@ test('gunFps：view 模式由表现层射线查部件登记，经 emitUI 回写 
   assert.deepEqual(g.w.vars.hits[2], [u, 3, 26, false])
 })
 
+// ---------------------------------------------------------------- gunFps
+
+const GUN_LOG = `w.on('gunFired', (w, p) => { (w.vars.fired ??= []).push([p.entity.id, p.shot]) })
+  w.on('gunHit', (w, p) => { (w.vars.hits ??= []).push({ by: p.entity.id, target: p.target.id, weak: p.weak, damage: p.damage, shot: p.shot }) })`
+
+test('gunFps world 模式：按住开火按射速出弹，命中碰撞体当步发 gunHit；写 moveFps.aim 与 cameraFps.kick', async () => {
+  const tree = `<entity key="p" moveFps cameraFps gunFps={{ hitscan: 'world' }} />
+    <entity key="t" at={[0, 1.6, 6]} body={{ size: [1.2, 1.2, 1.2] }} />`
+  const g = await start(tree, GUN_LOG)
+  const gun = () => g.at('p').b.gunFps
+  steps(g.runtime, 2)
+  assert.equal(gun().mag, 30)
+  assert.equal(gun().reserve, 150)
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 30)
+  g.engine.keys.delete('mouse0')
+  steps(g.runtime, 1)
+  // 720 发每分钟：0.5 秒 6 发（首发立即，之后每 5 步一发）
+  assert.equal(gun().shots, 6)
+  assert.equal(gun().mag, 24)
+  assert.equal(g.w.vars.fired.length, 6)
+  assert.deepEqual(g.w.vars.fired.map((f) => f[1]), [1, 2, 3, 4, 5, 6])
+  const hits = g.w.vars.hits
+  assert.equal(hits.length, 6, '全部命中')
+  assert.ok(hits.every((h) => h.target === g.at('t').id && h.damage === 26 && !h.weak))
+  assert.ok(gun().fired.every((s) => s.r === 1))
+  assert.ok(gun().recoilP < 0, '后坐向上')
+  assert.deepEqual(g.at('p').b.cameraFps.kick, [gun().recoilP, gun().recoilY])
+  assert.ok(gun().bloom > 0)
+  // 松开后后坐与 bloom 回落
+  steps(g.runtime, 120)
+  assert.ok(Math.abs(gun().recoilP) < 0.01)
+  assert.equal(gun().bloom, 0)
+  // 开镜
+  g.engine.keys.add('mouse1')
+  steps(g.runtime, 12)
+  assert.equal(gun().ads, 1)
+  assert.equal(g.at('p').b.moveFps.aim, 1)
+  g.engine.keys.delete('mouse1')
+  steps(g.runtime, 12)
+  assert.equal(gun().ads, 0)
+})
+
+test('gunFps：打空锁枪机、空仓扣扳机开始换弹，补弹与枪机复位按时刻；没有备弹时只记空仓', async () => {
+  const g = await start('<entity key="p" moveFps gunFps={{ magSize: 2, reserveStart: 3 }} />', GUN_LOG)
+  const gun = () => g.at('p').b.gunFps
+  steps(g.runtime, 1)
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 6)
+  assert.equal(gun().mag, 0)
+  assert.equal(gun().boltLocked, true)
+  steps(g.runtime, 1)
+  assert.equal(gun().reloading, true, '空仓扣扳机开始换弹')
+  assert.equal(gun().reloadTotal, 2.72)
+  assert.equal(gun().reloads, 1)
+  g.engine.keys.delete('mouse0')
+  steps(g.runtime, 82)
+  assert.equal(gun().mag, 2, '1.345 秒补弹')
+  assert.equal(gun().reserve, 1)
+  assert.equal(gun().boltLocked, true, '空仓换弹到拉机柄才复位')
+  steps(g.runtime, 51)
+  assert.equal(gun().boltLocked, false)
+  assert.equal(gun().reloading, true)
+  steps(g.runtime, 32)
+  assert.equal(gun().reloading, false)
+  // 满弹匣按 r 不换；打一发后按 r 是战术换弹
+  tap(g, 'r')
+  assert.equal(gun().reloading, false)
+  tap(g, 'mouse0')
+  assert.equal(gun().mag, 1)
+  tap(g, 'r')
+  assert.equal(gun().reloadTotal, 2.1)
+  steps(g.runtime, 130)
+  assert.equal(gun().mag, 2)
+  assert.equal(gun().reserve, 0)
+  // 没有备弹：打空后再扣扳机只记空仓
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 10)
+  g.engine.keys.delete('mouse0')
+  steps(g.runtime, 1)
+  tap(g, 'mouse0')
+  assert.equal(gun().mag, 0)
+  assert.equal(gun().reloading, false)
+  assert.equal(gun().dry, 1, '按住打空不算，再按一次才算')
+  assert.equal(g.w.vars.hits, undefined, '没有目标')
+})
+
+test('gunFps：active 为假或生命归零时不开火', async () => {
+  const g = await start('<entity key="a" moveFps gunFps /><entity key="b" at={[3, 0, 0]} moveFps health gunFps />', GUN_LOG)
+  steps(g.runtime, 1)
+  g.at('a').b.gunFps.active = false
+  globalThis.fpsDamage(g.w, g.at('b'), 1000)
+  g.engine.keys.add('mouse0')
+  steps(g.runtime, 10)
+  assert.equal(g.at('a').b.gunFps.shots, 0)
+  assert.equal(g.at('b').b.gunFps.shots, 0)
+  assert.equal(g.at('a').b.gunFps.trigger, false)
+})
+
+test('gunFps view 模式：表现层射线打中登记的部件，经 emitUI 回写，下一步发 gunHit（弱点乘倍率）；伪造与重复的报告被拒', async () => {
+  const tree = `<entity key="p" moveFps gunFps={{ hitscan: 'view', weakMultiplier: 2.2 }} />
+    <entity key="t" at={[0, 1.6, 6]} hitbox={{ tag: 'weak' }} />`
+  const g = await start(tree, GUN_LOG)
+  const gun = () => g.at('p').b.gunFps
+  steps(g.runtime, 1)
+  const [box] = g.engine.byName('hitbox')
+  assert.ok(box)
+  g.engine.nextHit = { id: box.id, point: [0, 1.7, 5.4], normal: [0, 0, -1], distance: 5.4 }
+  tap(g, 'mouse0')
+  assert.equal(gun().shots, 1)
+  assert.equal(g.w.vars.hits, undefined, '当步没有命中')
+  steps(g.runtime, 2)
+  const hits = g.w.vars.hits
+  assert.equal(hits.length, 1)
+  assert.deepEqual(hits[0], { by: g.at('p').id, target: g.at('t').id, weak: true, damage: 26 * 2.2, shot: 1 })
+  assert.equal(gun().fired[0].r, 1)
+  g.engine.nextHit = null
+  // 重复的报告、不在环里的发序号、打自己、超出射程：都不发 gunHit
+  const p = g.at('p').id, t = g.at('t').id
+  g.w.emitUI('gunReport', { entity: p, shot: 1, target: t, weak: false, point: [0, 1.7, 5.4], normal: [0, 0, -1] })
+  g.w.emitUI('gunReport', { entity: p, shot: 99, target: t, weak: false, point: [0, 1.7, 5.4], normal: [0, 0, -1] })
+  steps(g.runtime, 10)
+  assert.equal(g.w.vars.hits.length, 1)
+  tap(g, 'mouse0')
+  g.w.emitUI('gunReport', { entity: p, shot: 2, target: p, weak: false, point: [0, 1.7, 5.4], normal: [0, 0, -1] })
+  g.w.emitUI('gunReport', { entity: p, shot: 2, target: t, weak: false, point: [0, 1.7, 900], normal: [0, 0, -1] })
+  g.w.emitUI('gunReport', { entity: p, shot: 2, target: t, weak: false, point: 'x', normal: [0, 0, -1] })
+  steps(g.runtime, 3)
+  assert.equal(g.w.vars.hits.length, 1)
+  assert.equal(gun().shots, 2)
+})
+
 // ---------------------------------------------------------------- AI
 
 test('aiChase：看得见就追到 stopAt 以内；隔墙看不见不动', async () => {
