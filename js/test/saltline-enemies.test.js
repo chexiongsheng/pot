@@ -10,24 +10,35 @@ const { startGame, readGameFiles } = require('./helpers')
 
 const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 
-/** 测试入口：GAME 状态固定为 playing，加载碰撞、玩家与敌人单元，导出几个探针 */
+/** 测试入口：GAME 状态固定为 playing，用 src/parts 组装关卡碰撞、玩家与敌人，导出几个探针 */
 function files() {
   const f = readGameFiles(GAME_DIR)
   f.set('manifest.json', JSON.stringify({ id: 'saltline.enemies', plugins: ['probe'] }))
-  f.set('src/plugins/probe.ts', `
-import type { Context } from '@pot/core'
+  f.set('src/plugins/probe.tsx', `
+import { defineGame } from '@pot/core'
+import fps from '@pot/kit/fps'
 import { GAME, player } from '../lib/types'
 import { emit } from '../lib/bus'
-export const name = 'probe'
-export async function apply(ctx: Context) {
-  const g = ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', resume: 'playing', pending: [], stats: { shots: 0, hits: 0, kills: 0, weak: 0 }, relays: [], settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
-  for (const u of ['collision', 'player', 'enemies']) await ctx.use(u)
-  ;(globalThis as any).slProbe = {
-    g, player: () => player(ctx), w: () => ctx.world as any,
-    spawn: (type: string, pos: number[], pursuit = false) => emit(ctx, 'saltline/spawn', type as any, pos as any, pursuit),
-    clear: () => emit(ctx, 'saltline/clear-enemies'),
-  }
-}`)
+import { LevelColliders } from '../parts/level'
+import { Player, playerBlocks, wirePlayer } from '../parts/player'
+import { enemyBlocks, enemyPrefabs, wireEnemies } from '../parts/enemies'
+export default defineGame({
+  kits: [fps],
+  vars: { tokenGap: 0 },
+  blocks: [...playerBlocks, ...enemyBlocks],
+  prefabs: enemyPrefabs,
+  load: (ctx) => {
+    const g = ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', resume: 'playing', pending: [], stats: { shots: 0, hits: 0, kills: 0, weak: 0 }, relays: [], settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
+    wirePlayer(ctx)
+    wireEnemies(ctx)
+    ;(globalThis as any).slProbe = {
+      g, player: () => player(ctx), w: () => ctx.world as any,
+      spawn: (type: string, pos: number[], pursuit = false) => emit(ctx, 'saltline/spawn', type as any, pos as any, pursuit),
+      clear: () => emit(ctx, 'saltline/clear-enemies'),
+    }
+  },
+  scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
+})`)
   return f
 }
 

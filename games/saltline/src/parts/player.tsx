@@ -1,15 +1,16 @@
-/** 玩家：移动、相机、生命用 fps 套件；这里是阶段控制、音效、受伤反馈与落水救援 */
-import { defineBlock, defineGame, type Context } from '@pot/core'
-import fps, { damage } from '@pot/kit/fps'
+/**
+ * 玩家：移动、相机、生命用 fps 套件；这里是阶段控制、音效、受伤反馈与落水救援。
+ * 只导出定义（积木、Player 组件），由 game.tsx 组装；wirePlayer 是过渡期的事件接线，第 6 步删除。
+ */
+import { defineBlock, type Context, type SceneArgs } from '@pot/core'
+import { damage } from '@pot/kit/fps'
 import { on, emit } from '../lib/bus'
 import { levelBoxes } from '@pot/kit/harbor/physics'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { game, playerEntity, weapon } from '../lib/types'
 
-export const name = 'player'
-
-/** 积木的 step 拿不到单元的 ctx：apply 时记下 */
+/** 积木的 step 拿不到单元的 ctx：wirePlayer 时记下（过渡，第 6 步去掉） */
 let host: Context
 let T: any
 
@@ -61,24 +62,23 @@ const slFeedback = defineBlock({
   },
 })
 
-const unit = defineGame({
-  kits: [fps],
-  blocks: [slControl, slFeedback],
-  scene: ({ data }) => {
-    const { fov, fovAds, fovSprint, bobX, bobY, regenDelay, regenRate, maxHealth, seaY, rescueDamage, ...move } = data.load('tuning.json').player
-    const level = data.load<LevelData>('level.json')
-    const { start } = levelPoints(level), { bounds, groundMaxX } = levelBoxes(level)
-    return <entity key="player" tags={['player']} at={[...start.pos]} rot={[0, start.yaw, 0]} slControl slFeedback
-      moveFps={{ ...move, layers: ['default', 'playerWall'], ground: { y: 0, maxX: groundMaxX }, bounds: bounds ?? null }}
-      cameraFps={{ fov, fovAds, fovSprint, bobX, bobY, lockCursor: false }}
-      health={{ max: maxHealth, regen: regenRate, regenDelay }} />
-  },
-})
+export const playerBlocks = [slControl, slFeedback]
 
-export function apply(ctx: Context) {
+/** 玩家实体：出生点与朝向来自关卡，手感参数来自 tuning.json 的 player */
+export function Player({ data }: { data: SceneArgs['data'] }) {
+  const { fov, fovAds, fovSprint, bobX, bobY, regenDelay, regenRate, maxHealth, seaY, rescueDamage, ...move } = data.load('tuning.json').player
+  const level = data.load<LevelData>('level.json')
+  const { start } = levelPoints(level), { bounds, groundMaxX } = levelBoxes(level)
+  return <entity key="player" tags={['player']} at={[...start.pos]} rot={[0, start.yaw, 0]} slControl slFeedback
+    moveFps={{ ...move, layers: ['default', 'playerWall'], ground: { y: 0, maxX: groundMaxX }, bounds: bounds ?? null }}
+    cameraFps={{ fov, fovAds, fovSprint, bobX, bobY, lockCursor: false }}
+    health={{ max: maxHealth, regen: regenRate, regenDelay }} />
+}
+
+/** 过渡期接线（第 6 步改为 rules 后删除）：记下 ctx，处理 reset、damage-player，按武器后坐写相机 kick */
+export function wirePlayer(ctx: Context) {
   host = ctx
   T = ctx.data.load('tuning.json').player
-  unit.apply(ctx)
   const start = levelPoints(ctx.data.load<LevelData>('level.json')).start
 
   on(ctx, 'saltline/reset', () => {

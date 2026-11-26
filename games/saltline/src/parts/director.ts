@@ -1,4 +1,4 @@
-/** 游戏入口：挂载各单元，负责阶段状态机、标题镜头、中继交互、波次生成、撤离与评级 */
+/** 导演（过渡，第 6 步改为 flow、rules）：阶段状态机、标题镜头、中继交互、波次生成、撤离 */
 import type { Context, Vec3 } from '@pot/core'
 import { emit, on } from '../lib/bus'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
@@ -6,36 +6,31 @@ import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '@pot/kit/realis
 import { sfx } from '@pot/kit/realistic/sfx'
 import { foes, GAME, player, type EnemyType, type GameState, type Phase } from '../lib/types'
 
-export const name = 'game'
+type Points = ReturnType<typeof levelPoints>
 
-export async function apply(ctx: Context) {
-  const flow = ctx.data.load('flow.json')
-  const level = ctx.data.load<LevelData>('level.json')
-  const points = levelPoints(level)
-  const relayCount = points.relays.length
-
-  const fresh = (settings?: GameState['settings']): GameState => ({
+/** 新一局的 GAME 状态（设置沿用） */
+export function freshGame(points: Points, settings?: GameState['settings']): GameState {
+  return {
     phase: 'title', resume: 'playing', phaseTime: 0, time: 0, retries: 0,
     relays: points.relays.map(() => 'live'), interact: -1, progress: 0, hint: -1, alerted: false,
     stats: { shots: 0, hits: 0, kills: 0, weak: 0 },
     settings: settings ?? { sensitivity: 1, invertY: false, volume: 0.8, fov: 74, quality: 2 },
     panel: '', fade: 0, titleT: 0, pending: [], pursuitT: 0, pursuitSpawned: 0, lowWarned: false, seed: 1,
-  })
-  const g = ctx.state.define<GameState>(GAME, { version: 1, init: () => fresh() })
-
-  // 分阶段加载：逐个 await 子单元，期间让帧并回报进度（Runner 显示加载界面）
-  const stages: [string, string, number][] = [
-    ['world', '加载场景', 0], ['collision', '加载碰撞', 0.75], ['player', '加载角色', 0.76], ['weapon', '加载武器', 0.8],
-    ['enemies', '加载敌人', 0.9], ['hud', '加载界面', 0.97], ['menu', '加载菜单', 0.99],
-  ]
-  for (let i = 0; i < stages.length; i++) {
-    const [unit, text, progress] = stages[i]
-    await ctx.loading.step(text, progress)
-    // 子单元若用 defineGame 的 load 或启动预热，进度落在本阶段区间内
-    ctx.loading.within(progress, stages[i + 1]?.[2] ?? 1)
-    await ctx.use(unit)
   }
-  ctx.loading.within(0, 1)
+}
+
+/** 定义 GAME 状态：要在挂载渲染、武器、界面等低层单元之前 */
+export function defineGameState(ctx: Context) {
+  const points = levelPoints(ctx.data.load<LevelData>('level.json'))
+  return ctx.state.define<GameState>(GAME, { version: 1, init: () => freshGame(points) })
+}
+
+/** 导演逻辑：在所有低层单元挂载之后调用（update 处理器排在最后） */
+export function director(ctx: Context, g: GameState) {
+  const flow = ctx.data.load('flow.json')
+  const points = levelPoints(ctx.data.load<LevelData>('level.json'))
+  const relayCount = points.relays.length
+  const fresh = (settings?: GameState['settings']) => freshGame(points, settings)
 
   const cutCount = () => g.relays.filter((r) => r === 'cut').length
   const aliveCount = () => foes(ctx).filter((e) => e.mode !== 'dying').length + g.pending.length

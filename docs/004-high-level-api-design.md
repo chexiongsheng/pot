@@ -1692,6 +1692,7 @@ M3 收尾（遗留问题）：
 
 - 低层新增 `ctx.loading.within(lo, hi)`：设置接下来加载的单元可用的进度区间（绝对值），`begin` 时重置为 `[0, 1]`。由多个单元组成、自己报进度的父单元（如 saltline 的 game）在每个 `ctx.use(子单元)` 前调用；只有一个 `defineGame` 单元的游戏不用管。
 - `defineGame` 单元在开始 apply 时读取区间：有 `load` 且有 `scene` 时，`load` 占前 80%、预热占后 20%；只有其中一项时独占整个区间。apply 开始时场景还没挂载，不知道要预热多少实体，所以按有无 `scene` 划分；场景里没有带表现的实体时，后 20% 由下一次回报补齐。
+- `load` 的 `step(text, p, until?)`：给了 `until` 时，还把接下来在 `load` 里 `ctx.use` 的子单元区间设为本单元内 `p..until` 映射后的绝对区间（相当于替调用者换算好再调 `within`）；`load` 结束后恢复为本单元的区间。游戏入口本身是 `defineGame`、又在 `load` 里挂低层子单元时用它（saltline 第 4 步起的 game.tsx），不必自己换算 80% 的分配。热重载时同样设置区间，只是不回报、不让帧。
 
 约束：
 
@@ -2071,3 +2072,13 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 验收：`npm test` 277/278（仅 pot_gfx 一致性），玩家金标准与敌人回归不变；`pot check`、`pot test` 通过；`pot build` 引入 fps、harbor、mech、realistic 四个套件、复制 26 个套件资源；Runner 实机开局画面与迁移前一致（`shots/m35s3-play.png`），无新错误。
 - 技术债：`orig/port.ts` 是原版整段关卡代码（约 305KB），先放 realistic，第 8 步按场景与通用部分再拆；音效名仍是 `saltline.<名字>`；`palette` 暂留游戏，第 9 步随界面处理；`kits.json` 从约 28KB 涨到约 900KB（port 与 three-geo 占大头），它随 com.pot.core 进每个发布包，第 10 步要让发布包只带用到的套件或干脆不带 `kits.json`（发布构建本来就把套件代码打进 bundle）。
 
+
+第 4 步（单一 defineGame）：
+
+- `src/plugins/game.tsx` 是唯一的 `defineGame`：`kits` 为 `fps`、`realistic`、`harbor`、`mech`，`blocks`、`prefabs`、`vars.tokenGap` 来自 `src/parts`；`scene` 先放 `<LevelColliders>` 再放 `<Player>`。顺序必须如此：`w.move` 按实体 id 升序处理候选，关卡盒先建、玩家后建，id 顺序才与迁移前（collision 单元先挂）一致，金标准才逐步不变。
+- `src/parts`：`level.tsx`（关卡碰撞盒的函数组件）、`player.tsx`（`slControl`、`slFeedback` 与 `Player` 组件）、`enemies.tsx`（四个积木、四个预制件）、`director.ts`（原 game.ts 的导演逻辑，拆成 `defineGameState` 与 `director`）。`player`、`enemies` 的模块级 `host` 和事件接线暂时保留为 `wirePlayer`、`wireEnemies`，在 `load` 里调用；第 5、6 步改成 19.3 B 的写法后删除。
+- 架构调整：`load` 的 `step(text, p, until?)` 加第三个参数（见 17.13）。入口本身是 `defineGame`、又要在 `load` 里挂低层子单元时，不加它就得手算 `within` 的绝对区间。
+- 顺序约束：`GAME` 状态要在挂载 world、weapon、hud、menu 之前定义（它们 apply 时就读），导演的 update 要在它们之后注册（迁移前 game 单元在最后挂子单元之后才注册处理器），所以导演拆成两个函数分别放在 `load` 的首尾。
+- 两个回归测试的入口改为 `defineGame` 组装同样的 parts，不再 `ctx.use('collision')` 等。
+- 验收：`npm test` 278/279（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归 5 例不变；`tsc`、`pot check`、`pot test`（hash 3fb0ba35）通过。Runner 实机：挂载单元只剩 `game`，关卡盒 559 个、玩家 1 个，开局画面与第 3 步一致（`shots/s4-start.png`）；改 `parts/player.tsx` 触发“热重载 game”，玩家实体 id 与生命保留，无新错误。热重载后阶段变成 paused，是 Runner 窗口在后台时导演的“失焦自动暂停”，迁移前即如此。
+- 字节数：游戏 `plugins` + `parts` 共 127153 字节（game.tsx 1579，parts 47382，仍是低层单元的 world、weapon、hud、menu 78192）。这一步只是重组，不追求变小。

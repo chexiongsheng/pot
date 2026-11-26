@@ -1,10 +1,11 @@
 /**
  * 敌人：机械飞鸥（空中）与机械猎犬（地面）。
  * 模拟是积木：slFoe（感知、警戒、攻击令牌与开火）、slGull（飞行、避障、坠毁）、slHound（地面移动、扑击、倒地）、slBolt（弹道）。
- * 这个单元另有表现：按实体建、拆模型，驱动原版动画、特效，以及子弹命中的部件映射。
+ * wireEnemies 另有表现：按实体建、拆模型，驱动原版动画、特效，以及子弹命中的部件映射（过渡，第 5 步移入 mech 套件）。
+ * 只导出定义，由 game.tsx 组装。
  */
-import { defineBlock, defineGame, definePrefab, type Context, type Entity, type Vec3 } from '@pot/core'
-import fps, { damage } from '@pot/kit/fps'
+import { defineBlock, definePrefab, type Context, type Entity, type Vec3 } from '@pot/core'
+import { damage } from '@pot/kit/fps'
 import { emit, on } from '../lib/bus'
 import type { LevelData } from '@pot/kit/harbor/level'
 import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, RAD, segmentDistance, sub, yawOf } from '@pot/kit/realistic/math'
@@ -15,11 +16,9 @@ import { createMats, type Mats } from '@pot/kit/realistic/mats'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { chestOf, eyeOf, game, player, type EnemyType, type PlayerState } from '../lib/types'
 
-export const name = 'enemies'
-
 type Mode = 'patrol' | 'combat' | 'search' | 'dying'
 
-/** 积木的 step 拿不到单元的 ctx：apply 时记下 */
+/** 积木的 step 拿不到单元的 ctx：wireEnemies 时记下（过渡，第 5 步去掉） */
 let host: Context
 let TU: any
 let groundMaxX = 30
@@ -438,26 +437,24 @@ const slBolt = defineBlock({
   },
 })
 
-const unit = defineGame({
-  kits: [fps],
-  vars: { tokenGap: 0 },
-  blocks: [slFoe, slGull, slHound, slBolt],
-  prefabs: [
-    definePrefab('gull', { tags: ['enemy'], about: '机械飞鸥', slFoe: { kind: 'gull' }, slGull: true, health: true }),
-    definePrefab('hound', { tags: ['enemy'], about: '机械猎犬', slFoe: { kind: 'hound' }, slHound: true, health: true }),
-    definePrefab('bolt', { about: '敌人弹道', slBolt: true }),
-    definePrefab('boom', { about: '爆炸火球（只是表现）', lifetime: { seconds: 0.6 } }),
-  ],
-})
+/** 敌人积木；用到 game.tsx 的 vars.tokenGap（攻击令牌间隔） */
+export const enemyBlocks = [slFoe, slGull, slHound, slBolt]
+
+export const enemyPrefabs = [
+  definePrefab('gull', { tags: ['enemy'], about: '机械飞鸥', slFoe: { kind: 'gull' }, slGull: true, health: true }),
+  definePrefab('hound', { tags: ['enemy'], about: '机械猎犬', slFoe: { kind: 'hound' }, slHound: true, health: true }),
+  definePrefab('bolt', { about: '敌人弹道', slBolt: true }),
+  definePrefab('boom', { about: '爆炸火球（只是表现）', lifetime: { seconds: 0.6 } }),
+]
 
 /** 表现侧每个敌人的记录 */
 interface Look { m: EnemyModel; dead: boolean; fired: number; smokeT: number }
 
-export function apply(ctx: Context) {
+/** 过渡期接线：记下 ctx，建模型与特效池，处理 spawn、clear-enemies、shot、bullet 事件 */
+export function wireEnemies(ctx: Context) {
   host = ctx
   TU = ctx.data.load('tuning.json')
   groundMaxX = ctx.data.load<LevelData>('level.json').quay.X
-  unit.apply(ctx)
   const w: any = ctx.world
   const { scene } = ctx
   const looks = new Map<number, Look>()

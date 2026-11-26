@@ -97,6 +97,32 @@ test('loading.within：父单元给子单元划区间；非法区间报错', asy
   assert.throws(() => runtime.loading.within(-0.1, 0.2), /0 <= lo <= hi <= 1/)
 })
 
+test('load：step 的第三个参数给 ctx.use 的子单元划区间，load 结束后恢复', async () => {
+  const map = files({ budget: 0 })
+  map.set(GAME, `import { defineGame } from '@pot/core'
+export default defineGame({
+  load: async (ctx, step) => {
+    ctx.loading.budget = 0
+    await step('挂子单元', 0.25, 0.5)
+    await ctx.use('child')
+    ctx.logger('t').info('window ' + ctx.loading.window.join(','))
+  },
+  scene: () => <entity key="a" at={[0, 0, 0]} shape={{ kind: 'cube' }} />,
+})
+`)
+  map.set('src/plugins/child.tsx', `import { defineGame } from '@pot/core'
+export default defineGame({ load: async (_ctx, step) => { await step('子读数据', 0.5) } })
+`)
+  const { runtime, reports, host } = await startFramed(map)
+  assert.deepEqual(runtime.failures, [])
+  const find = (text) => reports.find(([, t]) => t === text)
+  assert.ok(Math.abs(find('挂子单元')[0] - 0.2) < 1e-9)
+  // 子单元区间为 0.2..0.4，没有 scene，load 独占：0.5 → 0.3
+  assert.ok(Math.abs(find('子读数据')[0] - 0.3) < 1e-9)
+  assert.ok(infos(host).includes('window 0.2,0.4'))
+  assert.deepEqual(runtime.loading.window, [0, 1])
+})
+
 test('load：热重载时重跑、不让帧，实体保留', async () => {
   const ctx = await startFramed(files())
   const { runtime, host } = ctx

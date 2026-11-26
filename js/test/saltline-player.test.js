@@ -15,20 +15,26 @@ const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 const FIXTURE = path.join(__dirname, 'fixtures/saltline-player.json')
 const STEPS = 840
 
-/** 测试入口单元：只放 GAME 状态（阶段固定为 playing），再按顺序加载玩家相关的单元 */
+/** 测试入口单元：只放 GAME 状态（阶段固定为 playing），用 src/parts 组装关卡碰撞与玩家 */
 function goldenFiles() {
   const files = readGameFiles(GAME_DIR)
-  const units = ['collision', 'player'].filter((u) => files.has(`src/plugins/${u}.ts`) || files.has(`src/plugins/${u}.tsx`))
   files.set('manifest.json', JSON.stringify({ id: 'saltline.golden', plugins: ['golden'] }))
-  files.set('src/plugins/golden.ts', `
-import type { Context } from '@pot/core'
+  files.set('src/plugins/golden.tsx', `
+import { defineGame } from '@pot/core'
+import fps from '@pot/kit/fps'
 import { GAME, player } from '../lib/types'
-export const name = 'golden'
-export async function apply(ctx: Context) {
-  ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
-  for (const u of ${JSON.stringify(units)}) await ctx.use(u)
-  ;(globalThis as any).slPlayer = () => player(ctx)
-}`)
+import { LevelColliders } from '../parts/level'
+import { Player, playerBlocks, wirePlayer } from '../parts/player'
+export default defineGame({
+  kits: [fps],
+  blocks: playerBlocks,
+  load: (ctx) => {
+    ctx.state.define(GAME, { version: 1, init: () => ({ phase: 'playing', settings: { sensitivity: 1, invertY: false, volume: 0, fov: 74, quality: 0 } }) })
+    wirePlayer(ctx)
+    ;(globalThis as any).slPlayer = () => player(ctx)
+  },
+  scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
+})`)
   return files
 }
 

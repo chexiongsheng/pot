@@ -57,9 +57,9 @@ export interface GameDef<V extends Record<string, any> = Record<string, any>> {
   /**
    * 预载（004 第 17.13 节）：在登记积木、vars 之后、挂载场景之前执行，用来预读数据、模型、编译材质。
    * step(文字, 0..1) 报本单元内的进度并在启动加载期按预算让帧。热重载时也会执行（不让帧），应可重复执行；
-   * 不要自己等帧。
+   * 不要自己等帧。step 的第三个参数 until 给接下来 ctx.use 的子单元划出本单元内 progress..until 的区间。
    */
-  load?: (ctx: Context, step: (text: string, progress?: number) => Promise<void>) => void | Promise<void>
+  load?: (ctx: Context, step: (text: string, progress?: number, until?: number) => Promise<void>) => void | Promise<void>
   /** 世界里有什么：返回标签树，挂到 ctx.world 上 */
   scene?: (s: SceneArgs) => PotChild
   /** 屏幕上画什么：每帧求值，画到 ctx.ui */
@@ -207,15 +207,22 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
       }
 
       if (!def.load) return finish()
-      const step = (text: string, progress = 0) => {
+      const toAbs = (v: unknown) => lo + (mid - lo) * Math.min(1, Math.max(0, Number(v) || 0))
+      const step = (text: string, progress = 0, until?: number) => {
+        const p = toAbs(progress)
+        // 给子单元划区间：load 里接下来 ctx.use 的单元落在 p..until 内（17.13）
+        if (until !== undefined) loading.within(p, Math.max(p, toAbs(until)))
         // 热重载时不让帧：回收与重新 apply 之间不能插进固定步（15.6）
         if (!starting || !loading.active) return Promise.resolve()
-        const p = Math.min(1, Math.max(0, Number(progress) || 0))
-        return loading.step(text, lo + (mid - lo) * p)
+        return loading.step(text, p)
+      }
+      const done = () => {
+        loading.within(lo, hi)
+        return finish()
       }
       const loaded = def.load(ctx, step)
-      if (loaded && typeof (loaded as any).then === 'function') return (loaded as Promise<void>).then(finish)
-      return finish()
+      if (loaded && typeof (loaded as any).then === 'function') return (loaded as Promise<void>).then(done)
+      return done()
     },
   }
 }

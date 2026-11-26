@@ -11369,14 +11369,20 @@ TS：${r.layout.text}
           if (starting && scene && loading.active) return warm();
         };
         if (!def.load) return finish();
-        const step = (text, progress = 0) => {
+        const toAbs = (v) => lo + (mid - lo) * Math.min(1, Math.max(0, Number(v) || 0));
+        const step = (text, progress = 0, until) => {
+          const p = toAbs(progress);
+          if (until !== void 0) loading.within(p, Math.max(p, toAbs(until)));
           if (!starting || !loading.active) return Promise.resolve();
-          const p = Math.min(1, Math.max(0, Number(progress) || 0));
-          return loading.step(text, lo + (mid - lo) * p);
+          return loading.step(text, p);
+        };
+        const done = () => {
+          loading.within(lo, hi);
+          return finish();
         };
         const loaded = def.load(ctx, step);
-        if (loaded && typeof loaded.then === "function") return loaded.then(finish);
-        return finish();
+        if (loaded && typeof loaded.then === "function") return loaded.then(done);
+        return done();
       }
     };
   }
