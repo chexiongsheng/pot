@@ -240,6 +240,8 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
   // ---- 逐帧 ----
   let cssW = 0, cssH = 0, ratio = 0
   let last = performance.now()
+  /** 着色器时间（_Time.y，秒） */
+  let clock = 0
   let frame = 0
   let stopped = false
   const resize = () => {
@@ -271,7 +273,8 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
       if (!failed) fail(error)
     }
     host.particles.update(dt)
-    renderer.render(scene, glCanvas.width, glCanvas.height, host.particles)
+    clock += dt
+    renderer.render(scene, glCanvas.width, glCanvas.height, host.particles, clock)
     const cam = scene.objects.get(CAMERA_ID)
     if (cam) {
       const q = scene.worldRotation(cam)

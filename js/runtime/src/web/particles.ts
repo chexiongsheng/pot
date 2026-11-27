@@ -6,7 +6,7 @@
  * 本文件不碰 WebGL：gl.ts 每帧读取 pools 画四边形。
  */
 import type { RaycastResult } from '../host'
-import { srgbToLinear } from './math'
+import { hdrToLinear } from './math'
 
 export type ParticleKind = 'spark' | 'glow' | 'smoke'
 
@@ -100,11 +100,6 @@ interface BurstCfg {
   sizeJitter: number
   life: number
   lifeJitter: number
-}
-
-/** PotScene.HdrToLinear：分量 ≤ 1 按 sRGB 解码，大于 1 按 2.2 次幂 */
-function hdrToLinear(x: number): number {
-  return x <= 0 ? 0 : x <= 1 ? srgbToLinear(x) : Math.pow(x, 2.2)
 }
 
 function num(v: unknown, d: number): number {

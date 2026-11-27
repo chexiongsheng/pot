@@ -155,6 +155,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     audioVolume: (volume) => audio.setVolume(volume),
     audioPause: (paused) => audio.pause(paused),
     burst: (json) => particles.burst(json),
+    render: (kind, json) => scene.render.configure(kind, json),
   }
   scene.warn = (text) => log('warn', text)
   scene.textures.error = (text) => log('error', text)

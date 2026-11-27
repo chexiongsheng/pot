@@ -8,6 +8,7 @@ import {
   quatToEuler, transformPoint,
 } from './math'
 import { WebMeshes } from './mesh'
+import { WebRenderConfig } from './render'
 import { WebTextures } from './texture'
 
 export const CAMERA_ID = 1
@@ -70,7 +71,7 @@ export interface WebEnvironment {
   near: number
   far: number
   fog: { color: V3; density: number }
-  ambient: { mode: 'flat' | 'trilight'; color: V3; sky: V3; equator: V3; ground: V3; reflection: number }
+  ambient: { mode: 'flat' | 'trilight' | 'sky'; color: V3; sky: V3; equator: V3; ground: V3; reflection: number }
   /** 主平行光（RenderSettings.sun）；0 表示无 */
   sun: number
 }
@@ -114,6 +115,8 @@ export class WebScene {
   /** 由 JS 像素创建的贴图（texture 返回的 id） */
   readonly textures = new WebTextures()
   env: WebEnvironment = defaultEnvironment()
+  /** 渲染配置（engine.render：sky、fog、weather、reflection、quality、post） */
+  readonly render = new WebRenderConfig()
   /** 任一局部变换或层级变化时加一，世界矩阵缓存据此失效 */
   version = 0
   /** 告警出口（宿主接到日志） */
@@ -122,6 +125,13 @@ export class WebScene {
 
   constructor() {
     this.objects.set(CAMERA_ID, this.makeCamera())
+    const r = this.render
+    r.onSkyAmbient = () => (this.env.ambient.mode = 'sky')
+    r.onReflectionIntensity = (v) => (this.env.ambient.reflection = v)
+    r.onFog = (color, density) => {
+      const f = this.env.fog
+      this.env.fog = { color: color ? [color[0], color[1], color[2]] : f.color, density: Number.isNaN(density) ? f.density : density }
+    }
   }
 
   private makeCamera(): WebObject {
@@ -212,6 +222,7 @@ export class WebScene {
     this.objects.clear()
     this.objects.set(CAMERA_ID, this.makeCamera())
     this.env = defaultEnvironment()
+    this.render.reset()
     this.meshes.clear()
     this.textures.clear()
     this.version++

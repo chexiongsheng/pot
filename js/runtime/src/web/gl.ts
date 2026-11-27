@@ -11,14 +11,169 @@ import type { MeshSkinData } from './mesh'
 import type { WebTexture } from './texture'
 import { WebObject, WebScene } from './scene'
 import { kindCurve, MAX_PARTICLES, PARTICLE_KINDS, WebParticles } from './particles'
+import { SkyConfig, SkyInputs, skySH } from './render'
 
 const MAX_LIGHTS = 8
 /** 材质贴图单元：0 _MainTex、1 _BumpMap、2 _MaskMap */
 const UNIT_MAIN = 0
 const UNIT_BUMP = 1
 const UNIT_MASK = 2
+/** 环境反射立方体（sky 的实时反射探针） */
+const UNIT_ENV = 3
 /** 骨骼矩阵贴图占用的纹理单元（0 起留给材质贴图） */
 const BONE_UNIT = 7
+
+/**
+ * 片元着色器公共部分（PotCommon.hlsl）：全局雾（颜色为线性，exp2 雾、高度衰减、太阳散射）、噪声与 sRGB 输出。
+ * 放在 precision 声明之后。
+ */
+const COMMON = `
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+uniform float uFogHeight;
+uniform float uFogBase;
+uniform float uFogSun;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+vec3 toSRGB(vec3 c) {
+  c = max(c, vec3(0.0));
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+float potHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float potNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = potHash(i);
+  float b = potHash(i + vec2(1.0, 0.0));
+  float c = potHash(i + vec2(0.0, 1.0));
+  float d = potHash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float potFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * potNoise(p);
+    p = p * 2.03 + 17.1;
+    a *= 0.5;
+  }
+  return v / 0.9375;
+}
+vec3 potFogColorFor(vec3 v) {
+  float s = pow(clamp(dot(v, uSunDir), 0.0, 1.0), 8.0);
+  return uFogColor + uSunColor * (uFogSun * s);
+}
+float potFogTransmittance(vec3 pos, vec3 cam) {
+  if (uFogDensity <= 0.0) return 1.0;
+  vec3 d = pos - cam;
+  float od = uFogDensity * length(d);
+  if (uFogHeight > 0.0) {
+    float k = uFogHeight;
+    float f = exp(-k * max(cam.y - uFogBase, -20.0));
+    float kdy = k * d.y;
+    float t = abs(kdy) > 1e-3 ? (1.0 - exp(-kdy)) / kdy : 1.0;
+    od *= f * t;
+  }
+  return exp(-od * od);
+}
+vec3 potApplyFog(vec3 color, vec3 pos, vec3 cam) {
+  float t = potFogTransmittance(pos, cam);
+  if (t >= 1.0) return color;
+  return mix(potFogColorFor(normalize(pos - cam)), color, t);
+}
+`
+
+/** 全屏三角形（不需要顶点缓冲） */
+const FULLSCREEN_VS = `#version 300 es
+out vec2 vNdc;
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)) * 2.0 - 1.0;
+  vNdc = p;
+  gl_Position = vec4(p, 1.0, 1.0);
+}`
+
+/** PotSky.shader：方向 = uFwd + ndc.x·uRight + ndc.y·uUp；uRaw 为 1 时输出线性 HDR（拍反射立方体） */
+const SKY_FS = `#version 300 es
+precision highp float;
+${COMMON}
+in vec2 vNdc;
+uniform vec3 uFwd;
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform int uRaw;
+uniform float uTime;
+uniform vec3 uZenith;
+uniform vec3 uHorizon;
+uniform vec3 uHorizonAway;
+uniform vec3 uGround;
+uniform vec3 uSkySun;
+uniform float uSunSize;
+uniform float uSunGlow;
+uniform float uClouds;
+uniform vec3 uCloudColor;
+uniform float uCloudSpeed;
+uniform float uHorizonFog;
+uniform float uExposure;
+out vec4 outColor;
+float cloudFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += a * potNoise(p);
+    p = p * 2.07 + vec2(13.7, 7.3);
+    a *= 0.5;
+  }
+  return v;
+}
+void main() {
+  vec3 d = normalize(uFwd + vNdc.x * uRight + vNdc.y * uUp);
+  vec3 s = normalize(uSunDir + vec3(0.0, 1e-4, 0.0));
+  float h = d.y;
+  vec2 dh = normalize(d.xz + 1e-5);
+  vec2 sh = normalize(s.xz + 1e-5);
+  float towards = dot(dh, sh) * 0.5 + 0.5;
+  vec3 horizon = mix(uHorizonAway, uHorizon, smoothstep(0.2, 1.0, towards));
+  float up = clamp(h, 0.0, 1.0);
+  vec3 col = mix(horizon, uZenith, pow(up, 0.45));
+  col = mix(col, uGround, clamp(-h * 5.0, 0.0, 1.0));
+  float mu = dot(d, s);
+  float smu = clamp(mu, 0.0, 1.0);
+  float glow = 0.18 * pow(smu, 4.0) + 0.45 * pow(smu, 32.0) + 1.2 * pow(smu, 400.0);
+  col += uSkySun * glow * uSunGlow * (0.4 + 0.6 * clamp(1.0 - h * 2.0, 0.0, 1.0));
+  float disc = smoothstep(cos(uSunSize * 1.25), cos(uSunSize), mu);
+  if (uClouds > 0.001 && h > -0.02) {
+    vec2 cp = d.xz / (max(h, 0.0) + 0.12) * 0.9 + uTime * uCloudSpeed * vec2(1.0, 0.35);
+    float c = cloudFbm(cp);
+    float cov = smoothstep(1.0 - uClouds, 1.0 - uClouds + 0.3, c) * smoothstep(-0.02, 0.15, h);
+    float thick = smoothstep(1.0 - uClouds, 1.1, c);
+    vec3 lit = uCloudColor * (0.7 + 0.3 * up) + uSkySun * 0.12 * pow(smu, 3.0);
+    vec3 dark = uCloudColor * 0.55;
+    vec3 cc = mix(lit, dark, thick * 0.7);
+    cc += uSkySun * 0.35 * pow(smu, 12.0) * (1.0 - thick);
+    col = mix(col, cc, cov * 0.92);
+    disc *= 1.0 - clamp(cov * 1.5, 0.0, 1.0);
+  }
+  col += uSkySun * disc * 25.0;
+  float fogAmt = exp(-max(h, 0.0) * 9.0) * uHorizonFog;
+  col = mix(col, potFogColorFor(d), clamp(fogAmt, 0.0, 1.0) * step(0.0001, uFogDensity));
+  col *= uExposure;
+  outColor = uRaw == 1 ? vec4(col, 1.0) : vec4(toSRGB(col), 1.0);
+}`
+
+/** 立方体贴图各面（GL 约定）：前向、s 轴、t 轴 */
+const CUBE_FACES: [number[], number[], number[]][] = [
+  [[1, 0, 0], [0, 0, -1], [0, -1, 0]],
+  [[-1, 0, 0], [0, 0, 1], [0, -1, 0]],
+  [[0, 1, 0], [1, 0, 0], [0, 0, 1]],
+  [[0, -1, 0], [1, 0, 0], [0, 0, -1]],
+  [[0, 0, 1], [1, 0, 0], [0, -1, 0]],
+  [[0, 0, -1], [-1, 0, 0], [0, -1, 0]],
+]
 
 const VS = `#version 300 es
 layout(location = 0) in vec3 aPos;
@@ -70,6 +225,7 @@ void main() {
 
 const FS = `#version 300 es
 precision highp float;
+${COMMON}
 in vec3 vWorld;
 in vec3 vNormal;
 in vec2 vUV;
@@ -110,19 +266,28 @@ uniform vec2 uLightSpot[${MAX_LIGHTS}];
 uniform vec3 uAmbSky;
 uniform vec3 uAmbEquator;
 uniform vec3 uAmbGround;
+uniform int uAmbMode;
+uniform vec3 uSH[9];
 uniform float uReflection;
-uniform vec3 uFogColor;
-uniform float uFogDensity;
+uniform int uEnvOn;
+uniform samplerCube uEnvMap;
 out vec4 outColor;
 
-vec3 toSRGB(vec3 c) {
-  c = max(c, vec3(0.0));
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
-
 vec3 ambientFor(vec3 n) {
+  if (uAmbMode == 1) {
+    // 天空球谐（render.ts skySH 的系数）
+    vec3 c = uSH[0] + uSH[1] * n.y + uSH[2] * n.z + uSH[3] * n.x + uSH[4] * (n.x * n.y) + uSH[5] * (n.y * n.z)
+      + uSH[6] * (3.0 * n.z * n.z - 1.0) + uSH[7] * (n.x * n.z) + uSH[8] * (n.x * n.x - n.y * n.y);
+    return max(c, vec3(0.0));
+  }
   float y = clamp(n.y, -1.0, 1.0);
   return y >= 0.0 ? mix(uAmbEquator, uAmbSky, y) : mix(uAmbEquator, uAmbGround, -y);
+}
+
+/** URP GlossyEnvironmentReflection：有反射探针时按粗糙度取 mip（PerceptualRoughnessToMipmapLevel，6 级） */
+vec3 envReflection(vec3 r, float perceptualRoughness) {
+  if (uEnvOn == 1) return textureLod(uEnvMap, r, perceptualRoughness * (1.7 - 0.7 * perceptualRoughness) * 6.0).rgb;
+  return ambientFor(r) * uReflection;
 }
 
 vec3 directBRDF(vec3 diffuse, vec3 specular, float r2, float normTerm, vec3 n, vec3 v, vec3 L, vec3 radiance) {
@@ -133,12 +298,6 @@ vec3 directBRDF(vec3 diffuse, vec3 specular, float r2, float normTerm, vec3 n, v
   float d = NoH * NoH * (r2 - 1.0) + 1.00001;
   float specTerm = r2 / ((d * d) * max(0.1, LoH * LoH) * normTerm);
   return (diffuse + specular * specTerm) * radiance;
-}
-
-float fogTransmittance() {
-  if (uFogDensity <= 0.0) return 1.0;
-  float od = uFogDensity * length(vWorld - uCamPos);
-  return exp(-od * od);
 }
 
 vec3 potUnpack(vec4 t) {
@@ -239,7 +398,7 @@ void main() {
     float NoV = clamp(dot(n, v), 0.0, 1.0);
     float x = 1.0 - NoV;
     float fres = x * x * x * x;
-    vec3 refl = ambientFor(reflect(-v, n)) * uReflection;
+    vec3 refl = envReflection(reflect(-v, n), pr);
     // 遮罩 AO 只作用于间接光（URP indirectAmbientOcclusion）
     color = (ambientFor(n) * diffuse + refl * (1.0 / (r2 + 1.0)) * mix(specular, vec3(grazing), fres)) * occ;
     color += directBRDF(diffuse, specular, r2, normTerm, n, v, uMainDir, uMainColor * clamp(dot(n, uMainDir), 0.0, 1.0));
@@ -271,9 +430,8 @@ void main() {
     if (uCutoff > 0.0 && base.a < uCutoff) discard;
     color = base.rgb + uEmission;
   }
-  float t = fogTransmittance();
-  if (uFogMode == 2) color *= t;
-  else if (uFogMode == 1) color = mix(uFogColor, color, t);
+  if (uFogMode == 2) color *= potFogTransmittance(vWorld, uCamPos);
+  else if (uFogMode == 1) color = potApplyFog(color, vWorld, uCamPos);
   outColor = vec4(toSRGB(color), base.a);
 }`
 
@@ -295,33 +453,27 @@ void main() {
 
 const PARTICLE_FS = `#version 300 es
 precision highp float;
+${COMMON}
 in vec3 vWorld;
 in vec2 vUV;
 in vec4 vColor;
 uniform sampler2D uMainTex;
 uniform vec3 uCamPos;
 uniform int uFogMode;
-uniform vec3 uFogColor;
-uniform float uFogDensity;
 out vec4 outColor;
-vec3 toSRGB(vec3 c) {
-  c = max(c, vec3(0.0));
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
 void main() {
   vec4 base = texture(uMainTex, vUV) * vColor;
   vec3 color = base.rgb;
-  if (uFogDensity > 0.0) {
-    float od = uFogDensity * length(vWorld - uCamPos);
-    float t = exp(-od * od);
-    if (uFogMode == 2) color *= t;
-    else if (uFogMode == 1) color = mix(uFogColor, color, t);
-  }
+  if (uFogMode == 2) color *= potFogTransmittance(vWorld, uCamPos);
+  else if (uFogMode == 1) color = potApplyFog(color, vWorld, uCamPos);
   outColor = vec4(toSRGB(color), base.a);
 }`
 
 /** 粒子顶点：位置 3 + UV 2 + 颜色 4 */
 const PARTICLE_STRIDE = 9
+
+/** COMMON 里的全局量（每个程序都要设） */
+const GLOBAL_UNIFORMS = ['uFogColor', 'uFogDensity', 'uFogHeight', 'uFogBase', 'uFogSun', 'uSunDir', 'uSunColor']
 
 interface GpuMesh {
   vao: WebGLVertexArrayObject
@@ -412,6 +564,25 @@ export class WebRenderer {
   private pIbo: WebGLBuffer
   private pData = new Float32Array(MAX_PARTICLES * 4 * PARTICLE_STRIDE)
   private dotTex: WebGLTexture
+  private skyProgram: WebGLProgram
+  private sLoc: Record<string, WebGLUniformLocation | null> = {}
+  private emptyVao: WebGLVertexArrayObject
+  /** EXT_color_buffer_float：可渲染到 RGBA16F（反射立方体保留 HDR） */
+  private colorFloat: boolean
+  private envCube: WebGLTexture | null = null
+  private envCubeSize = 0
+  private envFbo: WebGLFramebuffer | null = null
+  private envSeen = -1
+  /** 天空球谐（27 个数）；null 表示环境光不取天空 */
+  private sh: Float32Array | null = null
+  /** 本帧的全局量（PotCommon.hlsl 的 _PotFog*、_PotSun*，以及 _Time.y） */
+  private frame = {
+    fogColor: [0, 0, 0] as [number, number, number],
+    fogDensity: 0, fogHeight: 0, fogBase: 0, fogSun: 0,
+    sunDir: [0, 1, 0] as [number, number, number],
+    sunColor: [0, 0, 0] as [number, number, number],
+    time: 0,
+  }
   private static readonly IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
   private static readonly IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])
   private static readonly TILING = [1, 1, 0, 0]
@@ -429,6 +600,7 @@ export class WebRenderer {
       'uAmbSky', 'uAmbEquator', 'uAmbGround', 'uReflection', 'uFogColor', 'uFogDensity', 'uVColor', 'uSkinned', 'uBones',
       'uMainTex', 'uBumpMap', 'uMaskMap', 'uTiling', 'uUVMode', 'uHasBump', 'uHasMask', 'uBumpScale', 'uOcclusion', 'uRest',
       'uOddNeg', 'uObjScale',
+      'uFogHeight', 'uFogBase', 'uFogSun', 'uSunDir', 'uSunColor', 'uAmbMode', 'uSH', 'uEnvOn', 'uEnvMap',
     ]
     for (const n of names) this.loc[n] = gl.getUniformLocation(this.program, n)
     // 未启用的顶点属性取常量：没 UV 为 0，没顶点色为白，没切线为 +X，没蒙皮为骨骼 0 权重 1
@@ -451,6 +623,7 @@ export class WebRenderer {
     gl.uniform1i(this.loc.uMainTex, UNIT_MAIN)
     gl.uniform1i(this.loc.uBumpMap, UNIT_BUMP)
     gl.uniform1i(this.loc.uMaskMap, UNIT_MASK)
+    gl.uniform1i(this.loc.uEnvMap, UNIT_ENV)
     this.white = this.solid(255, 255, 255, 255)
     this.flatBump = this.solid(128, 128, 255, 255)
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
@@ -458,7 +631,7 @@ export class WebRenderer {
 
     // ---- 粒子 ----
     this.pProgram = this.link(PARTICLE_VS, PARTICLE_FS)
-    for (const n of ['uViewProj', 'uMainTex', 'uCamPos', 'uFogMode', 'uFogColor', 'uFogDensity']) this.pLoc[n] = gl.getUniformLocation(this.pProgram, n)
+    for (const n of ['uViewProj', 'uMainTex', 'uCamPos', 'uFogMode', ...GLOBAL_UNIFORMS]) this.pLoc[n] = gl.getUniformLocation(this.pProgram, n)
     gl.useProgram(this.pProgram)
     gl.uniform1i(this.pLoc.uMainTex, UNIT_MAIN)
     gl.useProgram(this.program)
@@ -481,6 +654,14 @@ export class WebRenderer {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW)
     gl.bindVertexArray(null)
     this.dotTex = this.dotTexture()
+
+    // ---- 天空 ----
+    this.skyProgram = this.link(FULLSCREEN_VS, SKY_FS)
+    for (const n of ['uFwd', 'uRight', 'uUp', 'uRaw', 'uTime', 'uZenith', 'uHorizon', 'uHorizonAway', 'uGround', 'uSkySun', 'uSunSize', 'uSunGlow',
+      'uClouds', 'uCloudColor', 'uCloudSpeed', 'uHorizonFog', 'uExposure', ...GLOBAL_UNIFORMS]) this.sLoc[n] = gl.getUniformLocation(this.skyProgram, n)
+    this.emptyVao = gl.createVertexArray()!
+    this.colorFloat = !!gl.getExtension('EXT_color_buffer_float')
+    gl.useProgram(this.program)
   }
 
   /** PotRender.DotTexture：64×64 圆点，a = smoothstep(1 − d)，线性、带 mipmap、clamp */
@@ -688,12 +869,14 @@ export class WebRenderer {
     for (const b of m.buffers) gl.deleteBuffer(b)
   }
 
-  /** 画一帧到当前绑定的默认帧缓冲；width、height 为绘图缓冲像素尺寸 */
-  render(scene: WebScene, width: number, height: number, particles: WebParticles | null = null): void {
+  /** 画一帧到当前绑定的默认帧缓冲；width、height 为绘图缓冲像素尺寸，time 为秒（_Time.y） */
+  render(scene: WebScene, width: number, height: number, particles: WebParticles | null = null, time = 0): void {
     const gl = this.gl
     const env = scene.env
     width = Math.max(1, width | 0)
     height = Math.max(1, height | 0)
+    this.updateFrame(scene, time)
+    this.captureEnvironment(scene)
     gl.viewport(0, 0, width, height)
     gl.clearColor(env.background[0], env.background[1], env.background[2], 1)
     gl.depthMask(true)
@@ -708,6 +891,19 @@ export class WebRenderer {
     this.lastWidth = width
     this.lastHeight = height
     const camPos = [camWorld[12], camWorld[13], camWorld[14]]
+
+    const sky = scene.render.sky
+    if (sky) {
+      // 天空盒：方向 = 前 + ndc.x·右·tan(fov/2)·aspect + ndc.y·上·tan(fov/2)
+      const ty = Math.tan((env.fov * Math.PI) / 360)
+      const tx = ty * (width / height)
+      const axis = (i: number, k: number) => {
+        const x = camWorld[i], y = camWorld[i + 1], z = camWorld[i + 2]
+        const l = Math.hypot(x, y, z) || 1
+        return [(x / l) * k, (y / l) * k, (z / l) * k]
+      }
+      this.drawSky(sky, axis(8, 1), axis(0, tx), axis(4, ty), false)
+    }
 
     gl.useProgram(this.program)
     if (this.texs.size) this.sweepTextures(scene)
@@ -745,21 +941,141 @@ export class WebRenderer {
   }
 
   /**
+   * 本帧全局量：雾色（scene.env.fog，sRGB 转线性）、密度、高度雾（scene.render.fog）；
+   * 太阳照 PotRender.SyncSun：主方向光的 −forward 与线性颜色 × 强度，没有时为 (0,1,0) 与黑。
+   */
+  private updateFrame(scene: WebScene, time: number): void {
+    const f = this.frame
+    const env = scene.env
+    f.fogColor = lin3(env.fog.color)
+    f.fogDensity = env.fog.density
+    f.fogHeight = scene.render.fog.height
+    f.fogBase = scene.render.fog.base
+    f.fogSun = scene.render.fog.sun
+    f.time = time
+    const main = scene.mainLight()
+    if (main?.light && main.light.type === 'directional') {
+      const d = rotateVector(scene.worldRotation(main), [0, 0, 1])
+      f.sunDir = [-d[0], -d[1], -d[2]]
+      f.sunColor = lin3(main.light.color, main.light.intensity)
+    } else {
+      f.sunDir = [0, 1, 0]
+      f.sunColor = [0, 0, 0]
+    }
+  }
+
+  /** 把本帧全局量设到当前程序 */
+  private globals(L: Record<string, WebGLUniformLocation | null>): void {
+    const gl = this.gl
+    const f = this.frame
+    gl.uniform3fv(L.uFogColor, f.fogColor)
+    gl.uniform1f(L.uFogDensity, f.fogDensity)
+    gl.uniform1f(L.uFogHeight, f.fogHeight)
+    gl.uniform1f(L.uFogBase, f.fogBase)
+    gl.uniform1f(L.uFogSun, f.fogSun)
+    gl.uniform3fv(L.uSunDir, f.sunDir)
+    gl.uniform3fv(L.uSunColor, f.sunColor)
+  }
+
+  /** 全屏画程序化天空（PotSky.shader）；raw 为 true 时输出线性 HDR（拍反射立方体） */
+  private drawSky(sky: SkyConfig, fwd: number[], right: number[], up: number[], raw: boolean): void {
+    const gl = this.gl
+    const L = this.sLoc
+    gl.useProgram(this.skyProgram)
+    this.globals(L)
+    gl.uniform3fv(L.uFwd, fwd)
+    gl.uniform3fv(L.uRight, right)
+    gl.uniform3fv(L.uUp, up)
+    gl.uniform1i(L.uRaw, raw ? 1 : 0)
+    gl.uniform1f(L.uTime, this.frame.time)
+    gl.uniform3fv(L.uZenith, lin3(sky.zenith))
+    gl.uniform3fv(L.uHorizon, lin3(sky.horizon))
+    gl.uniform3fv(L.uHorizonAway, lin3(sky.horizonAway))
+    gl.uniform3fv(L.uGround, lin3(sky.ground))
+    gl.uniform3fv(L.uCloudColor, lin3(sky.cloudColor))
+    gl.uniform3fv(L.uSkySun, sky.sun)
+    gl.uniform1f(L.uSunSize, sky.sunSize)
+    gl.uniform1f(L.uSunGlow, sky.sunGlow)
+    gl.uniform1f(L.uClouds, sky.clouds)
+    gl.uniform1f(L.uCloudSpeed, sky.cloudSpeed)
+    gl.uniform1f(L.uHorizonFog, sky.horizonFog)
+    gl.uniform1f(L.uExposure, sky.exposure)
+    gl.disable(gl.DEPTH_TEST)
+    gl.disable(gl.BLEND)
+    gl.disable(gl.CULL_FACE)
+    gl.depthMask(false)
+    gl.bindVertexArray(this.emptyVao)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+    gl.bindVertexArray(null)
+  }
+
+  /**
+   * sky / refresh 之后（envVersion 变化）重新捕捉：环境光球谐（DynamicGI.UpdateEnvironment）与
+   * 反射探针立方体（只拍天空，6 面各画一次天空后 generateMipmap；粗糙反射按 mip 取，没有 GGX 预滤波）。
+   */
+  private captureEnvironment(scene: WebScene): void {
+    const r = scene.render
+    if (r.envVersion === this.envSeen) return
+    this.envSeen = r.envVersion
+    const gl = this.gl
+    const sky = r.sky
+    const f = this.frame
+    if (sky && r.skyAmbient) {
+      const inp: SkyInputs = {
+        sky, sunDir: f.sunDir, fogColor: f.fogColor, fogDensity: f.fogDensity, fogSun: f.fogSun, sunColor: f.sunColor, time: f.time,
+      }
+      this.sh = skySH(inp)
+    } else this.sh = null
+
+    if (!sky || !r.probe) {
+      if (this.envCube) gl.deleteTexture(this.envCube)
+      this.envCube = null
+      this.envCubeSize = 0
+      return
+    }
+    const size = r.probe.size
+    gl.activeTexture(gl.TEXTURE0 + UNIT_ENV)
+    if (!this.envCube || this.envCubeSize !== size) {
+      if (this.envCube) gl.deleteTexture(this.envCube)
+      this.envCube = gl.createTexture()!
+      this.envCubeSize = size
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.envCube)
+      const levels = Math.floor(Math.log2(size)) + 1
+      gl.texStorage2D(gl.TEXTURE_CUBE_MAP, levels, this.colorFloat ? gl.RGBA16F : gl.RGBA8, size, size)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    }
+    this.envFbo ??= gl.createFramebuffer()!
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.envFbo)
+    gl.viewport(0, 0, size, size)
+    for (let i = 0; i < 6; i++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, this.envCube, 0)
+      const [fwd, s, t] = CUBE_FACES[i]
+      this.drawSky(sky, fwd, s, t, true)
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    gl.activeTexture(gl.TEXTURE0 + UNIT_ENV)
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.envCube)
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP)
+    gl.activeTexture(gl.TEXTURE0)
+  }
+
+  /**
    * 粒子（渲染队列 3100，不写深度、不剔除）：smoke 先画（alpha 混合），spark、glow 后画（加色）。
    * billboard 朝相机平面；spark 为 Stretch：沿速度在屏幕上的投影拉伸，长 = size + |v|·velocityScale。
    */
   private drawParticles(scene: WebScene, particles: WebParticles, camWorld: ArrayLike<number>): void {
     const gl = this.gl
     const L = this.pLoc
-    const env = scene.env
     const rx = camWorld[0], ry = camWorld[1], rz = camWorld[2]
     const ux = camWorld[4], uy = camWorld[5], uz = camWorld[6]
     const cx = camWorld[12], cy = camWorld[13], cz = camWorld[14]
     gl.useProgram(this.pProgram)
     gl.uniformMatrix4fv(L.uViewProj, false, this.viewProj)
     gl.uniform3f(L.uCamPos, cx, cy, cz)
-    gl.uniform3fv(L.uFogColor, lin3(env.fog.color))
-    gl.uniform1f(L.uFogDensity, env.fog.density)
+    this.globals(L)
     this.bindUnit(UNIT_MAIN, this.dotTex)
     gl.disable(gl.CULL_FACE)
     gl.bindVertexArray(this.pVao)
@@ -841,8 +1157,17 @@ export class WebRenderer {
       gl.uniform3fv(L.uAmbGround, c)
     }
     gl.uniform1f(L.uReflection, a.reflection)
-    gl.uniform3fv(L.uFogColor, lin3(env.fog.color))
-    gl.uniform1f(L.uFogDensity, env.fog.density)
+    this.globals(L)
+    if (a.mode === 'sky' && this.sh) {
+      gl.uniform1i(L.uAmbMode, 1)
+      gl.uniform3fv(L.uSH, this.sh)
+    } else gl.uniform1i(L.uAmbMode, 0)
+    gl.uniform1i(L.uEnvOn, this.envCube ? 1 : 0)
+    if (this.envCube) {
+      gl.activeTexture(gl.TEXTURE0 + UNIT_ENV)
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.envCube)
+      gl.activeTexture(gl.TEXTURE0)
+    }
 
     const main = scene.mainLight()
     if (main?.light) {
@@ -964,6 +1289,12 @@ export class WebRenderer {
     gl.deleteBuffer(this.pVbo)
     gl.deleteBuffer(this.pIbo)
     gl.deleteProgram(this.pProgram)
+    gl.deleteProgram(this.skyProgram)
+    gl.deleteVertexArray(this.emptyVao)
+    if (this.envCube) gl.deleteTexture(this.envCube)
+    if (this.envFbo) gl.deleteFramebuffer(this.envFbo)
+    this.envCube = null
+    this.envFbo = null
     gl.deleteProgram(this.program)
   }
 }

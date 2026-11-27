@@ -246,3 +246,8 @@ export function viewFromCamera(world: ArrayLike<number>, out: M4 = new Float32Ar
 export function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
 }
+
+/** PotScene.HdrToLinear（Unity Color.linear）：分量 ≤ 1 按 sRGB 解码，大于 1 按 2.2 次幂 */
+export function hdrToLinear(x: number): number {
+  return x <= 0 ? 0 : x <= 1 ? srgbToLinear(x) : Math.pow(x, 2.2)
+}
