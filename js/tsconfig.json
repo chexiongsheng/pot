@@ -20,5 +20,6 @@
       "@pot/kit/*": ["../kits/*"]
     }
   },
-  "include": ["runtime/src", "devtools/src", "../games/*/src", "../kits"]
+  "include": ["runtime/src", "devtools/src", "../games/*/src", "../kits"],
+  "exclude": ["runtime/src/web"]
 }

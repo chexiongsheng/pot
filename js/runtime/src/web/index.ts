@@ -1,9 +1,8 @@
-/**
- * Web 原生宿主（004 第 20 节）。build.js 把运行时核心与本模块一起打成 dist/web.js：
- * globalThis.pot 为运行时核心，本模块的导出在 pot.web 下。
- */
+/** Web 原生宿主（004 第 20 节）。build.js 把运行时核心与本模块一起打成 dist/web.js：globalThis.pot 为运行时核心，本模块的导出在 pot.web 下。 */
 export * from './math'
 export * from './scene'
 export * from './keys'
 export * from './input'
 export * from './ui'
+export * from './geometry'
+export * from './gl'
