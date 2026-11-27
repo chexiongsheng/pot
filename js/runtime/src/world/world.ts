@@ -16,7 +16,7 @@ import type { BlockDef } from './registry'
 import { evaluate } from './tree'
 import type { EntitySpec, RuleSpec, StageSpec, TreeResult } from './tree'
 import { applyPatches, mergePatches, treeView } from './inspect'
-import type { VarsOf } from './types'
+import type { BlockDataOf, VarsOf } from './types'
 import { BodyTable, bodyCollider, bodyEntry, overlappingPairs } from './collide'
 import type { BodyEntry, Collider, Mover, MoveOptions, MoveResult, OverlapShape } from './collide'
 import { WorldView } from './view'
@@ -48,7 +48,7 @@ export interface EntityData {
   rot: Vec3
   scale: Vec3
   /** 每个积木一个对象：属性与状态放在一起（me） */
-  b: Record<string, Record<string, any>>
+  b: BlockDataOf
   /** w.spawn 的覆盖参数，用于重建 */
   spawn?: Record<string, any>
 }
@@ -799,7 +799,7 @@ export class WorldService extends Service implements World {
     const id = data.nextId++
     const e: EntityData = {
       id, prefab: spec.prefab, mount, path, tags: [...spec.tags],
-      pos: [...spec.at], rot: [...spec.rot], scale: [...spec.scale], b: {},
+      pos: [...spec.at], rot: [...spec.rot], scale: [...spec.scale], b: {} as BlockDataOf,
     }
     if (spec.name !== undefined) e.name = spec.name
     for (const name of Object.keys(spec.blocks)) e.b[name] = this._blockData(name, spec.blocks[name])

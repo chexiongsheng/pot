@@ -45,6 +45,9 @@ export interface BlockDef<P extends object = Record<string, any>, S extends obje
   }
 }
 
+/** 积木在实体上的数据类型（e.b[name]，即钩子里的 me）：套件扩充 GameBlockData 时用，如 moveFps: BlockMe<typeof moveFps> */
+export type BlockMe<D> = D extends BlockDef<infer P, infer S> ? P & S : never
+
 export function defineBlock<P extends object = {}, S extends object = {}>(def: BlockDef<P, S>): BlockDef<P, S> {
   if (!def || typeof def.name !== 'string' || !IDENT.test(def.name)) {
     throw new Error(`defineBlock：积木名必须是小写开头的驼峰标识符，收到 ${JSON.stringify(def?.name)}`)

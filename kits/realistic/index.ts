@@ -17,7 +17,7 @@
  * 游戏驱动的后处理参数（受伤、低血量、开镜）用 setPostValues 写。beacon 是目标标记（光圈、光柱、点光）。
  */
 import { defineBlock, defineKit, parseColor } from '@pot/core'
-import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3 } from '@pot/core'
+import type { BlockMe, Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3 } from '@pot/core'
 import { viewGun } from './viewgun'
 import { viewFeedback, type ViewFeedbackProps } from './feedback'
 import { createPost, takePostValues, type PostFx } from './post'
@@ -406,6 +406,13 @@ declare module '@pot/core' {
     viewGun?: boolean | Record<string, never>
     viewFeedback?: Over<ViewFeedbackProps>
     beacon?: Over<typeof BEACON_PROPS>
+  }
+  interface GameBlockData {
+    atmosphere: BlockMe<typeof atmosphere>
+    surface: BlockMe<typeof surface>
+    viewGun: BlockMe<typeof viewGun>
+    viewFeedback: BlockMe<typeof viewFeedback>
+    beacon: BlockMe<typeof beacon>
   }
 }
 

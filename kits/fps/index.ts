@@ -6,7 +6,7 @@
  *   export default defineGame({ kits: [fps], ... })
  */
 import { defineBlock, defineKit, dmath } from '@pot/core'
-import type { EntityData, Over, Vec3, World } from '@pot/core'
+import type { BlockMe, EntityData, Over, Vec3, World } from '@pot/core'
 
 // ---------------------------------------------------------------- 小工具
 
@@ -715,6 +715,15 @@ declare module '@pot/core' {
     aiPatrol?: Over<{ points: Vec3[]; speed: number; wait: number; loop: boolean; arrive: number } & typeof AI_BODY>
     gunFps?: Over<typeof GUN_PROPS>
     feedbackFps?: Over<typeof FEEDBACK_PROPS>
+  }
+  interface GameBlockData {
+    moveFps: BlockMe<typeof moveFps>
+    cameraFps: BlockMe<typeof cameraFps>
+    health: BlockMe<typeof health>
+    aiChase: BlockMe<typeof aiChase>
+    aiPatrol: BlockMe<typeof aiPatrol>
+    gunFps: BlockMe<typeof gunFps>
+    feedbackFps: BlockMe<typeof feedbackFps>
   }
 }
 

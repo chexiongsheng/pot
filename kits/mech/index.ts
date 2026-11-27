@@ -11,10 +11,10 @@
  * 与 fps 的枪靠事件对接：gunHit 打中机甲时扣血并发 mechHurt { entity, kind, weak, killed, pos, damage, by }；gunFired 惊动听觉范围内的机甲。
  */
 import { defineKit } from '@pot/core'
-import type { Over, Vec3 } from '@pot/core'
+import type { BlockMe, Over, Vec3 } from '@pot/core'
 import fps from '@pot/kit/fps'
 import realistic from '@pot/kit/realistic'
-import { BOLT_PROPS, FOE_PROPS, GULL_PROPS, HOUND_PROPS, mechBlocks, mechPrefabs, onGunFired, onGunHit } from './foe'
+import { BOLT_PROPS, FOE_PROPS, GULL_PROPS, HOUND_PROPS, mechBlocks, mechBolt, mechFoe, mechGull, mechHound, mechPrefabs, onGunFired, onGunHit } from './foe'
 
 export { mechFoe, mechGull, mechHound, mechBolt, mechBoom, mechHit, mechHear, mechClear, type MechHit } from './foe'
 export { findTarget, eyeOf, chestOf, hpOf } from './target'
@@ -27,6 +27,12 @@ declare module '@pot/core' {
     mechHound?: Over<typeof HOUND_PROPS>
     mechBolt?: Over<typeof BOLT_PROPS & { vel: Vec3 }>
     mechBoom?: boolean
+  }
+  interface GameBlockData {
+    mechFoe: BlockMe<typeof mechFoe>
+    mechGull: BlockMe<typeof mechGull>
+    mechHound: BlockMe<typeof mechHound>
+    mechBolt: BlockMe<typeof mechBolt>
   }
 }
 

@@ -895,8 +895,8 @@ interface EntityData {
   path: string | null
   name?: string
   tags: string[]
-  pos: number[]; rot: number[]; scale: number[]
-  b: Record<string, Record<string, any>>   // 每个积木一个对象：属性与状态放在一起
+  pos: Vec3; rot: Vec3; scale: Vec3
+  b: BlockDataOf                           // 每个积木一个对象：属性与状态放在一起；类型见下
   spawn?: Record<string, any>              // w.spawn 的覆盖参数，用于重建
 }
 interface MountData {
@@ -904,7 +904,7 @@ interface MountData {
 }
 ```
 
-`me` 就是 `e.b[积木名]`。属性与状态放在同一个对象里，属性约定只读。不进 `state` 的东西放在 `WorldService` 的内存表里，丢了可以重建：按积木名的实体索引、上一步的变换（插值用）、表现对象、当前规则表、事件队列。冷重启后这些表从 `WorldData` 重建。
+`me` 就是 `e.b[积木名]`。属性与状态放在同一个对象里，属性约定只读。`e.b` 的类型 `BlockDataOf` 是 `BuiltinBlockData & GameBlockData & { [积木名: string]: Record<string, any> }`：系统积木与声明过的套件积木按名字带类型（`e.b.moveFps.walk` 是 `number`，字段写错会报错），其余积木名照旧放行。套件在 `declare module '@pot/core'` 里扩充 `GameBlockData`，值用 `BlockMe<typeof 积木>`（即 `props & state`）。字段不写可选：实体上有没有这个积木由调用方判断，可能没有时写 `e.b.moveFps as GameBlockData['moveFps'] | undefined` 或先查 `w.matches`。游戏自写的积木没有生成数据类型（运行时的缺省值推不出 `null` 起步的状态之类的类型），要跨积木读时自己扩充。不进 `state` 的东西放在 `WorldService` 的内存表里，丢了可以重建：按积木名的实体索引、上一步的变换（插值用）、表现对象、当前规则表、事件队列。冷重启后这些表从 `WorldData` 重建。
 
 `vars` 的合并：`defineGame` 的 `vars` 里有、`WorldData.vars` 里没有的键补上初值，已有的键保留。
 
@@ -2076,7 +2076,7 @@ D. 界面。`hud`、`menu` 从即时模式 `ctx.ui` 改为 `ui` 树；罗盘、�
 
 E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realistic`、`harbor`、`mech`，`blocks` 与 `prefabs` 列出 `src/parts` 的定义，`scene` 布置玩家、关卡、环境与导演实体，`ui` 组装界面。
 
-F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` 的 `enter`、`update`、`exit` 另有 `ctx` 与 `objs`。`e` 的类型是 `EntityData`，`pos`、`rot`、`scale` 为 `Vec3`；`w` 的类型是 `World`：给游戏代码（积木、规则的 `do`、流程的 `enter`、界面函数）用的接口，只有时间（`dt`、`tick`、`time`）、`vars`、`flow`、`overlayActive`、`rand`、`cmd`、实体增删查（`spawn`、`destroy`、`get`、`query`、`count`、`matches`）、物理查询（`move`、`raycast`、`overlap`）、事件（`on`、`emit`、`emitUI`）、`goto`、插值用的 `prev`、表现层的部件登记 `view`（`bindPart`、`unbindPart`、`partOf`）与作缓存键的 `registry`。`WorldService` 实现它；挂载、补丁、录制、指令来源、原生实现等框架内部能力不在里面，框架与开发工具照旧用 `WorldService`，游戏 `load` 里的 `ctx.world` 也还是它。`enter` 返回场景对象（`Entity`）、它们的数组或不返回，`objs` 是 `Entity[]`。起因：这些参数原来都是 `any`，导演里写错的 `w.down`（应为 `w.cmd().down`）类型检查发现不了，中继一直切不断。
+F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` 的 `enter`、`update`、`exit` 另有 `ctx` 与 `objs`。`e` 的类型是 `EntityData`，`pos`、`rot`、`scale` 为 `Vec3`；`w` 的类型是 `World`：给游戏代码（积木、规则的 `do`、流程的 `enter`、界面函数）用的接口，只有时间（`dt`、`tick`、`time`）、`vars`、`flow`、`overlayActive`、`rand`、`cmd`、实体增删查（`spawn`、`destroy`、`get`、`query`、`count`、`matches`）、物理查询（`move`、`raycast`、`overlap`）、事件（`on`、`emit`、`emitUI`）、`goto`、插值用的 `prev`、表现层的部件登记 `view`（`bindPart`、`unbindPart`、`partOf`）与作缓存键的 `registry`。`WorldService` 实现它；挂载、补丁、录制、指令来源、原生实现等框架内部能力不在里面，框架与开发工具照旧用 `WorldService`，游戏 `load` 里的 `ctx.world` 也还是它。`enter` 返回场景对象（`Entity`）、它们的数组或不返回，`objs` 是 `Entity[]`。`e.b` 按积木名带类型（第 6 节 `EntityData` 下的说明）：系统积木与套件积木是 `props & state`，套件用 `GameBlockData` 与 `BlockMe` 声明。起因：这些参数原来都是 `any`，导演里写错的 `w.down`（应为 `w.cmd().down`）类型检查发现不了，中继一直切不断。
 
 ### 19.4 步骤
 
@@ -2380,6 +2380,8 @@ F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` �
 - 验证：`npm test` 308/309（仅 pot_gfx 一致性）；其中 `pot check（defineGame 游戏）` 用例起初报了上面 `game.ts` 的转换错误（只有生成了 `GameVars` 的游戏才会触发），修后通过；`tsc`、saltline 的 `tsc`、`pot check` 通过；`pot test` 冒烟 hash 39eebbf5 不变（只改了类型）；玩家金标准、敌人回归、导演测试共 8 例通过。saltline 源码未改，字节数不变。
 
 第 18 步（辅助函数的类型）：套件与 saltline 里把 `w`、实体参数写成 `any` 的辅助函数（mech 的 `findTarget`、`eyeOf`、`mechHit`、`mechClear`、look 的动画函数，fps 的 `damage`、`walkTo`、`onGunReport`，realistic 的 viewgun、weather，saltline 的导演、`findPlayer`、`phaseOf`、`spawnFoe`、界面组件，框架的 `KitHandler`）改为 `World`、`EntityData`，`findTarget`、`findPlayer` 返回 `EntityData | undefined`。类型检查只多报了两处：`phaseOf` 把 flow 状态名当阶段返回（补 `as Phase`），`onGunReport` 没收窄 `shooter`（并进已有的判空）；没有发现新的错误调用。行为不变：`npm test` 308/309（仅 pot_gfx），两处 `tsc`、`pot check` 通过，冒烟 hash 39eebbf5 不变，三组 saltline 回归 8 例通过。
+
+第 19 步（`e.b` 按积木名带类型）：`types.ts` 新增可扩充的 `GameBlockData`、系统积木的 `BuiltinBlockData`，`EntityData.b` 改为 `BlockDataOf = BuiltinBlockData & GameBlockData & { [积木名: string]: Record<string, any> }`；`registry.ts` 新增 `BlockMe<D>`（从积木定义取 `props & state`）。fps、mech、realistic（含 weather）、harbor、topdown 各自扩充 `GameBlockData`，写成 `moveFps: BlockMe<typeof moveFps>`，没有出现循环推断。取舍：字段不写可选，否则现有的 `e.b.moveFps.x` 都要改；索引签名保留，游戏自写的积木名照旧放行（`pot check` 不生成数据类型：运行时缺省值推不出 `null` 起步的状态等类型，生成了反而误报）。框架里 `_create` 的 `b: {}` 补 `as BlockDataOf`，其余代码无需改动，类型检查没有报出错误访问。用临时文件确认：`e.b.moveFps.nope` 报不存在，字段类型不符报错，未声明的积木名不报。行为不变：`npm test` 308/309（仅 pot_gfx），两处 `tsc`、`pot check` 通过，冒烟 hash 39eebbf5 不变，回归 8 例通过。
 
 ### 19.6 后续：积木预览
 

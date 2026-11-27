@@ -8,6 +8,9 @@ import type { Vec3 } from '../host'
 import type { Color, Shape } from '../scene'
 import type { PotChild, Prefab } from './node'
 import type { World } from './world'
+import type { BlockMe } from './registry'
+import type * as blocks from './blocks'
+import type { body } from './blocks/body'
 
 /** 积木覆盖：对象为字段覆盖，true 用默认值，false / null 去掉 */
 export type Over<T> = Partial<T> | boolean | null
@@ -15,6 +18,27 @@ export type Over<T> = Partial<T> | boolean | null
 /** 游戏自写积木的属性覆盖：由 pot check / pot types 生成到 .pot/types.d.ts，以声明合并补进来 */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface GameBlockProps {}
+
+/**
+ * e.b 上各积木的数据类型（属性与状态合在一起，即钩子里的 me）：套件以声明合并补进来，
+ * 如 moveFps: BlockMe<typeof moveFps>。字段不写可选：实体上有没有这个积木由调用方判断（同改造前的 any）。
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface GameBlockData {}
+
+/** 系统积木在 e.b 上的数据类型 */
+export interface BuiltinBlockData {
+  shape: BlockMe<typeof blocks.shape>
+  spin: BlockMe<typeof blocks.spin>
+  trigger: BlockMe<typeof blocks.trigger>
+  lifetime: BlockMe<typeof blocks.lifetime>
+  projectile: BlockMe<typeof blocks.projectile>
+  light: BlockMe<typeof blocks.light>
+  body: BlockMe<typeof body>
+}
+
+/** e.b 的类型：声明过的积木按名字带类型，其余积木名放行 */
+export type BlockDataOf = BuiltinBlockData & GameBlockData & { [block: string]: Record<string, any> }
 
 /** w.vars 的类型：由 pot check / pot types 按运行时的 vars 生成 */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface

@@ -12,7 +12,7 @@
  * 原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，chunk / of 分份），由 <Harbor> 摆好。
  */
 import { defineKit } from '@pot/core'
-import type { Over, Vec3 } from '@pot/core'
+import type { BlockMe, Over, Vec3 } from '@pot/core'
 import realistic, { type GunEnv } from '@pot/kit/realistic'
 import { isPuddle } from './apron'
 import { surfaceAt } from '@pot/kit/realistic/decals'
@@ -48,6 +48,10 @@ declare module '@pot/core' {
   interface GameBlockProps {
     harborLook?: Over<HarborLookProps>
     harborStatics?: Over<HarborStaticsProps>
+  }
+  interface GameBlockData {
+    harborLook: BlockMe<typeof harborLook>
+    harborStatics: BlockMe<typeof harborStatics>
   }
 }
 

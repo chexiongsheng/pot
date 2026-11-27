@@ -6,7 +6,7 @@
  *   export default defineGame({ kits: [topdown], ... })
  */
 import { defineBlock, defineKit } from '@pot/core'
-import type { Over, Vec3 } from '@pot/core'
+import type { BlockMe, Over, Vec3 } from '@pot/core'
 
 /** 俯视角移动：读 move 轴，x 轴对应世界 x，y 轴对应世界 z */
 export const moveTopdown = defineBlock({
@@ -45,6 +45,10 @@ declare module '@pot/core' {
   interface GameBlockProps {
     moveTopdown?: Over<{ speed: number }>
     cameraFollow?: Over<{ offset: Vec3 }>
+  }
+  interface GameBlockData {
+    moveTopdown: BlockMe<typeof moveTopdown>
+    cameraFollow: BlockMe<typeof cameraFollow>
   }
 }
 
