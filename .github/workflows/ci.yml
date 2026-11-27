@@ -247,13 +247,14 @@ jobs:
         with:
           node-version: 22
 
-      # 与 Windows 相同的仓库脚本安装（macOS 镜像自带 pwsh）；不出 WebGL，只要 core / v8
+      # 与 Windows 相同的仓库脚本安装（macOS 镜像自带 pwsh）；player 工程的 manifest 引用了
+      # com.tencent.puerts.webgl，即便只出 macOS 包也必须在本地存在，否则 Unity 包解析直接失败
       - name: Install Puerts
         shell: pwsh
         run: |
           $src = Join-Path $env:RUNNER_TEMP 'puerts'
           New-Item -ItemType Directory -Force -Path $src | Out-Null
-          foreach ($n in 'Core', 'V8') {
+          foreach ($n in 'Core', 'V8', 'Webgl') {
             $file = Join-Path $env:RUNNER_TEMP "PuerTS_$n.tar.gz"
             curl -fsSL --retry 3 -o $file "https://github.com/Tencent/puerts/releases/download/Unity_v$env:PUERTS_VERSION/PuerTS_${n}_$env:PUERTS_VERSION.tar.gz"
             if ($LASTEXITCODE -ne 0) { throw "download PuerTS_$n failed" }
@@ -297,7 +298,7 @@ jobs:
         run: node js/devserver/cli.js native --platform macos --force --unity "$UNITY_EDITOR_PATH"
 
       - name: Diagnose Unity PluginAPI
-        if: ${{ failure() }}
+        if: ${{ failure() && steps.runner.outcome == 'skipped' && steps.webgl.outcome == 'skipped' }}
         shell: bash
         run: |
           app="${UNITY_EDITOR_PATH%%.app/*}.app"
