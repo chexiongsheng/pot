@@ -10,6 +10,7 @@ import { primitiveMesh } from './geometry'
 import type { MeshSkinData } from './mesh'
 import type { WebTexture } from './texture'
 import { WebObject, WebScene } from './scene'
+import { kindCurve, MAX_PARTICLES, PARTICLE_KINDS, WebParticles } from './particles'
 
 const MAX_LIGHTS = 8
 /** 材质贴图单元：0 _MainTex、1 _BumpMap、2 _MaskMap */
@@ -276,6 +277,52 @@ void main() {
   outColor = vec4(toSRGB(color), base.a);
 }`
 
+/** 粒子（PotUnlit + _VColor）：CPU 展开的四边形，位置在世界空间 */
+const PARTICLE_VS = `#version 300 es
+layout(location = 0) in vec3 aPos;
+layout(location = 2) in vec2 aUV;
+layout(location = 3) in vec4 aColor;
+uniform mat4 uViewProj;
+out vec3 vWorld;
+out vec2 vUV;
+out vec4 vColor;
+void main() {
+  vWorld = aPos;
+  vUV = aUV;
+  vColor = aColor;
+  gl_Position = uViewProj * vec4(aPos, 1.0);
+}`
+
+const PARTICLE_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec2 vUV;
+in vec4 vColor;
+uniform sampler2D uMainTex;
+uniform vec3 uCamPos;
+uniform int uFogMode;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+out vec4 outColor;
+vec3 toSRGB(vec3 c) {
+  c = max(c, vec3(0.0));
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+void main() {
+  vec4 base = texture(uMainTex, vUV) * vColor;
+  vec3 color = base.rgb;
+  if (uFogDensity > 0.0) {
+    float od = uFogDensity * length(vWorld - uCamPos);
+    float t = exp(-od * od);
+    if (uFogMode == 2) color *= t;
+    else if (uFogMode == 1) color = mix(uFogColor, color, t);
+  }
+  outColor = vec4(toSRGB(color), base.a);
+}`
+
+/** 粒子顶点：位置 3 + UV 2 + 颜色 4 */
+const PARTICLE_STRIDE = 9
+
 interface GpuMesh {
   vao: WebGLVertexArrayObject
   count: number
@@ -358,6 +405,13 @@ export class WebRenderer {
   private bound: (WebGLTexture | null)[] = [null, null, null]
   private anisoExt: any
   private maxAniso = 1
+  private pProgram: WebGLProgram
+  private pLoc: Record<string, WebGLUniformLocation | null> = {}
+  private pVao: WebGLVertexArrayObject
+  private pVbo: WebGLBuffer
+  private pIbo: WebGLBuffer
+  private pData = new Float32Array(MAX_PARTICLES * 4 * PARTICLE_STRIDE)
+  private dotTex: WebGLTexture
   private static readonly IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
   private static readonly IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])
   private static readonly TILING = [1, 1, 0, 0]
@@ -401,6 +455,58 @@ export class WebRenderer {
     this.flatBump = this.solid(128, 128, 255, 255)
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
     if (this.anisoExt) this.maxAniso = gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1
+
+    // ---- 粒子 ----
+    this.pProgram = this.link(PARTICLE_VS, PARTICLE_FS)
+    for (const n of ['uViewProj', 'uMainTex', 'uCamPos', 'uFogMode', 'uFogColor', 'uFogDensity']) this.pLoc[n] = gl.getUniformLocation(this.pProgram, n)
+    gl.useProgram(this.pProgram)
+    gl.uniform1i(this.pLoc.uMainTex, UNIT_MAIN)
+    gl.useProgram(this.program)
+    this.pVao = gl.createVertexArray()!
+    this.pVbo = gl.createBuffer()!
+    this.pIbo = gl.createBuffer()!
+    gl.bindVertexArray(this.pVao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pVbo)
+    gl.bufferData(gl.ARRAY_BUFFER, this.pData.byteLength, gl.DYNAMIC_DRAW)
+    const stride = PARTICLE_STRIDE * 4
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0)
+    gl.enableVertexAttribArray(2)
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 12)
+    gl.enableVertexAttribArray(3)
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, stride, 20)
+    const idx = new Uint16Array(MAX_PARTICLES * 6)
+    for (let i = 0; i < MAX_PARTICLES; i++) idx.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6)
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.pIbo)
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW)
+    gl.bindVertexArray(null)
+    this.dotTex = this.dotTexture()
+  }
+
+  /** PotRender.DotTexture：64×64 圆点，a = smoothstep(1 − d)，线性、带 mipmap、clamp */
+  private dotTexture(): WebGLTexture {
+    const gl = this.gl
+    const S = 64
+    const px = new Uint8Array(S * S * 4)
+    for (let y = 0; y < S; y++)
+      for (let x = 0; x < S; x++) {
+        const dx = ((x + 0.5) / S) * 2 - 1
+        const dy = ((y + 0.5) / S) * 2 - 1
+        let a = Math.max(0, Math.min(1, 1 - Math.sqrt(dx * dx + dy * dy)))
+        a = a * a * (3 - 2 * a)
+        px.set([255, 255, 255, Math.round(a * 255)], (y * S + x) * 4)
+      }
+    const t = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, t)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, S, S, 0, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    gl.generateMipmap(gl.TEXTURE_2D)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+    gl.bindTexture(gl.TEXTURE_2D, null)
+    return t
   }
 
   /** 1×1 纯色贴图（缺省 _MainTex 为白，缺省 _BumpMap 为平坦法线） */
@@ -583,7 +689,7 @@ export class WebRenderer {
   }
 
   /** 画一帧到当前绑定的默认帧缓冲；width、height 为绘图缓冲像素尺寸 */
-  render(scene: WebScene, width: number, height: number): void {
+  render(scene: WebScene, width: number, height: number, particles: WebParticles | null = null): void {
     const gl = this.gl
     const env = scene.env
     width = Math.max(1, width | 0)
@@ -632,9 +738,91 @@ export class WebRenderer {
     gl.enable(gl.BLEND)
     gl.depthMask(false)
     for (const t of transparent) this.draw(scene, t.o)
+    if (particles && particles.alive > 0) this.drawParticles(scene, particles, camWorld)
     gl.depthMask(true)
     gl.disable(gl.BLEND)
     gl.bindVertexArray(null)
+  }
+
+  /**
+   * 粒子（渲染队列 3100，不写深度、不剔除）：smoke 先画（alpha 混合），spark、glow 后画（加色）。
+   * billboard 朝相机平面；spark 为 Stretch：沿速度在屏幕上的投影拉伸，长 = size + |v|·velocityScale。
+   */
+  private drawParticles(scene: WebScene, particles: WebParticles, camWorld: ArrayLike<number>): void {
+    const gl = this.gl
+    const L = this.pLoc
+    const env = scene.env
+    const rx = camWorld[0], ry = camWorld[1], rz = camWorld[2]
+    const ux = camWorld[4], uy = camWorld[5], uz = camWorld[6]
+    const cx = camWorld[12], cy = camWorld[13], cz = camWorld[14]
+    gl.useProgram(this.pProgram)
+    gl.uniformMatrix4fv(L.uViewProj, false, this.viewProj)
+    gl.uniform3f(L.uCamPos, cx, cy, cz)
+    gl.uniform3fv(L.uFogColor, lin3(env.fog.color))
+    gl.uniform1f(L.uFogDensity, env.fog.density)
+    this.bindUnit(UNIT_MAIN, this.dotTex)
+    gl.disable(gl.CULL_FACE)
+    gl.bindVertexArray(this.pVao)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pVbo)
+    const out = this.pData
+    const curve: number[] = [0, 0, 0, 0, 0]
+    for (const kind of PARTICLE_KINDS) {
+      const pool = particles.pools.get(kind)
+      if (!pool || pool.count === 0) continue
+      const st = pool.style
+      let o = 0
+      for (let i = 0; i < pool.count; i++) {
+        kindCurve(kind, pool.age[i] / pool.life[i], curve)
+        const s = pool.size[i] * curve[4] * 0.5
+        const px = pool.pos[i * 3], py = pool.pos[i * 3 + 1], pz = pool.pos[i * 3 + 2]
+        // 半宽向量 a、半高向量 b
+        let ax = rx * s, ay = ry * s, az = rz * s
+        let bx = ux * s, by = uy * s, bz = uz * s
+        if (st.stretch > 0) {
+          const vx = pool.vel[i * 3], vy = pool.vel[i * 3 + 1], vz = pool.vel[i * 3 + 2]
+          const speed = Math.hypot(vx, vy, vz)
+          // 视线方向（相机到粒子），拉伸轴取速度去掉视线分量
+          let wx = px - cx, wy = py - cy, wz = pz - cz
+          const wl = Math.hypot(wx, wy, wz) || 1
+          wx /= wl; wy /= wl; wz /= wl
+          const dv = vx * wx + vy * wy + vz * wz
+          let tx = vx - dv * wx, ty = vy - dv * wy, tz = vz - dv * wz
+          const tl = Math.hypot(tx, ty, tz)
+          if (speed > 1e-4 && tl > 1e-6) {
+            tx /= tl; ty /= tl; tz /= tl
+            const half = (pool.size[i] * curve[4] + speed * st.stretch) * 0.5
+            bx = tx * half; by = ty * half; bz = tz * half
+            // 宽度方向：拉伸轴 × 视线
+            let nx = ty * wz - tz * wy, ny = tz * wx - tx * wz, nz = tx * wy - ty * wx
+            const nl = Math.hypot(nx, ny, nz) || 1
+            ax = (nx / nl) * s; ay = (ny / nl) * s; az = (nz / nl) * s
+          }
+        }
+        const r = pool.color[i * 4] * curve[0]
+        const g = pool.color[i * 4 + 1] * curve[1]
+        const b = pool.color[i * 4 + 2] * curve[2]
+        const a = pool.color[i * 4 + 3] * curve[3]
+        for (let k = 0; k < 4; k++) {
+          const sx = k === 0 || k === 3 ? -1 : 1
+          const sy = k < 2 ? -1 : 1
+          out[o++] = px + ax * sx + bx * sy
+          out[o++] = py + ay * sx + by * sy
+          out[o++] = pz + az * sx + bz * sy
+          out[o++] = sx < 0 ? 0 : 1
+          out[o++] = sy < 0 ? 0 : 1
+          out[o++] = r
+          out[o++] = g
+          out[o++] = b
+          out[o++] = a
+        }
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, out, 0, o)
+      if (st.blend === 'add') gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
+      else gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+      gl.uniform1i(L.uFogMode, st.fog)
+      gl.drawElements(gl.TRIANGLES, pool.count * 6, gl.UNSIGNED_SHORT, 0)
+    }
+    gl.useProgram(this.program)
   }
 
   private uploadEnvironment(scene: WebScene): void {
@@ -771,6 +959,11 @@ export class WebRenderer {
     this.texs.clear()
     gl.deleteTexture(this.white)
     gl.deleteTexture(this.flatBump)
+    gl.deleteTexture(this.dotTex)
+    gl.deleteVertexArray(this.pVao)
+    gl.deleteBuffer(this.pVbo)
+    gl.deleteBuffer(this.pIbo)
+    gl.deleteProgram(this.pProgram)
     gl.deleteProgram(this.program)
   }
 }

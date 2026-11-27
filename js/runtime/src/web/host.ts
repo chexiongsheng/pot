@@ -6,6 +6,7 @@
 import type { Engine, Host, LogLevel } from '../host'
 import { WebAudio } from './audio'
 import { WebInput } from './input'
+import { WebParticles } from './particles'
 import { WebPhysics } from './physics'
 import { CAMERA_ID, WebScene } from './scene'
 import { Text2DLike, WebText } from './text'
@@ -47,6 +48,8 @@ export interface WebHost extends Host {
   platform: 'web'
   scene: WebScene
   physics: WebPhysics
+  /** 粒子迸发（boot.ts 每帧 update 并交给渲染器） */
+  particles: WebParticles
   audio: WebAudio
   input: WebInput
   ui: WebUI
@@ -82,6 +85,8 @@ export function createWebHost(options: WebHostOptions): WebHost {
   } catch {}
   const unsupported = new Set<string>()
   const physics = new WebPhysics(scene)
+  // 火花碰撞所有层（ParticleSystem.collision.collidesWith 缺省 Everything）
+  const particles = new WebParticles((ox, oy, oz, dx, dy, dz, max) => physics.raycast(ox, oy, oz, dx, dy, dz, max, -1))
   const audio = options.audio ?? new WebAudio(null)
   audio.warn = (text) => log('warn', text)
   const text = new WebText(scene.textures, options.text2d ?? null)
@@ -149,6 +154,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     audioStop: (handle) => audio.stop(handle),
     audioVolume: (volume) => audio.setVolume(volume),
     audioPause: (paused) => audio.pause(paused),
+    burst: (json) => particles.burst(json),
   }
   scene.warn = (text) => log('warn', text)
   scene.textures.error = (text) => log('error', text)
@@ -172,6 +178,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     platform: 'web',
     scene,
     physics,
+    particles,
     audio,
     input,
     ui,

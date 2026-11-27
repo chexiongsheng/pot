@@ -270,7 +270,8 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
     } catch (error) {
       if (!failed) fail(error)
     }
-    renderer.render(scene, glCanvas.width, glCanvas.height)
+    host.particles.update(dt)
+    renderer.render(scene, glCanvas.width, glCanvas.height, host.particles)
     const cam = scene.objects.get(CAMERA_ID)
     if (cam) {
       const q = scene.worldRotation(cam)
