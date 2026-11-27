@@ -14,6 +14,7 @@ const tools = [
   { name: 'pot_restart', description: '冷重启当前游戏（重建 JS 环境）。默认保留 state；reset=true 清空 state', inputSchema: { type: 'object', properties: { reset: { type: 'boolean' } } } },
   { name: 'pot_reload', description: '强制热重载指定单元（一般不需要，保存文件后 Runner 会自动重载）', inputSchema: { type: 'object', properties: { units: { type: 'array', items: { type: 'string' } } }, required: ['units'] } },
   { name: 'pot_check', description: '在本机对游戏目录做类型检查 + 试打包（不需要 Runner）。返回错误列表', inputSchema: { type: 'object', properties: { dir: { type: 'string', description: '游戏目录绝对路径' } }, required: ['dir'] } },
+  { name: 'pot_web', description: '把游戏构建成网页（index.html + pot-web.js + game.js），静态托管即可在浏览器里玩，不需要 Runner。out 缺省 <游戏目录>/.pot/web', inputSchema: { type: 'object', properties: { dir: { type: 'string', description: '游戏目录绝对路径' }, out: { type: 'string', description: '输出目录' } }, required: ['dir'] } },
   { name: 'pot_eval', description: '在 Runner 的 JS 运行时中执行代码。可用变量：runtime、ctx（根上下文）、pot。表达式直接返回值；多语句请用 return', inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] } },
   { name: 'pot_state', description: '读写 state。action: keys | get | set | reset', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['keys', 'get', 'set', 'reset'] }, key: { type: 'string' }, value: {} } } },
   { name: 'pot_blocks', description: '列出积木、预制件、界面标签、内置节点、套件（名字、层、一句话说明、属性及缺省值；套件给出用法与是否已引入，未引入套件里的积木标 available），不需要 Runner。dir 为游戏目录（缺省只列系统级与套件）；keyword 按名字和说明过滤；name 取单项', inputSchema: { type: 'object', properties: { dir: { type: 'string' }, keyword: { type: 'string' }, name: { type: 'string' } } } },
@@ -38,6 +39,11 @@ async function callTool(api, name, args = {}) {
     case 'pot_restart': return api.call({ type: 'restart', reset: !!args.reset })
     case 'pot_reload': return api.call({ type: 'reload', units: args.units ?? [] })
     case 'pot_check': return require('./builder').checkGame(args.dir)
+    case 'pot_web': {
+      const path = require('path')
+      const data = await require('./web').buildWeb(path.resolve(args.dir), args.out && path.resolve(args.out))
+      return { ok: true, data }
+    }
     case 'pot_eval': return api.call({ type: 'eval', code: args.code })
     case 'pot_state': return api.call({ type: 'state', ...args })
     case 'pot_blocks': {

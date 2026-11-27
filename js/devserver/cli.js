@@ -14,6 +14,7 @@
  *   pot eject --kit <名字> [游戏目录]        把套件复制进游戏 src/kits/<名字>/ 并改写 import（之后归游戏所有）
  *   pot build <游戏目录> <输出目录>           发布构建（manifest.json + bundle.cjs + data/）
  *   pot pack <游戏目录> [输出.potg]           打包为 .potg，Runner 可直接打开
+ *   pot web <游戏目录> [输出目录]             构建网页（index.html + pot-web.js + game.js，缺省 <游戏目录>/.pot/web），静态托管即可玩
  *   pot release <游戏目录> [--platform win64|android|webgl[,…]] [--unity Unity.exe] [--out 目录]
  *                                           出包：TS 编译 → 暂存 → Unity -batchmode 打包（通用工程 player/），不用打开编辑器
  *   pot runner [--platform win64|android|macos[,…]] [--unity Unity.exe|Unity.app] [--out 目录]
@@ -183,6 +184,11 @@ async function main() {
       const { packGame } = require('./builder')
       if (args.length < 1) throw new Error('用法：pot pack <游戏目录> [输出文件.potg]')
       return print(await packGame(path.resolve(args[0]), args[1] && path.resolve(args[1])))
+    }
+    case 'web': {
+      const { buildWeb } = require('./web')
+      if (args.length < 1) throw new Error('用法：pot web <游戏目录> [输出目录]')
+      return print(await buildWeb(path.resolve(args[0]), args[1] && path.resolve(args[1])))
     }
     case 'stage': {
       const { stageGame } = require('./release')
