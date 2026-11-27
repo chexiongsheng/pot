@@ -131,12 +131,11 @@ test('Web 宿主：未实现的方法 warn 一次并返回中性值', () => {
     platform: fakePlatform(),
     log: (level, text) => logs.push({ level, text }),
   })
-  assert.strictEqual(host.engine.canvasText('hi', 16), null)
-  assert.strictEqual(host.engine.canvasText('hi', 16), null)
-  assert.strictEqual(host.engine.textTexture('hi', 16), 0)
-  assert.strictEqual(host.engine.burst(2, 1), '')
-  assert.deepStrictEqual(logs.map((l) => l.text), ['Web 宿主不支持 canvasText', 'Web 宿主不支持 textTexture', 'Web 宿主不支持 burst'])
-  assert.deepStrictEqual([...host.unsupported], ['canvasText', 'textTexture', 'burst'])
+  assert.strictEqual(host.engine.noSuchMethod(1), '')
+  assert.strictEqual(host.engine.noSuchMethod(2), '')
+  assert.strictEqual(host.engine.anotherMissing(), '')
+  assert.deepStrictEqual(logs.map((l) => l.text), ['Web 宿主不支持 noSuchMethod', 'Web 宿主不支持 anotherMissing'])
+  assert.deepStrictEqual([...host.unsupported], ['noSuchMethod', 'anotherMissing'])
   assert.strictEqual(host.readText('manifest.json'), '{"id":"t"}')
   assert.strictEqual(host.readText('nope.json'), null)
 })

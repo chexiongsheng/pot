@@ -145,6 +145,10 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
     scene,
     input,
     audio,
+    text2d: () => {
+      const c = document.createElement('canvas')
+      return c.getContext('2d', { willReadFrequently: true }) as any
+    },
     ui,
     platform,
     storage,

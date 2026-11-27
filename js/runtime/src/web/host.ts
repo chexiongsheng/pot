@@ -8,6 +8,7 @@ import { WebAudio } from './audio'
 import { WebInput } from './input'
 import { WebPhysics } from './physics'
 import { CAMERA_ID, WebScene } from './scene'
+import { Text2DLike, WebText } from './text'
 import { WebUI } from './ui'
 
 /** 与 DOM 相关的状态，由 boot.ts 提供；测试里给固定值 */
@@ -32,6 +33,8 @@ export interface WebHostOptions {
   input?: WebInput
   /** 音频（boot.ts 传入带 AudioContext 工厂的实例；缺省为静默实例） */
   audio?: WebAudio
+  /** 文字贴图用的 2D 上下文工厂（boot.ts 建离屏 canvas）；缺省时 textTexture 返回 0、canvasText 返回 null */
+  text2d?: (() => Text2DLike | null) | null
   ui: WebUI
   platform: WebPlatform
   storage?: WebStorage | null
@@ -55,8 +58,6 @@ export interface WebHost extends Host {
 
 /** 未实现方法的中性返回值；没列的返回 ''（多数宿主方法以空串表示成功） */
 const NEUTRAL: Record<string, any> = {
-  canvasText: null,
-  textTexture: 0,
   gfxBakeBegin: 0,
   gfxBake: '!Web 宿主暂不支持 gfxBake',
   gfxProgram: 'Web 宿主暂不支持运行时着色器',
@@ -83,6 +84,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   const physics = new WebPhysics(scene)
   const audio = options.audio ?? new WebAudio(null)
   audio.warn = (text) => log('warn', text)
+  const text = new WebText(scene.textures, options.text2d ?? null)
   const impl: Partial<Engine> = {
     spawn: (shape, name, parent) => scene.spawn(shape, name, parent),
     destroy: (id) => scene.destroy(id),
@@ -129,6 +131,8 @@ export function createWebHost(options: WebHostOptions): WebHost {
     skin: (id, bones) => scene.skin(id, bones),
     texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => scene.textures.create(data, width, height, linear, mipmaps, wrap, filter, aniso),
     destroyTexture: (id) => scene.textures.destroy(id),
+    textTexture: (json) => text.texture(json),
+    canvasText: (s, family, size, style) => text.canvasText(s, family, size, style),
     matTexture: (id, slot, tex) => scene.matTexture(id, slot, tex),
     matFloat: (id, prop, value) => scene.matFloat(id, prop, value),
     matVector: (id, prop, x, y, z, w) => scene.matVector(id, prop, x, y, z, w),
