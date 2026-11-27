@@ -61,12 +61,9 @@ const NEUTRAL: Record<string, any> = {
   gfxPost: 'Web 宿主暂不支持后处理',
   gfxPostEnable: 'Web 宿主暂不支持后处理',
   gfxInstances: 'Web 宿主暂不支持实例缓冲',
-  mesh: 0,
-  meshCached: -1,
   audioClip: false,
   audioHas: false,
   skin: 'Web 宿主暂不支持蒙皮',
-  meshSkin: 'Web 宿主暂不支持蒙皮',
   colliderShape: '',
 }
 
@@ -123,7 +120,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
     uiMeasure: (text, size, flags) => ui.measure(text, size, flags),
     gfxBackend: () => '',
     gfxUnsupported: () => 'Web 宿主暂不支持运行时着色器（004 第 20.2 节 web-3）',
+    mesh: (name, positions, normals, uvs, colors, indices, key) => scene.meshes.register(name, positions, normals, uvs, colors, indices, key),
+    meshCached: (name, key) => scene.meshes.cached(name, key),
+    meshTangents: (name, tangents) => scene.meshes.tangents(name, tangents),
+    meshColors: (name, colors, linear) => scene.meshes.colors(name, colors, linear),
+    meshAttribute: (name, channel, attr, size, data) => scene.meshes.attribute(name, channel, attr, size, data),
+    meshSkin: (name, boneIndices, weights, bindPoses) => scene.meshes.skin(name, boneIndices, weights, bindPoses),
   }
+  scene.warn = (text) => log('warn', text)
 
   const engine = new Proxy(impl as Engine, {
     get(target, key) {

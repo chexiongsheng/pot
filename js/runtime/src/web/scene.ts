@@ -7,6 +7,7 @@ import {
   M4, Q4, V3, composeTRS, eulerToQuaternion, invert, lookRotation, multiply, quatConjugate, quatMultiply, quatNormalize,
   quatToEuler, transformPoint,
 } from './math'
+import { WebMeshes } from './mesh'
 
 export const CAMERA_ID = 1
 
@@ -107,9 +108,13 @@ function viewOf<T extends Int32Array | Float32Array>(buf: ArrayBuffer | ArrayBuf
 
 export class WebScene {
   readonly objects = new Map<number, WebObject>()
+  /** 注册的网格（mesh:名字、skin:名字） */
+  readonly meshes = new WebMeshes()
   env: WebEnvironment = defaultEnvironment()
   /** 任一局部变换或层级变化时加一，世界矩阵缓存据此失效 */
   version = 0
+  /** 告警出口（宿主接到日志） */
+  warn: (text: string) => void = () => {}
   private nextId = CAMERA_ID + 1
 
   constructor() {
@@ -135,7 +140,16 @@ export class WebScene {
   spawn(shape: string, name: string, parent: number): number {
     const id = this.nextId++
     const p = parent ? this.objects.get(parent) : undefined
-    const o = makeObject(id, shape, name || `${shape}#${id}`, p ? p.id : 0)
+    let s = shape
+    if (shape.startsWith('mesh:') || shape.startsWith('skin:')) {
+      // 与 PotScene.Spawn 一致：未注册的网格建空对象并告警
+      const meshName = shape.slice(5)
+      if (!this.meshes.get(meshName)) {
+        this.warn(`[pot] 未注册的网格：${meshName}`)
+        s = 'empty'
+      }
+    }
+    const o = makeObject(id, s, name || `${shape}#${id}`, p ? p.id : 0)
     this.objects.set(id, o)
     if (p) p.children.push(id)
     this.version++
@@ -179,6 +193,7 @@ export class WebScene {
     this.objects.clear()
     this.objects.set(CAMERA_ID, this.makeCamera())
     this.env = defaultEnvironment()
+    this.meshes.clear()
     this.version++
   }
 
