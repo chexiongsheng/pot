@@ -8,7 +8,7 @@
  */
 import { defineBlock, type SceneArgs } from '@pot/core'
 import { damage } from '@pot/kit/fps'
-import { levelBoxes } from '@pot/kit/harbor/physics'
+import { harborBoxes } from '@pot/kit/harbor/physics'
 import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { setPostValues } from '@pot/kit/realistic'
@@ -152,7 +152,7 @@ export function Player({ data }: { data: SceneArgs['data'] }) {
   const { fov, fovAds, fovSprint, bobX, bobY, regenDelay, regenRate, maxHealth, seaY, rescueDamage, ...move } = tuning.player
   const { name: _name, mag, reserve, spread, ...gun } = tuning.weapon
   const level = data.load<LevelData>('level.json')
-  const { start } = levelPoints(level), { bounds, groundMaxX } = levelBoxes(level)
+  const { start } = levelPoints(level), { bounds, groundMaxX } = harborBoxes()
   return <>
     <entity key="player" tags={['player']} at={[...start.pos]} rot={[0, start.yaw, 0]}
       slControl={{ regen: regenRate, fov }} slFeedback={{ seaY, rescueDamage, rescued: data.load('flow.json').rescued }}

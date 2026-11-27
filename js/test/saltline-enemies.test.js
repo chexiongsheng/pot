@@ -28,14 +28,14 @@ export default defineGame({
   flow: { start: 'play', states: { play: {}, paused: { pause: true } } },
   load: (ctx) => {
     const w = ctx.world as any
-    const spawns = foeSpawns(ctx.data.load('tuning.json'), ctx.data.load('level.json'))
+    const spawns = foeSpawns(ctx.data.load('tuning.json'))
     ;(globalThis as any).slProbe = {
       player: () => w.query('player')[0], w: () => w,
       spawn: (type: string, pos: number[], pursuit = false) => spawnFoe(w, spawns, type as any, pos as any, pursuit),
       clear: () => mechClear(w),
     }
   },
-  scene: ({ data }) => <><HarborColliders data={data} /><Player data={data} /></>,
+  scene: ({ data }) => <><HarborColliders /><Player data={data} /></>,
 })`)
   return f
 }

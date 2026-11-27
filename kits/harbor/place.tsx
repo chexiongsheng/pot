@@ -1,8 +1,9 @@
 /**
  * 港口这个地方（004 第 19.2 节末段）：一个场景组件放出整座港区，玩家能走、子弹能打、看得见也淋得着雨。
+ * 港口是自带的地方，不读游戏的数据：布局全在套件里（原版港区与码头常量），游戏只管放。
  *
  *   scene: ({ data }) => <>
- *     <Harbor data={data} />          // 港口：碰撞盒、天气、港区模型
+ *     <Harbor />                      // 港口：碰撞盒、天气、港区模型
  *     <Player data={data} />          // 玩家要放在港口后面（见下）
  *   </>
  *
@@ -17,16 +18,10 @@
  * 用到港口的角色（玩家、猎犬）要放在 <Harbor> 后面：w.move 按实体 id 升序处理碰撞候选，碰撞盒先建、id 在前，
  * 结果才与迁移前一致（saltline 的玩家金标准依赖这个顺序）。天气与模型没有碰撞体，放在哪里都不影响模拟。
  */
-import type { SceneArgs } from '@pot/core'
 import type { AtmosphereProps } from '@pot/kit/realistic'
-import { levelBoxes } from './physics'
-import type { LevelData } from './level'
+import { harborBoxes } from './physics'
 
 export interface HarborProps {
-  /** 场景参数里的 data（读关卡布局） */
-  data: SceneArgs['data']
-  /** 关卡布局文件，缺省 level.json */
-  level?: string
   /** 贴图档：0 为缺省，1024 为高清贴图 */
   tex?: number
   /** 天气：湿度、积水、雨量、雨色、风（realistic atmosphere 的 weather），缺省为黄昏暴雨 */
@@ -44,15 +39,15 @@ export interface HarborProps {
 /** 港口的黄昏暴雨（saltline 的画面风格） */
 const DUSK_STORM: AtmosphereProps['weather'] = { wetness: 0.85, puddles: 0.6, rain: 0.45, rainColor: '#c9d2dc', wind: [1.2, -0.5] }
 
-/** 整座港口：碰撞、天气、模型 */
-export function Harbor({ data, level = 'level.json', tex = 0, weather, exposure = 1, quality, lightning = true, chunks = 8 }: HarborProps) {
+/** 整座港口：碰撞、天气、模型。不给属性也能放出来（缺省贴图、黄昏暴雨） */
+export function Harbor({ tex = 0, weather, exposure = 1, quality, lightning = true, chunks = 8 }: HarborProps = {}) {
   return <>
-    <HarborColliders data={data} level={level} />
+    <HarborColliders />
     <entity key="atmosphere" keep atmosphere={{
       preset: 'dusk', weather: weather ?? DUSK_STORM, chain: { exposure },
       lightning: lightning ? { sound: true } : null, quality: quality ?? null, shaderRain: true,
     }} />
-    <entity key="harbor" keep harborLevel={{ level, tex }} />
+    <entity key="harbor" keep harborLevel={{ tex }} />
     {Array.from({ length: chunks }, (_, i) => <entity key={`statics${i}`} keep harborStatics={{ chunk: i, of: chunks, tex }} />)}
   </>
 }
@@ -61,8 +56,8 @@ export function Harbor({ data, level = 'level.json', tex = 0, weather, exposure 
  * 只有港口的碰撞（<Harbor> 的第一部分）：不需要画面时用，例如无画面的回归测试。
  * 层：default 谁都挡；playerWall 是码头边、围栏外的空气墙，只挡玩家；bullet 只挡子弹
  */
-export function HarborColliders({ data, level = 'level.json' }: { data: SceneArgs['data']; level?: string }) {
-  const { boxes } = levelBoxes(data.load<LevelData>(level))
+export function HarborColliders() {
+  const { boxes } = harborBoxes()
   return <>
     {boxes.map(({ box: b, layer }, i) => <entity key={i} keep tags={['level']}
       at={[(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2]}

@@ -32,7 +32,7 @@ export default defineGame({
   load: (ctx) => {
     ;(globalThis as any).slPlayer = () => (ctx.world as any).query('player')[0]
   },
-  scene: ({ data }) => <><HarborColliders data={data} /><Player data={data} /></>,
+  scene: ({ data }) => <><HarborColliders /><Player data={data} /></>,
 })`)
   return files
 }

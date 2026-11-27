@@ -2063,7 +2063,7 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 9. 界面改为 `ui` 树（19.3 D）。
 10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。实施中加入：加载进度的修正（17.13 的“M3.5 第 10 步改”）。
 11. 港口作为一个地方（19.2 末段）：harbor 导出 `<Harbor>`（关卡碰撞盒、天气、港区模型），saltline 删除 `parts/level.tsx`、`parts/stage.tsx`；撤离点信标归导演组件（它是任务目标，导演点亮它），环境声直接写在 `game.tsx` 的 `scene` 里。`game.tsx` 的场景读起来是“港口、突击队员、任务、环境声”。
-12. 港区布局进套件：`level.json` 里描述港口本身的部分（集装箱、杂物、桅杆、系缆桩、起重机、仓库、码头、围栏、楼梯、栈桥、配色）作为 harbor 的缺省布局，`<Harbor>` 不给数据也能放出来（预览要用）；saltline 的 `level.json` 只留玩法点位（中继、出生点、开局位置、撤离点、标题镜头路线）。
+12. 港口不再读游戏的数据：港区本身的样子（堆场、仓库、围栏、道具、起重机、远景）第 8 步起就由 harbor 的 `origlevel`（原版关卡代码）建，`level.json` 里只有码头的 `quay`（码头边、轨道）还在用，集装箱、杂物、桅杆、系缆桩、起重机、仓库、围栏、楼梯、栈桥、配色只被 `buildLevel` 已经走不到的分支（`origStatic` 为假）读。码头参数改为 harbor 的常量，删除死分支与这些字段；`buildLevel()`、`levelBoxes()`（改名 `harborBoxes()`）不再取数据，`harborLevel` 去掉 `level` 属性，`<Harbor>`、`<HarborColliders>` 去掉 `data`、`level`，不给属性也能放出来（预览要用）。saltline 的 `level.json` 只留这一关在港口里的点位（中继、开局位置、敌人出生点、撤离点、标题镜头路线），`level` 从此只指“这一关”。
 
 ### 19.5 实施记录
 
@@ -2279,6 +2279,14 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 顺序：碰撞盒仍在玩家之前（`w.move` 按 id 升序处理候选）。天气、模型、撤离点、环境声没有碰撞体，位置不影响模拟：把它们放到玩家前面、开局后推进 1500 步（8 只敌人出场巡逻），去掉实体 id 与路径后 581 个实体与 World 数据完全相同。
 - 验证：`npm test` 303/304（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归、harbor 套件测试不变；`tsc`、`pot check` 通过；冒烟 hash 由 6d0d2fee 变为 9d8db754（实体的 key 路径由 `LevelColliders#0/…` 变为 `Harbor#0/HarborColliders#0/…`，布景实体的 id 排到玩家之前）。与 HEAD 对比开局后 1500 步：去掉 id 与路径后实体状态、随机种子、vars 全同，只有挂载记录里的 key 路径不同。实体的积木属性与迁移前相同（`harborLevel` 多写了缺省的 `level: 'level.json'`），没有做 Runner 实机验证。
 - 字节数：saltline 的 `src` 由 86812 降到 83405 字节（第 10 步之后补过注释，所以比第 10 步的 60955 多）；harbor 的 `place.tsx` 4102 字节。
+
+第 12 步（港口不再读游戏的数据）：
+
+- 起因：港区的样子第 8 步起由 harbor 的 `origlevel`（原版关卡代码）建，`buildLevel` 只走 `origStatic` 分支，`level.json` 里只有码头的 `quay` 还在用；集装箱、杂物、桅杆、系缆桩、起重机、仓库、围栏、楼梯、栈桥、配色都是死数据。港口却要游戏把 `data` 和文件名传进来，离开 saltline 就放不出来（19.6 的预览做不了）。
+- harbor：`level.ts` 的码头参数改为常量 `QUAY`（`X` 30、`RAILS` [18.5, 28.5]），`buildLevel()` 不要参数，只出地面、码头面、码头边、码头墙、轨道、海面、码头边空气墙与车道标线；删除 `full` 分支、`block`、`CONTAINER`、`PROPS`、`shade`。`LevelData` 只剩玩法点位（`relays`、`playerStart`、`extraction`、`spawns`、`cinematic`），`levelPoints` 去掉 `shed`。`physics.ts` 的 `levelBoxes(level)` 改为 `harborBoxes()`。`harborLevel` 去掉 `level` 属性；`<Harbor>` 与 `<HarborColliders>` 去掉 `data`、`level`，不给属性也能放出来（`<Harbor />`）。
+- saltline：`level.json` 只留点位（7751 降到 2577 字节），note 写明港口布局在 harbor 里。`player.tsx` 用 `harborBoxes()` 取边界与地面范围；`enemies.ts` 的 `foeSpawns(tuning)` 用 `QUAY.X` 判断脚下是地面还是海面；`game.tsx` 写 `<Harbor weather quality tex />`。点位仍由游戏读 `level.json` 再交给 `levelPoints` 转坐标：出生点、中继、撤离点、敌人出生点属于这局任务，不属于港口。
+- 验证：`npm test` 303/304（仅 pot_gfx 一致性），玩家金标准、敌人回归、harbor 套件测试不变；`tsc`、`pot check` 通过；冒烟 hash 由 9d8db754 变为 f404422a（只因 `harborLevel` 的属性少了 `level`）。与 HEAD 对比开局后 1500 步：581 个实体、随机种子、vars 全同，只有 `harborLevel` 实体的属性与挂载记录少了 `level: 'level.json'`。没有做 Runner 实机验证。
+- 字节数：harbor 的 `.ts`/`.tsx` 由 76473 降到 62090（`level.ts` 20284 降到 6172），`place.tsx` 3910；saltline 的 `src` 83369。
 
 ### 19.6 后续：积木预览
 

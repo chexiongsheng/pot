@@ -1,6 +1,6 @@
 /**
  * harbor 的场景积木（004 第 19.5 节第 8 步）：港口整张图的样子。
- * - harborLevel（一个实体）：原版地面（apron）、海面、雨幕、buildLevel 的关卡几何、原版动态网格（闸杆、中继等，
+ * - harborLevel（一个实体）：原版地面（apron）、海面、雨幕、buildLevel 的码头几何（常量，不读游戏数据）、原版动态网格（闸杆、中继等，
  *   每帧同步原版动画）、远景闪灯与海鸥、原版点光、中继灯。中继状态读 w.vars.harborRelays（游戏写）。
  * - harborStatics（若干实体，chunk / of 分份）：原版合并后的静态网格。分成几份，启动预热在实体之间让帧，加载界面不卡。
  * 材质（GPU 烘焙的原版材质）、表面贴图、喷字、闪灯与海鸥着色器按 World 缓存，几个积木共用；场景对象按实体建，exit 倒序销毁。
@@ -14,7 +14,7 @@ import * as T from '@pot/kit/realistic/textures'
 import { createApron, type Apron } from './apron'
 import { createSea } from './sea'
 import { createRain, type Rain } from './rain'
-import { buildLevel, LEVEL_LAYER, type LevelData, type Piece } from './level'
+import { buildLevel, LEVEL_LAYER, type Piece } from './level'
 import { emissiveMaterial, gullMesh, hdr, lampAttributes, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from './origlevel'
 
 // ---------------------------------------------------------------- 表面与喷字
@@ -225,11 +225,10 @@ interface LevelLook {
   dt: number
 }
 
-const LEVEL_PROPS = { level: 'level.json', tex: 0 }
+const LEVEL_PROPS = { tex: 0 }
 
 function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelLook {
   const { scene } = ctx
-  const level = ctx.data.load<LevelData>(me.level)
   const M = mats(S, ctx, me.tex)
   shaders(S, ctx)
   const L: LevelLook = { objs: [], dynamic: [], dynIds: new Int32Array(0), dynData: new Float32Array(0), lights: [], relays: [], time: ctx.clock.time, frame: ctx.clock.frame, dt: 0 }
@@ -243,8 +242,8 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
   if (sea) add(sea)
   const replaced = new Set<string>([...(L.apron ? ['ground', 'quay-deck'] : []), ...(sea ? ['sea'] : [])])
 
-  // 关卡几何：地面、码头、海面、起重机、远景
-  for (const piece of buildLevel(level, { origStatic: true })) {
+  // 码头几何：地面、码头、海面、轨道、空气墙
+  for (const piece of buildLevel()) {
     if (piece.hidden || replaced.has(piece.name ?? '')) continue
     const collide = piece.collide !== false
     const { color, material } = resolvePiece(S, ctx, M, piece, rand)
@@ -357,7 +356,7 @@ function dropLevel(L: LevelLook) {
 
 export const harborLevel = defineBlock({
   name: 'harborLevel',
-  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。level 为关卡数据文件，tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
+  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
   props: LEVEL_PROPS,
   view: {
     // 实测（Windows）约 350 ms：地面遮罩与细节、海面、雨幕、关卡几何、动态网格；harborStatics 每份约 80 ms，缺省 1

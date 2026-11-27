@@ -3,10 +3,10 @@
  * 关卡碰撞盒、黄昏暴雨的天气、地面积水、海面、雨幕、集装箱堆场、起重机、仓库、货轮与码头。
  *
  *   import harbor, { Harbor, harborGunEnv } from '@pot/kit/harbor'
- *   scene: ({ data }) => <><Harbor data={data} /><Player data={data} /></>   // 角色放在港口后面
+ *   scene: ({ data }) => <><Harbor /><Player data={data} /></>   // 角色放在港口后面
  *   setGunEnv(ctx.world, harborGunEnv())   // realistic 的 viewGun：港口的表面种类与室内盒
  *
- * 组成：原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、关卡数据与玩法点（level）、关卡碰撞盒（physics），
+ * 组成：原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、码头几何常量与玩法点的坐标转换（level，点位由游戏的数据给）、关卡碰撞盒（physics），
  * 地面积水（apron）、海面（sea）、雨幕（rain）与着色器；场景积木 harborLevel（整张图的地面、海面、雨幕、关卡几何、
  * 原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，chunk / of 分份），由 <Harbor> 摆好。
  */

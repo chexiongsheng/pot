@@ -389,7 +389,7 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
   // 导演实体，加上把各种事件落进 vars 的规则：HUD 每帧只读 vars.slHud，自己不订阅事件
   return <>
     <entity key="director" tags={['director']} slDirector={{
-      flow, relays: relays.map((r) => ({ pos: r.pos, label: r.label })), spawns, extraction, foes: foeSpawns(data.load('tuning.json'), level),
+      flow, relays: relays.map((r) => ({ pos: r.pos, label: r.label })), spawns, extraction, foes: foeSpawns(data.load('tuning.json')),
     }} />
     {/* 撤离点信标：码头南端舷梯旁的地面光圈、光柱和点光（realistic 的 beacon），三处中继都断开后导演把它点亮；
         标 keep，重试时不重建 */}

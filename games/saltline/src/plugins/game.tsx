@@ -77,7 +77,7 @@ export default defineGame({
   scene: ({ data }) => {
     const tuning = data.load('tuning.json')
     return <>
-      <Harbor data={data} weather={tuning.look.weather} quality={tuning.quality.levels} tex={tuning.quality.tex ?? 0} />
+      <Harbor weather={tuning.look.weather} quality={tuning.quality.levels} tex={tuning.quality.tex ?? 0} />
       <Player data={data} />
       <Director data={data} />
       <entity key="audio" keep slAudio />
