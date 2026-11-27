@@ -40,17 +40,58 @@ function missingFiles(platform) {
   return requiredFiles(platform).filter((f) => !fs.existsSync(f))
 }
 
+/** 在 root 下按广度优先找含 header 的目录（优先名为 PluginAPI 的），不跟随符号链接 */
+function findHeaderDir(root, header, maxDepth) {
+  const hits = []
+  let level = [root]
+  for (let depth = 0; depth <= maxDepth && level.length; depth++) {
+    const next = []
+    for (const dir of level) {
+      let entries
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { continue }
+      if (entries.some((e) => e.isFile() && e.name === header)) hits.push(dir)
+      for (const e of entries) if (e.isDirectory()) next.push(path.join(dir, e.name))
+    }
+    if (hits.length) break
+    level = next
+  }
+  return hits.find((d) => path.basename(d) === 'PluginAPI') || hits[0] || null
+}
+
 /**
  * Unity.exe → Editor/Data/PluginAPI；macOS 的 Unity.app/Contents/MacOS/Unity → Contents/PluginAPI；
  * 没有则用仓库自带头文件（requireMetal 时不行：自带的没有 IUnityGraphicsMetal.h）
  */
 function pluginApiDir(unity, requireMetal = false) {
+  const header = requireMetal ? 'IUnityGraphicsMetal.h' : 'IUnityGraphics.h'
+  const tried = []
   if (unity) {
-    for (const dir of [path.join(path.dirname(unity), 'Data/PluginAPI'), path.join(path.dirname(unity), '../PluginAPI')]) {
-      if (fs.existsSync(path.join(dir, 'IUnityGraphics.h'))) return path.resolve(dir)
+    let exe = unity
+    try { exe = fs.realpathSync(unity) } catch {}
+    // 允许直接传 Unity.app（目录）
+    if (exe.endsWith('.app') && fs.existsSync(path.join(exe, 'Contents/MacOS/Unity'))) exe = path.join(exe, 'Contents/MacOS/Unity')
+    const bin = path.dirname(exe)
+    const candidates = [
+      path.join(bin, 'Data/PluginAPI'),          // Windows: Editor/Data/PluginAPI
+      path.join(bin, '../PluginAPI'),            // macOS: Unity.app/Contents/PluginAPI
+      path.join(bin, '../Resources/PluginAPI'),  // macOS 部分版本
+      path.join(bin, '../../../PluginAPI'),      // macOS: 与 Unity.app 同级
+    ]
+    for (const dir of candidates) {
+      tried.push(path.resolve(dir))
+      if (fs.existsSync(path.join(dir, header))) return path.resolve(dir)
+    }
+    // 兜底（仅 Metal 场景）：在编辑器安装根目录（Unity.app 的上级）下有限深度搜索
+    if (requireMetal) {
+      const root = exe.includes('.app/') ? path.dirname(exe.slice(0, exe.indexOf('.app/') + 4)) : bin
+      const found = findHeaderDir(root, header, 7)
+      if (found) return found
+      tried.push(`${root}/**（深度 7）`)
     }
   }
-  if (requireMetal) throw new Error('找不到 Unity 的 PluginAPI（需要 IUnityGraphicsMetal.h），用 --unity 指定 Unity.app 路径')
+  if (requireMetal) {
+    throw new Error(`找不到 Unity 的 PluginAPI（需要 IUnityGraphicsMetal.h），用 --unity 指定 Unity.app 路径\n  --unity=${unity || '(空)'}\n  已查找：\n    ${tried.join('\n    ') || '(无)'}`)
+  }
   if (fs.existsSync(path.join(BUNDLED_PLUGIN_API, 'IUnityGraphics.h'))) return BUNDLED_PLUGIN_API
   throw new Error('找不到 Unity PluginAPI 头文件（IUnityGraphics.h），用 --unity 指定 Unity.exe')
 }
