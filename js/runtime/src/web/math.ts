@@ -247,6 +247,46 @@ export function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
 }
 
+/**
+ * PotRender.UpdatePlanar 的镜像相机世界矩阵：位置关于 y = h 镜像，forward、up 的 y 取反后 LookRotation。
+ * 结果是正常旋转（右轴 = −镜像后的右轴），所以画面左右翻转，着色器按 1 − x 取样。
+ */
+export function mirrorCamera(world: ArrayLike<number>, h: number, out: M4 = new Float32Array(16)): M4 {
+  out.set(world)
+  out[0] = -world[0]; out[1] = world[1]; out[2] = -world[2]
+  out[4] = world[4]; out[5] = -world[5]; out[6] = world[6]
+  out[8] = world[8]; out[9] = -world[9]; out[10] = world[10]
+  out[12] = world[12]; out[13] = 2 * h - world[13]; out[14] = world[14]
+  return out
+}
+
+/**
+ * Camera.CalculateObliqueMatrix（OpenGL 约定，Lengyel 斜裁剪）：近裁剪面换成视空间平面
+ * plane = (a, b, c, d)，正侧（a·x + b·y + c·z + d > 0）可见；相机须在负侧。
+ */
+export function obliqueProjection(proj: ArrayLike<number>, plane: ArrayLike<number>, out: M4 = new Float32Array(16)): M4 {
+  const m = Float32Array.from(proj as ArrayLike<number>)
+  const qx = (Math.sign(plane[0]) + m[8]) / m[0]
+  const qy = (Math.sign(plane[1]) + m[9]) / m[5]
+  const qw = (1 + m[10]) / m[14]
+  const k = 2 / (plane[0] * qx + plane[1] * qy - plane[2] + plane[3] * qw)
+  m[2] = plane[0] * k
+  m[6] = plane[1] * k
+  m[10] = plane[2] * k + 1
+  m[14] = plane[3] * k
+  out.set(m)
+  return out
+}
+
+/** 世界空间水平面 y = h（法线朝上）在视矩阵 view 下的平面方程 */
+export function viewPlaneY(view: ArrayLike<number>, h: number): [number, number, number, number] {
+  const nx = view[4], ny = view[5], nz = view[6]
+  const l = Math.hypot(nx, ny, nz) || 1
+  const px = view[4] * h + view[12], py = view[5] * h + view[13], pz = view[6] * h + view[14]
+  const a = nx / l, b = ny / l, c = nz / l
+  return [a, b, c, -(a * px + b * py + c * pz)]
+}
+
 /** Unity Color.linear（Mathf.GammaToLinearSpace）：分量 ≤ 1 按 sRGB 解码，大于 1 按 2.2 次幂；用于着色器属性缺省值 */
 export function hdrToLinear(x: number): number {
   return x <= 0 ? 0 : x <= 1 ? srgbToLinear(x) : Math.pow(x, 2.2)

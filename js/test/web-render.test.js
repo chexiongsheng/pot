@@ -239,3 +239,36 @@ test('web 宿主：engine.render 交给 scene.render，冷重启复位', () => {
   host.scene.clear()
   assert.equal(host.scene.render.sky, null)
 })
+
+test('平面反射：镜像相机（位置关于 y = h 镜像、正常旋转、左右翻转）与斜裁剪近平面', () => {
+  const W = web()
+  // 相机在 (1, 3, 2)，绕 X 轴俯 30°（Unity：forward = (0, −sin, cos)）
+  const a = Math.PI / 6, c = Math.cos(a), s = Math.sin(a)
+  const world = new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 1, 3, 2, 1])
+  const m = W.mirrorCamera(world, 0.5)
+  assert.deepEqual([m[12], m[13], m[14]], [1, -2, 2])
+  // forward、up 的 y 取反，右轴 = −镜像右轴
+  assert.ok(near(m[8], 0) && near(m[9], s) && near(m[10], c))
+  assert.ok(near(m[4], 0) && near(m[5], -c) && near(m[6], s))
+  assert.ok(near(m[0], -1) && near(m[1], 0) && near(m[2], 0))
+  // 行列式为 +1（正常旋转）
+  const det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[4] * (m[1] * m[10] - m[2] * m[9]) + m[8] * (m[1] * m[6] - m[2] * m[5])
+  assert.ok(near(det, 1))
+
+  const view = W.viewFromCamera(m)
+  const plane = W.viewPlaneY(view, 0.5)
+  const proj = W.perspective(60, 16 / 9, 0.1, 500)
+  const ob = W.obliqueProjection(proj, plane)
+  const clip = (p) => {
+    const v = [0, 1, 2, 3].map((r) => view[r] * p[0] + view[4 + r] * p[1] + view[8 + r] * p[2] + view[12 + r])
+    const q = [0, 1, 2, 3].map((r) => ob[r] * v[0] + ob[4 + r] * v[1] + ob[8 + r] * v[2] + ob[12 + r] * v[3])
+    return q[2] / q[3]
+  }
+  // 平面上、相机前方的点落在近平面（ndc z = −1）；平面上方可见，下方被裁掉
+  assert.ok(near(clip([1, 0.5, 8]), -1, 1e-3), String(clip([1, 0.5, 8])))
+  const above = clip([1, 1.5, 8])
+  assert.ok(above > -1 && above < 1, String(above))
+  assert.ok(clip([1, 0.2, 8]) < -1)
+  // 相机在平面负侧
+  assert.ok(plane[3] < 0)
+})

@@ -5,7 +5,7 @@
  * 网格：图元（geometry.ts）与 mesh:/skin: 自定义网格（mesh.ts，按 WebMesh.version 重建缓冲）；顶点属性 0 位置、1 法线、2 UV、3 顶点色（线性）、4 切线。
  * 材质贴图照 PotLit 的 PotSample：_MainTex/_BumpMap/_MaskMap 占单元 0/1/2，_Tiling、_UVMode（网格 UV、世界或物体三平面）、_Rest、_BumpScale、_Occlusion（只作用于间接光）。
  */
-import { hdrColorToLinear, M4, multiply, perspective, rotateVector, srgbToLinear, viewFromCamera } from './math'
+import { hdrColorToLinear, M4, mirrorCamera, multiply, obliqueProjection, perspective, rotateVector, srgbToLinear, viewFromCamera, viewPlaneY } from './math'
 import { primitiveMesh } from './geometry'
 import type { MeshSkinData } from './mesh'
 import type { WebTexture } from './texture'
@@ -21,6 +21,8 @@ const UNIT_BUMP = 1
 const UNIT_MASK = 2
 /** 环境反射立方体（sky 的实时反射探针） */
 const UNIT_ENV = 3
+/** 平面反射贴图（_PotPlanarTex） */
+const UNIT_PLANAR = 4
 /** 骨骼矩阵贴图占用的纹理单元（0 起留给材质贴图） */
 const BONE_UNIT = 7
 
@@ -267,7 +269,39 @@ uniform vec3 uSH[9];
 uniform float uReflection;
 uniform int uEnvOn;
 uniform samplerCube uEnvMap;
+// 天气（PotCommon _PotWetness / _PotPuddles / _PotRain）与材质响应（PotLit _Wet / _Planar）
+uniform float uWetness;
+uniform float uPuddles;
+uniform float uRainFx;
+uniform float uTime;
+uniform float uWet;
+uniform float uPlanar;
+// 平面反射（_PotPlanarOn / _PotPlanarHeight / _PotPlanarTex）；uScreen 为当前渲染目标像素尺寸
+uniform int uPlanarOn;
+uniform float uPlanarHeight;
+uniform sampler2D uPlanarTex;
+uniform vec2 uScreen;
 out vec4 outColor;
+
+// PotCommon.hlsl 的雨滴波纹（potHash / potFbm 在 COMMON 中）
+vec2 potRipples(vec2 p, float t) {
+  vec2 g = vec2(0.0);
+  for (int layer = 0; layer < 3; layer++) {
+    float fl = float(layer);
+    vec2 q = p * (2.2 + fl * 0.9) + fl * vec2(7.7, 3.3);
+    vec2 cell = floor(q);
+    vec2 c = cell + 0.3 + 0.4 * vec2(potHash(cell), potHash(cell + 3.1));
+    float ph = fract(t * (0.8 + 0.15 * fl) + potHash(cell + 11.7));
+    vec2 v = q - c;
+    float d = length(v) + 1e-4;
+    float x = d - ph * 0.42;
+    float env = clamp(1.0 - abs(x) / 0.07, 0.0, 1.0);
+    float amp = (1.0 - ph) * (1.0 - ph);
+    float dh = cos(x * 60.0) * env * env * amp;
+    g += dh * v / d;
+  }
+  return g;
+}
 
 vec3 ambientFor(vec3 n) {
   if (uAmbMode == 1) {
@@ -382,6 +416,35 @@ void main() {
       occ = mix(1.0, mask.g, uOcclusion);
       smoothness *= mask.a;
     }
+    // ---- 天气：湿润、积水、波纹（PotLit.shader） ----
+    float wet = clamp(uWetness * uWet, 0.0, 1.0);
+    float pm = 0.0;
+    if (wet > 0.001) {
+      float up = clamp((geomN.y - 0.7) / 0.25, 0.0, 1.0);
+      vec2 xz = vWorld.xz;
+      float h = uHasMask > 0.5 ? mask.b : 0.5;
+      float field = 1.0 - (potFbm(xz * 0.19) * 0.82 + h * 0.18);
+      float th = 1.0 - 0.62 * clamp(uPuddles, 0.0, 1.0) * wet;
+      float puddle = up * smoothstep(th, th + 0.04, field);
+      float soak = up * smoothstep(th - 0.14, th, field) * wet;
+      float porous = 1.0 - metallic;
+      base.rgb *= mix(1.0, mix(0.92, 0.5, porous), wet);
+      smoothness = max(smoothness, mix(smoothness, 0.66, wet));
+      smoothness = mix(smoothness, 0.86, soak);
+      smoothness = mix(smoothness, 0.965, puddle);
+      base.rgb *= mix(1.0, 0.72, puddle);
+      occ = mix(occ, 1.0, puddle);
+      n = normalize(mix(n, geomN, clamp(puddle + soak * 0.5, 0.0, 1.0)));
+      if (uRainFx > 0.01) {
+        vec2 g = potRipples(xz, uTime) * uRainFx * (0.18 + 0.82 * puddle) * up;
+        n = normalize(n + vec3(-g.x, 0.0, -g.y) * 0.35);
+      }
+      pm = clamp(puddle + soak * 0.6 + wet * 0.25, 0.0, 1.0);
+    }
+    if (uPlanarOn == 1 && uPlanar > 0.0) {
+      float near = clamp(1.0 - abs(vWorld.y - uPlanarHeight) * 3.0, 0.0, 1.0);
+      pm = clamp(max(pm, 0.35) * uPlanar * near * clamp((geomN.y - 0.9) * 10.0, 0.0, 1.0), 0.0, 1.0);
+    } else pm = 0.0;
     vec3 v = normalize(uCamPos - vWorld);
     float oneMinusRefl = 0.96 * (1.0 - metallic);
     vec3 diffuse = base.rgb * oneMinusRefl;
@@ -395,6 +458,12 @@ void main() {
     float x = 1.0 - NoV;
     float fres = x * x * x * x;
     vec3 refl = envReflection(reflect(-v, n), pr);
+    if (pm > 0.001) {
+      // 镜像相机画面左右翻转（PotRender.UpdatePlanar 的 LookRotation），故 x 取 1 − x
+      vec2 suv = gl_FragCoord.xy / uScreen;
+      vec2 puv = vec2(1.0 - suv.x, suv.y) + (n.xz - geomN.xz) * vec2(-0.12, 0.12);
+      refl = mix(refl, textureLod(uPlanarTex, puv, pr * 7.0).rgb, pm);
+    }
     // 遮罩 AO 只作用于间接光（URP indirectAmbientOcclusion）
     color = (ambientFor(n) * diffuse + refl * (1.0 / (r2 + 1.0)) * mix(specular, vec3(grazing), fres)) * occ;
     color += directBRDF(diffuse, specular, r2, normTerm, n, v, uMainDir, uMainColor * clamp(dot(n, uMainDir), 0.0, 1.0));
@@ -570,6 +639,12 @@ export class WebRenderer {
   private envCubeSize = 0
   private envFbo: WebGLFramebuffer | null = null
   private envSeen = -1
+  /** 平面反射（PotRender planarRT）：HDR、带 mipmap、深度 24，尺寸为画布 × scale（不小于 64） */
+  private planarTex: WebGLTexture | null = null
+  private planarDepth: WebGLRenderbuffer | null = null
+  private planarFbo: WebGLFramebuffer | null = null
+  private planarW = 0
+  private planarH = 0
   /** 天空球谐（27 个数）；null 表示环境光不取天空 */
   private sh: Float32Array | null = null
   /** 本帧的全局量（PotCommon.hlsl 的 _PotFog*、_PotSun*，以及 _Time.y） */
@@ -598,6 +673,7 @@ export class WebRenderer {
       'uMainTex', 'uBumpMap', 'uMaskMap', 'uTiling', 'uUVMode', 'uHasBump', 'uHasMask', 'uBumpScale', 'uOcclusion', 'uRest',
       'uOddNeg', 'uObjScale',
       'uFogHeight', 'uFogBase', 'uFogSun', 'uSunDir', 'uSunColor', 'uAmbMode', 'uSH', 'uEnvOn', 'uEnvMap',
+      'uWetness', 'uPuddles', 'uRainFx', 'uTime', 'uWet', 'uPlanar', 'uPlanarOn', 'uPlanarHeight', 'uPlanarTex', 'uScreen',
     ]
     for (const n of names) this.loc[n] = gl.getUniformLocation(this.program, n)
     // 未启用的顶点属性取常量：没 UV 为 0，没顶点色为白，没切线为 +X，没蒙皮为骨骼 0 权重 1
@@ -621,6 +697,7 @@ export class WebRenderer {
     gl.uniform1i(this.loc.uBumpMap, UNIT_BUMP)
     gl.uniform1i(this.loc.uMaskMap, UNIT_MASK)
     gl.uniform1i(this.loc.uEnvMap, UNIT_ENV)
+    gl.uniform1i(this.loc.uPlanarTex, UNIT_PLANAR)
     this.white = this.solid(255, 255, 255, 255)
     this.flatBump = this.solid(128, 128, 255, 255)
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
@@ -869,33 +946,66 @@ export class WebRenderer {
 
   /** 画一帧到画布（默认帧缓冲）；width、height 为绘图缓冲像素尺寸，time 为秒（_Time.y） */
   render(scene: WebScene, width: number, height: number, particles: WebParticles | null = null, time = 0): void {
-    const gl = this.gl
     const env = scene.env
     width = Math.max(1, width | 0)
     height = Math.max(1, height | 0)
     this.updateFrame(scene, time)
     this.captureEnvironment(scene)
-    this.post.begin(width, height, scene.render.quality)
-    const bg = lin3(env.background)
-    gl.clearColor(bg[0], bg[1], bg[2], 1)
-    gl.depthMask(true)
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+    const camWorld = scene.worldMatrix(scene.camera)
+    const aspect = width / height
 
-    const cam = scene.camera
-    const camWorld = scene.worldMatrix(cam)
+    // 平面反射：镜像相机先画到 planarRT（不做后处理、不画平面反射本身，剔除 exclude 层）
+    const planar = scene.render.planar
+    if (planar.enabled) {
+      const pw = Math.max(64, Math.trunc(width * planar.scale))
+      const ph = Math.max(64, Math.trunc(height * planar.scale))
+      this.ensurePlanar(pw, ph)
+      const mw = mirrorCamera(camWorld, planar.height)
+      viewFromCamera(mw, this.view)
+      perspective(env.fov, aspect, env.near, env.far, this.proj)
+      obliqueProjection(this.proj, viewPlaneY(this.view, planar.height + 0.02), this.proj)
+      multiply(this.proj, this.view, this.viewProj)
+      const gl = this.gl
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.planarFbo)
+      gl.viewport(0, 0, pw, ph)
+      this.drawWorld(scene, mw, aspect, particles, planar.exclude, false, pw, ph)
+      gl.activeTexture(gl.TEXTURE0 + UNIT_PLANAR)
+      gl.bindTexture(gl.TEXTURE_2D, this.planarTex)
+      gl.generateMipmap(gl.TEXTURE_2D)
+      gl.activeTexture(gl.TEXTURE0)
+    } else if (this.planarTex) this.freePlanar()
+
+    const [w, h] = this.post.begin(width, height, scene.render.quality)
     viewFromCamera(camWorld, this.view)
-    perspective(env.fov, width / height, env.near, env.far, this.proj)
+    perspective(env.fov, aspect, env.near, env.far, this.proj)
     multiply(this.proj, this.view, this.viewProj)
     this.lastViewProj.set(this.viewProj)
     this.lastWidth = width
     this.lastHeight = height
+    this.drawWorld(scene, camWorld, aspect, particles, 0, !!this.planarTex, w, h)
+    this.post.end(scene.render.post, width, height, this.frame.time)
+    // 后处理占用了单元 0、1、2
+    this.bound = [null, null, null]
+  }
+
+  /**
+   * 用 this.viewProj 把天空、不透明、透明与粒子画到当前帧缓冲（视口已设好）。
+   * exclude 为剔除的层掩码（ext.layer）；planarOn 决定是否采样平面反射；w、h 为目标像素尺寸。
+   */
+  private drawWorld(scene: WebScene, camWorld: ArrayLike<number>, aspect: number, particles: WebParticles | null, exclude: number, planarOn: boolean, w: number, h: number): void {
+    const gl = this.gl
+    const env = scene.env
+    const bg = lin3(env.background)
+    gl.clearColor(bg[0], bg[1], bg[2], 1)
+    gl.depthMask(true)
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
     const camPos = [camWorld[12], camWorld[13], camWorld[14]]
 
     const sky = scene.render.sky
     if (sky) {
       // 天空盒：方向 = 前 + ndc.x·右·tan(fov/2)·aspect + ndc.y·上·tan(fov/2)
       const ty = Math.tan((env.fov * Math.PI) / 360)
-      const tx = ty * (width / height)
+      const tx = ty * aspect
       const axis = (i: number, k: number) => {
         const x = camWorld[i], y = camWorld[i + 1], z = camWorld[i + 2]
         const l = Math.hypot(x, y, z) || 1
@@ -910,6 +1020,12 @@ export class WebRenderer {
     gl.uniformMatrix4fv(L.uViewProj, false, this.viewProj)
     gl.uniform3f(L.uCamPos, camPos[0], camPos[1], camPos[2])
     this.uploadEnvironment(scene)
+    gl.uniform1i(L.uPlanarOn, planarOn ? 1 : 0)
+    gl.uniform2f(L.uScreen, w, h)
+    // 画 planarRT 时单元 4 不能绑着它（反馈环）
+    gl.activeTexture(gl.TEXTURE0 + UNIT_PLANAR)
+    gl.bindTexture(gl.TEXTURE_2D, planarOn ? this.planarTex : null)
+    gl.activeTexture(gl.TEXTURE0)
 
     gl.enable(gl.DEPTH_TEST)
     gl.depthFunc(gl.LEQUAL)
@@ -917,11 +1033,12 @@ export class WebRenderer {
     const opaque: WebObject[] = []
     const transparent: { o: WebObject; d: number }[] = []
     for (const o of scene.renderables()) {
+      if (exclude && (exclude & (1 << ((o.ext.layer as number | undefined) ?? 0))) !== 0) continue
       const mi = modeInfo(o.mat.mode)
       if (mi.blend === 'none') opaque.push(o)
       else {
-        const w = scene.worldMatrix(o)
-        const dx = w[12] - camPos[0], dy = w[13] - camPos[1], dz = w[14] - camPos[2]
+        const wm = scene.worldMatrix(o)
+        const dx = wm[12] - camPos[0], dy = wm[13] - camPos[1], dz = wm[14] - camPos[2]
         transparent.push({ o, d: dx * dx + dy * dy + dz * dz })
       }
     }
@@ -937,9 +1054,45 @@ export class WebRenderer {
     gl.depthMask(true)
     gl.disable(gl.BLEND)
     gl.bindVertexArray(null)
-    this.post.end(scene.render.post, width, height, this.frame.time)
-    // 后处理占用了单元 0、1、2
-    this.bound = [null, null, null]
+  }
+
+  /** 建或重建平面反射目标（尺寸变化时） */
+  private ensurePlanar(w: number, h: number): void {
+    if (this.planarTex && this.planarW === w && this.planarH === h) return
+    this.freePlanar()
+    const gl = this.gl
+    this.planarW = w
+    this.planarH = h
+    this.planarTex = gl.createTexture()!
+    gl.activeTexture(gl.TEXTURE0 + UNIT_PLANAR)
+    gl.bindTexture(gl.TEXTURE_2D, this.planarTex)
+    const levels = Math.floor(Math.log2(Math.max(w, h))) + 1
+    gl.texStorage2D(gl.TEXTURE_2D, levels, this.colorFloat ? gl.RGBA16F : gl.RGBA8, w, h)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.activeTexture(gl.TEXTURE0)
+    this.planarDepth = gl.createRenderbuffer()!
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.planarDepth)
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h)
+    this.planarFbo = gl.createFramebuffer()!
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.planarFbo)
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.planarTex, 0)
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.planarDepth)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+  }
+
+  private freePlanar(): void {
+    const gl = this.gl
+    if (this.planarTex) gl.deleteTexture(this.planarTex)
+    if (this.planarDepth) gl.deleteRenderbuffer(this.planarDepth)
+    if (this.planarFbo) gl.deleteFramebuffer(this.planarFbo)
+    this.planarTex = null
+    this.planarDepth = null
+    this.planarFbo = null
+    this.planarW = 0
+    this.planarH = 0
   }
 
   /**
@@ -1159,6 +1312,12 @@ export class WebRenderer {
     }
     gl.uniform1f(L.uReflection, a.reflection)
     this.globals(L)
+    const r = scene.render
+    gl.uniform1f(L.uWetness, r.wetness)
+    gl.uniform1f(L.uPuddles, r.puddles)
+    gl.uniform1f(L.uRainFx, r.rain)
+    gl.uniform1f(L.uTime, this.frame.time)
+    gl.uniform1f(L.uPlanarHeight, r.planar.height)
     if (a.mode === 'sky' && this.sh) {
       gl.uniform1i(L.uAmbMode, 1)
       gl.uniform3fv(L.uSH, this.sh)
@@ -1268,6 +1427,8 @@ export class WebRenderer {
     gl.uniform1f(L.uBumpScale, floats._BumpScale ?? 1)
     gl.uniform1f(L.uOcclusion, floats._Occlusion ?? 1)
     gl.uniform1f(L.uRest, floats._Rest ?? 0)
+    gl.uniform1f(L.uWet, floats._Wet ?? 1)
+    gl.uniform1f(L.uPlanar, floats._Planar ?? 0)
     this.bindMaterialTextures(scene, o)
 
     gl.bindVertexArray(m.vao)
@@ -1296,6 +1457,7 @@ export class WebRenderer {
     if (this.envFbo) gl.deleteFramebuffer(this.envFbo)
     this.envCube = null
     this.envFbo = null
+    this.freePlanar()
     this.post.dispose()
     gl.deleteProgram(this.program)
   }
