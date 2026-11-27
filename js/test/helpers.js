@@ -80,9 +80,9 @@ class MockEngine {
   audioClip(name, rate, channels, data) { (this.clips ??= new Map()).set(name, { rate, channels, bytes: data.length }); return true }
   audioHas(name) { return !!this.clips?.has(name) }
   audioPlay(name, volume) { (this.played ??= []).push({ name, volume }) }
-  audioLoop(name) { this.loops ??= new Map(); const id = (this.loopId = (this.loopId ?? 0) + 1); this.loops.set(id, name); return id }
-  audioSetLoop() {}
-  audioStop(handle) { this.loops?.delete(handle) }
+  audioLoop(name, volume) { this.loops ??= new Map(); const id = (this.loopId = (this.loopId ?? 0) + 1); this.loops.set(id, name); (this.loopVolumes ??= new Map()).set(id, volume); return id }
+  audioSetLoop(id, volume) { if (volume >= 0 && this.loops?.has(id)) (this.loopVolumes ??= new Map()).set(id, volume) }
+  audioStop(handle) { this.loops?.delete(handle); this.loopVolumes?.delete(handle) }
   audioVolume(v) { this.volume = v }
   audioPause(p) { this.audioPaused = p }
   texture(data, width, height, linear) { this.textures ??= new Map(); const id = (this.texId = (this.texId ?? 0) + 1); this.textures.set(id, { bytes: data.byteLength, width, height, linear }); return id }

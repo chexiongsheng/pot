@@ -31,7 +31,7 @@ export default defineGame({
 - 实体标签的公共属性：`key`、`at`、`rot`（欧拉角，度）、`scale`、`name`、`tags`、`keep`，其余属性名就是积木名，值是该积木属性的部分覆盖（`true` 表示用缺省值）。`keep` 见“流程”。
 - 系统层只有 `entity` 预制件和一组通用积木（`shape`、`spin`、`trigger`、`lifetime`、`projectile`、`light`、`body`）。游戏同名定义会覆盖系统的。
 - 碰撞在模拟侧：带 `body`（轴对齐的盒、球或竖直胶囊，可设 `layer`、`solid`）的实体进碰撞表。`w.move(e, mover, { radius, height, stepUp, layers, ground })` 做角色移动（`mover` 为 `{ vel, grounded }`，放在积木状态里）；`w.raycast(from, dir, maxDist, { layers, ignore, solid })` 返回最近的 `{ point, normal, dist, entity }` 或 null；`w.overlap({ kind: 'sphere', radius }, at)` 返回重叠的实体。三者都是纯 JS、可复现，玩法判定不要用 `scene.raycast`。
-- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`fps` 还有 `gunFps`（弹匣、射速、散布、后坐、开镜、换弹；开火发 `gunFired`，命中发 `gunHit`，不扣血）与 `@pot/kit/fps/hud` 的 `drawCompass`、`drawCrosshair`（在 `<canvas>` 里调用）。`realistic`（`import realistic from '@pot/kit/realistic'`）提供写实环境 `atmosphere`、带材质预设的 `surface`、目标标记 `beacon`、第一人称枪的样子 `viewGun`（配 `gunFps`），见下文“写实环境”。`harbor`（港口这个地方：场景组件 `<Harbor />` 放出碰撞盒、天气与整座港区，不读游戏的数据，角色放在它后面）与 `mech`（机械敌人，预制件 `gull`、`hound`）是 saltline 的风格内容，可作为写场景套件的例子。套件按玩家认得出的东西提供（一个地方、一种敌人、一把枪）：一个地方写成套件导出的函数组件（`.tsx`），把碰撞、外观、天气一起摆好，布局数据放在套件里，不给属性也能放出来，游戏的 `scene` 只写一行；任务相关的点位（出生点、目标点）留在游戏的数据里。套件之间靠事件对接（套件的 `on`），也可以声明 `vars`（如 realistic 的 `renderQuality`、harbor 的 `harborRelays`），游戏写它们来驱动套件。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
+- 玩法相关的积木放在套件里，按需引入：`import topdown from '@pot/kit/topdown'`，再写 `defineGame({ kits: [topdown], ... })`。`topdown` 提供 `moveTopdown`、`cameraFollow`。`fps`（`import fps, { damage } from '@pot/kit/fps'`）提供 `moveFps`（第一人称走跑蹲跳，状态里有 `yaw`、`pitch`、`grounded`、`bob`，武器写 `aim`）、`cameraFps`（眼高相机，别的积木写 `shake`、`kick`）、`health`（扣血用 `damage(w, e, n, from)`，发 `damaged`、`died`，payload 为 `{ entity, amount, from }`）、`aiChase`、`aiPatrol`。`pot blocks` 会列出全部套件和它们的积木（未引入的标“未引入”并给出写法）；`fps` 还有 `gunFps`（弹匣、射速、散布、后坐、开镜、换弹；开火发 `gunFired`，命中发 `gunHit`，不扣血）与 `@pot/kit/fps/hud` 的 `drawCompass`、`drawCrosshair`（在 `<canvas>` 里调用）。`realistic`（`import realistic from '@pot/kit/realistic'`）提供时段与画面 `atmosphere`、天气 `weather`、带材质预设的 `surface`、目标标记 `beacon`、第一人称枪的样子 `viewGun`（配 `gunFps`），见下文“写实环境”。`harbor`（港口这个地方：场景组件 `<Harbor />` 放出碰撞盒、天气与整座港区，不读游戏的数据，角色放在它后面）与 `mech`（机械敌人，预制件 `gull`、`hound`）是 saltline 的风格内容，可作为写场景套件的例子。套件按玩家认得出的东西提供（一个地方、一种敌人、一把枪）：一个地方写成套件导出的函数组件（`.tsx`），把碰撞、外观、天气一起摆好，布局数据放在套件里，不给属性也能放出来，游戏的 `scene` 只写一行；任务相关的点位（出生点、目标点）留在游戏的数据里。套件之间靠事件对接（套件的 `on`），也可以声明 `vars`（如 realistic 的 `renderQuality`、harbor 的 `harborRelays`），游戏写它们来驱动套件。要改套件代码用 `pot eject --kit <名字>` 复制进游戏。
 - 套件可以带数据文件（着色器、JSON）：`ctx.gfx.shader({ fragment: '@pot/kit/<名字>/shaders/x.frag' })`、`ctx.data.load('@pot/kit/<名字>/x.json')`。套件着色器里的相对 `#include` 留在套件内，游戏的着色器可以写 `#include "@pot/kit/<名字>/..."`。游戏的 `data/kits/<名字>/` 有同名文件时优先读它；`pot build` 把用到的套件资源复制进发布包，`pot eject` 把它们复制到 `data/kits/<名字>/`。
 
 ## 场景树
@@ -43,20 +43,22 @@ export default defineGame({
 
 ## 写实环境（realistic 套件）
 
-`atmosphere` 放在一个不带外形的实体上，管主方向光、天空、环境光、雾、后处理、天气和平面反射，实体销毁或热重载去掉时全部还原。`surface` 是带材质的外形。
+玩家说“黄昏下暴雨”，黄昏是 `atmosphere`，暴雨是 `weather`，各放在一个不带外形的实体上。`atmosphere` 管主方向光、天空、环境光、雾、后处理和平面反射；`weather` 管雨（雨量、湿度、积水、雨色、风、雨声）和闪电（排期、事件、雷声），打雷时 `atmosphere` 读它的闪电状态让画面闪一下。实体销毁或热重载去掉时全部还原。`surface` 是带材质的外形。
 
 ```tsx
-<entity key="env" atmosphere={{ preset: 'night', rain: 1, reflection: 0.5, lightning: { first: [3, 3], every: [6, 9] } }} />
+<entity key="env" atmosphere={{ preset: 'night', reflection: 0.5 }} />
+<entity key="storm" weather={{ rain: 1, lightning: { first: [3, 3], every: [6, 9] } }} />
 <entity key="ground" scale={[40, 1, 40]} surface={{ kind: 'plane', material: 'wetGround' }} />
 <entity key="box" at={[0, 1, 4]} surface={{ kind: 'cube', material: 'concrete', color: '#8c7a6a' }} />
 <rule on="lightning" do={(w, p) => { /* p.entity、p.power（0..1）、p.delay：雷声延迟秒数 */ }} />
 ```
 
-- `atmosphere.preset`：`dusk`（缺省，黄昏干燥）、`overcast`（阴天）、`night`（夜）。`sun`、`sky`、`ambient`、`fog`、`post`、`weather` 六节按字段覆盖预设；`rain`（0..1）是简写，同时设湿度和积水，`weather` 里显式写的字段优先；`reflection`（0..1）开平面反射；`lightning` 为 null 时不打雷，有值时按 `w.rand` 排期，到点发 `lightning` 事件并让画面闪一下，积木状态 `active` 设为 false 可暂停。
+- `atmosphere.preset`：`dusk`（缺省，黄昏）、`overcast`（阴天）、`night`（夜）。`sun`、`sky`、`ambient`、`fog`、`post` 五节按字段覆盖预设；`reflection`（0..1）开平面反射。预设里没有雨，不放 `weather` 就是干的。
+- `weather`：`rain`（0..1）为雨量，`wetness`、`puddles` 缺省跟雨量走（湿度 `min(1, rain × 2)`、积水等于雨量），显式写的优先；`rainColor`、`wind`；`sound` 为雨量 1 时的雨声音量（缺省 0.78，叠加状态如暂停时压低）；`lightning` 为 null 时不打雷，有值时按 `w.rand` 排期，到点发 `lightning` 事件并按 `delay` 放雷声（`lightning.sound` 缺省 true），积木状态 `active` 设为 false 可暂停。地图自己画的雨幕、积水用 `currentWeather(w)` 读雨量与湿度（没有天气时为 undefined）。一个场景只放一个。
 - `surface`：`kind`、`scale` 同 `shape`；`material` 为预设名（`wetGround`、`metal`、`concrete`）或材质参数对象；`color` 为 null 时取预设颜色。
-- 想按关卡或天气切换环境：`scene` 不能读 `w.vars`，用流程状态决定写哪个预设，并让 `key` 随之变化（如 `key={'env-' + s.state}`），旧环境会先还原再建新的。
+- 想按关卡或天气切换：`scene` 不能读 `w.vars`，用流程状态决定写哪个预设，并让 `key` 随之变化（如 `key={'env-' + s.state}`），旧环境会先还原再建新的。
 - 预设与材质是 `presets`、`materials` 导出，可以读来做自己的组合；名字写错时报“未知的预设 X，可用 …”。
-- `atmosphere` 的进阶属性：`chain`（用原版移植的后处理链代替 URP 后处理，游戏驱动的参数如受伤红边用 `setPostValues(w, { uDamage, uLowHealth, uAds })` 写）、`quality`（画质档位表，档位读 `w.vars.renderQuality`）、`shaderRain`（雨由别的积木用着色器画时关掉内置雨滴）、`lightning.sound`（按 `delay` 放雷声）。
+- `atmosphere` 的进阶属性：`chain`（用原版移植的后处理链代替 URP 后处理，游戏驱动的参数如受伤红边用 `setPostValues(w, { uDamage, uLowHealth, uAds })` 写）、`quality`（画质档位表，档位读 `w.vars.renderQuality`，内置雨滴数交给 `weather`）。`weather` 的 `shaderRain` 表示雨由别的积木用着色器画，着色器可用时关掉内置雨滴。
 - `beacon={{ radius, color }}`：地面光圈、光柱、点光，状态 `on` 由游戏的积木写。
 - `viewGun`：放在带 `moveFps`、`cameraFps`、`gunFps` 的玩家实体上。命中点的表面种类与雨淋程度用 `setGunEnv(w, { surface, shelter })` 注入（在 `load` 里调）。
 

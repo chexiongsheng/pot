@@ -5,21 +5,23 @@
  *   export default defineGame({
  *     kits: [realistic],
  *     scene: () => <>
- *       <entity key="env" atmosphere={{ preset: 'overcast', rain: 0.6, lightning: {} }} />
+ *       <entity key="env" atmosphere={{ preset: 'overcast' }} />
+ *       <entity key="storm" weather={{ rain: 0.6, lightning: {} }} />
  *       <entity key="ground" scale={[40, 1, 40]} surface={{ kind: 'plane', material: 'wetGround' }} />
  *     </>,
  *   })
  *
+ * atmosphere 是时段与画面（太阳、天空、环境光、雾、后处理），weather 是天气（雨、雨声、闪电与雷声，见 weather.ts）。
  * 黄昏预设与闪电的时间分布、闪光曲线取自 saltline。atmosphere 还可以换成原版移植的后处理链（chain）、
- * 按画质档位表切换（quality，档位读 w.vars.renderQuality）、闪电后放雷声（lightning.sound）；
+ * 按画质档位表切换（quality，档位读 w.vars.renderQuality）；
  * 游戏驱动的后处理参数（受伤、低血量、开镜）用 setPostValues 写。beacon 是目标标记（光圈、光柱、点光）。
  */
 import { defineBlock, defineKit, parseColor } from '@pot/core'
-import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3, WeatherOptions } from '@pot/core'
+import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3 } from '@pot/core'
 import { viewGun } from './viewgun'
 import { createPost, type PostFx } from './post'
-import { registerSfx, sfx } from './sfx'
 import { VIEW_LAYER } from './layers'
+import { weather, lightningNow, setWeatherDrops } from './weather'
 
 // ---------------------------------------------------------------- 预设
 
@@ -44,7 +46,6 @@ export interface Preset {
   ambient: AmbientSpec
   fog: FogSpec
   post: PostOptions
-  weather: WeatherOptions
 }
 
 const freeze = <T>(v: T): T => {
@@ -55,9 +56,7 @@ const freeze = <T>(v: T): T => {
   return v
 }
 
-const DRY: WeatherOptions = { wetness: 0, puddles: 0, rain: 0 }
-
-/** 三个环境预设（只读）。dusk 取自 saltline 的 tuning.json 的 look，去掉天气 */
+/** 三个环境预设（只读）。dusk 取自 saltline 的 tuning.json 的 look；天气不在预设里（weather 积木） */
 export const presets: Readonly<Record<'dusk' | 'overcast' | 'night', Preset>> = freeze({
   dusk: {
     sun: { rotation: [13, -70, 0], intensity: 3.8, color: '#ffd2a0' },
@@ -71,7 +70,6 @@ export const presets: Readonly<Record<'dusk' | 'overcast' | 'night', Preset>> = 
       tonemap: 'aces', exposure: 0.2, contrast: 20, saturation: 6, temperature: 8, tint: 2, bloom: 0.6, bloomThreshold: 1.2, bloomScatter: 0.72,
       vignette: 0.28, vignetteSmooth: 0.45, grain: 0.07, chromatic: 0.03, shadows: [0.96, 1, 1.08, 0], highlights: [1.06, 1, 0.92, 0],
     },
-    weather: { ...DRY },
   },
   overcast: {
     sun: { rotation: [55, -40, 0], intensity: 1.1, color: '#c9d0d8' },
@@ -85,7 +83,6 @@ export const presets: Readonly<Record<'dusk' | 'overcast' | 'night', Preset>> = 
       tonemap: 'aces', exposure: 0.3, contrast: 12, saturation: -18, temperature: -6, tint: 0, bloom: 0.3, bloomThreshold: 1.3, bloomScatter: 0.7,
       vignette: 0.22, vignetteSmooth: 0.45, grain: 0.05,
     },
-    weather: { ...DRY },
   },
   night: {
     sun: { rotation: [35, 150, 0], intensity: 0.35, color: '#9fb4e0' },
@@ -99,7 +96,6 @@ export const presets: Readonly<Record<'dusk' | 'overcast' | 'night', Preset>> = 
       tonemap: 'aces', exposure: 0.6, contrast: 18, saturation: -10, temperature: -14, tint: 2, bloom: 0.9, bloomThreshold: 1, bloomScatter: 0.75,
       vignette: 0.35, vignetteSmooth: 0.5, grain: 0.08,
     },
-    weather: { ...DRY },
   },
 })
 
@@ -123,11 +119,8 @@ function deep<T>(base: T, over: any): T {
   return out
 }
 
-/** 闪光曲线（saltline 原式）：t 为距闪电的秒数，power 为强度 */
-export function lightningValue(t: number, power: number): number {
-  if (!(t >= 0) || t >= 0.9) return 0
-  return Math.max(0, power * Math.exp(-t * 5) * (0.55 + 0.45 * Math.sin(t * 47) * Math.sin(t * 13 + 1)))
-}
+/** 闪光曲线在 weather.ts（这里转导出） */
+export { lightningValue } from './weather'
 
 const scaled = (c: Color, k: number): Color => {
   const [r, g, b] = parseColor(c)
@@ -136,8 +129,7 @@ const scaled = (c: Color, k: number): Color => {
 
 // ---------------------------------------------------------------- atmosphere
 
-const LIGHTNING = { every: [30, 60] as [number, number], first: [12, 30] as [number, number], power: [0.3, 1] as [number, number], flash: 1, sound: false }
-export type LightningProps = typeof LIGHTNING
+export type { LightningProps } from './weather'
 
 const ATMOS_PROPS = {
   preset: 'dusk' as PresetName,
@@ -146,16 +138,11 @@ const ATMOS_PROPS = {
   ambient: {} as Partial<AmbientSpec>,
   fog: {} as Partial<FogSpec>,
   post: {} as PostOptions,
-  weather: {} as WeatherOptions,
-  rain: 0,
   reflection: 0,
-  lightning: null as Partial<LightningProps> | null,
   /** 原版移植的后处理链（运行时着色器可用时代替 URP 后处理）；sunColor 缺省取 sky.sun */
   chain: null as { exposure?: number; sunColor?: string } | null,
   /** 画质档位表：按 w.vars.renderQuality 选档 */
   quality: null as QualityLevel[] | null,
-  /** 雨由别的积木用着色器画（运行时着色器可用时内置雨滴粒子数为 0） */
-  shaderRain: false,
 }
 
 /** 画质档位（saltline 的 tuning.quality.levels） */
@@ -166,7 +153,7 @@ export interface QualityLevel {
   shadowCascades: number
   /** 平面反射分辨率比例，0 为关 */
   reflection: number
-  /** 内置雨滴粒子数（shaderRain 且着色器可用时不用） */
+  /** 内置雨滴粒子数（交给 weather；它的 shaderRain 且着色器可用时不用） */
   drops: number
   ao: number
   antialias: 'none' | 'fxaa' | 'smaa'
@@ -175,24 +162,19 @@ export interface QualityLevel {
   bloom?: boolean
 }
 
-const ATMOS_STATE = { active: true, next: -1, t: 99, power: 0, strikes: 0, delay: 0 }
-
 export type AtmosphereProps = typeof ATMOS_PROPS
 
-/** 按属性算出最终的环境（预设深合并分节覆盖，再套 rain 简写） */
+/** 按属性算出最终的环境（预设深合并分节覆盖） */
 export function resolveAtmosphere(me: Partial<AtmosphereProps>): Preset {
   const name = me.preset ?? 'dusk'
   const base = presets[name]
   if (!base) throw new Error(`atmosphere：未知的预设 ${name}，可用 ${Object.keys(presets).join('、')}`)
-  const rain = Math.max(0, Math.min(1, me.rain ?? 0))
-  const weather = rain > 0 ? { ...base.weather, rain, wetness: Math.min(1, rain * 2), puddles: rain } : base.weather
   return {
     sun: deep(base.sun, me.sun),
     sky: deep(base.sky, me.sky),
     ambient: deep(base.ambient, me.ambient),
     fog: deep(base.fog, me.fog),
     post: deep(base.post, me.post),
-    weather: deep(weather, me.weather),
   }
 }
 
@@ -204,8 +186,8 @@ interface Held {
   post?: PostFx
   /** 已应用的画质档位（-1 为未应用） */
   quality: number
+  /** 见过的闪电次数（-1 为还没见过 weather 的闪电） */
   strikes: number
-  thunder: { at: number; near: boolean; gain: number }[]
   time: number
   frame: number
 }
@@ -234,7 +216,7 @@ export function setPostValues(w: { registry: object }, values: Record<string, nu
   else postValues.set(w.registry, { ...values })
 }
 
-function applyQuality(ctx: any, me: AtmosphereProps, h: Held, index: number) {
+function applyQuality(ctx: any, me: AtmosphereProps, h: Held, index: number, w: { registry: object }) {
   const levels = me.quality!
   const q = levels[Math.max(0, Math.min(levels.length - 1, index))]
   h.quality = index
@@ -243,7 +225,8 @@ function applyQuality(ctx: any, me: AtmosphereProps, h: Held, index: number) {
   scene.reflection({ enabled: q.reflection > 0, height: 0, scale: q.reflection > 0 ? q.reflection : undefined, exclude: [VIEW_LAYER], shadows: q.reflectionShadows })
   scene.post({ ao: q.ao, antialias: q.antialias })
   h.post?.quality(q.bloom !== false)
-  scene.weather({ ...h.env.weather, drops: me.shaderRain && ctx.gfx.supported ? 0 : q.drops })
+  // 雨滴数随画质档走，由 weather 应用
+  setWeatherDrops(w, q.drops)
 }
 
 function applyAmbient(ctx: any, a: AmbientSpec, k: number) {
@@ -255,29 +238,10 @@ function applyFog(ctx: any, f: FogSpec, k: number, options: boolean) {
   ctx.scene.fog(scaled(color, k), density, options ? rest : undefined)
 }
 
-const range = (w: any, r: [number, number]) => w.rand(Math.min(r[0], r[1]), Math.max(r[0], r[1]))
-
 export const atmosphere = defineBlock({
   name: 'atmosphere',
-  about: '写实环境：preset（dusk、overcast、night）加分节覆盖 sun、sky、ambient、fog、post、weather；rain 为雨量简写，reflection 开平面反射，lightning 打雷（发 lightning 事件，payload { entity, power, delay }；sound 为 true 时按 delay 放雷声）；chain 用原版后处理链（游戏参数用 setPostValues 写）；quality 为画质档位表（档位读 w.vars.renderQuality）；shaderRain 表示雨由着色器画。一个场景只放一个；active 为 false 时不打雷',
+  about: '时段与画面：preset（dusk、overcast、night）加分节覆盖 sun、sky、ambient、fog、post；reflection 开平面反射；chain 用原版后处理链（游戏参数用 setPostValues 写）；quality 为画质档位表（档位读 w.vars.renderQuality，雨滴数交给 weather）。雨与闪电在 weather 积木，打雷时这里按闪光提亮画面。一个场景只放一个',
   props: ATMOS_PROPS,
-  state: ATMOS_STATE,
-  step(me, e, w) {
-    me.t += w.dt
-    if (!me.lightning) return
-    const l = { ...LIGHTNING, ...me.lightning }
-    if (me.next < 0) me.next = range(w, l.first)
-    if (!me.active) return
-    me.next -= w.dt
-    if (me.next > 0) return
-    me.power = Math.min(1, range(w, l.power))
-    me.t = 0
-    me.strikes++
-    me.next = range(w, l.every)
-    const delay = 0.5 + (1 - me.power) * 2 + w.rand() * 0.6
-    me.delay = delay
-    w.emit('lightning', { entity: e, power: me.power, delay })
-  },
   view: {
     enter(me, e, ctx, w) {
       const env = resolveAtmosphere(me)
@@ -285,17 +249,16 @@ export const atmosphere = defineBlock({
       const old = held.get(e.id)
       if (old) release(old)
       const sun = scene.light({ type: 'directional', name: 'sun', rotation: env.sun.rotation, intensity: env.sun.intensity, color: env.sun.color, shadows: 'soft' })
-      const h: Held = { sun, env, flash: 0, quality: -1, strikes: me.strikes, thunder: [], time: ctx.clock.time, frame: ctx.clock.frame }
+      const h: Held = { sun, env, flash: 0, quality: -1, strikes: -1, time: ctx.clock.time, frame: ctx.clock.frame }
       held.set(e.id, h)
-      if (me.lightning?.sound) registerSfx(ctx)
       scene.sky(env.sky)
       applyAmbient(ctx, env.ambient, 1)
       applyFog(ctx, env.fog, 1, true)
       if (me.chain) h.post = createPost(ctx, { exposure: me.chain.exposure ?? 1, sunColor: me.chain.sunColor ?? (env.sky.sun as string | undefined) })
       if (!h.post) scene.post(env.post)
-      if (me.quality?.length) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2)
+      if (me.quality?.length) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2, w)
       else {
-        scene.weather(env.weather)
+        setWeatherDrops(w, undefined)
         scene.reflection(me.reflection > 0 ? { enabled: true, height: 0, scale: me.reflection } : { enabled: false })
       }
       scene.refreshEnvironment()
@@ -304,7 +267,7 @@ export const atmosphere = defineBlock({
       const h = held.get(e.id)
       if (!h) return
       const dt = frameDt(h, ctx.clock)
-      if (me.quality?.length && (w.vars.renderQuality ?? 2) !== h.quality) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2)
+      if (me.quality?.length && (w.vars.renderQuality ?? 2) !== h.quality) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2, w)
       if (h.post) {
         h.post.update(dt)
         const values = postValues.get(w.registry)
@@ -313,27 +276,19 @@ export const atmosphere = defineBlock({
           postValues.delete(w.registry)
         }
       }
-      if (!me.lightning) return
-      // 新的闪电：链上随机一个闪光方向，排雷声
-      if (me.strikes !== h.strikes) {
-        h.strikes = me.strikes
-        if (h.post) {
+      // 闪电读 weather：新的一次在链上随机一个闪光方向（第一次见到只记下次数）
+      const ln = lightningNow(w, ctx.clock.fixedAlpha)
+      if (ln && ln.strikes !== h.strikes) {
+        const first = h.strikes < 0
+        h.strikes = ln.strikes
+        if (!first && h.post) {
           const a = Math.PI * (0.55 + Math.random() * 0.9)
           const d = [Math.cos(a), 0.35 + Math.random() * 0.3, Math.sin(a) * (Math.random() < 0.5 ? -1 : 1)]
           const l = Math.hypot(d[0], d[1], d[2])
           h.post.set({ uFlashDir: [d[0] / l, d[1] / l, -d[2] / l] })
         }
-        if (me.lightning.sound) h.thunder.push({ at: h.time + me.delay, near: me.power > 0.6, gain: 0.35 + 0.65 * me.power })
       }
-      for (let i = h.thunder.length - 1; i >= 0; i--) {
-        const s = h.thunder[i]
-        if (h.time < s.at) continue
-        h.thunder.splice(i, 1)
-        ctx.audio.play(sfx(s.near ? 'thunderNear' : 'thunder'), { volume: s.gain, pitch: 0.9 + Math.random() * 0.2 })
-      }
-      const flash = me.lightning.flash ?? LIGHTNING.flash
-      const t = me.t + (me.active ? ctx.clock.fixedAlpha * w.dt : 0)
-      const v = lightningValue(t, me.power) * flash
+      const v = ln?.flash ?? 0
       if (v === h.flash) return
       h.flash = v
       // 有链时写链的 uThunder（原版：闪光值 × 0.35）；没有链时按闪光提亮环境光与雾
@@ -345,12 +300,12 @@ export const atmosphere = defineBlock({
       applyAmbient(ctx, h.env.ambient, k)
       applyFog(ctx, h.env.fog, k, false)
     },
-    exit(_me, e, _objs, ctx) {
+    exit(_me, e, _objs, ctx, w) {
       const h = held.get(e.id)
       held.delete(e.id)
       if (h) release(h)
+      setWeatherDrops(w, undefined)
       ctx.scene.fog(false)
-      ctx.scene.weather({ rain: 0, wetness: 0, puddles: 0 })
       ctx.scene.reflection({ enabled: false })
     },
   },
@@ -470,10 +425,11 @@ declare module '@pot/core' {
 
 export { viewGun, setGunEnv, type GunEnv } from './viewgun'
 export { registerSfx, sfx } from './sfx'
+export { weather, currentWeather, resolveWeather, type WeatherProps, type WeatherNow } from './weather'
 
 export default defineKit({
   name: 'realistic',
-  about: '写实：atmosphere（环境预设 dusk、overcast、night，雨、平面反射、闪电与雷声，后处理链，画质档位）、surface（材质预设 wetGround、metal、concrete）、beacon（目标标记）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
+  about: '写实：atmosphere（时段与画面：环境预设 dusk、overcast、night，平面反射，后处理链，画质档位）、weather（天气：雨、雨声、闪电与雷声）、surface（材质预设 wetGround、metal、concrete）、beacon（目标标记）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
   vars: { renderQuality: 2 },
-  blocks: [atmosphere, surface, beacon, viewGun],
+  blocks: [atmosphere, weather, surface, beacon, viewGun],
 })

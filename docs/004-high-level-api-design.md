@@ -1515,6 +1515,17 @@ saltline 不改用这个套件：它的天空、雾、后处理由自己的着�
 
 测试 `kit-realistic.test.js`：预设与分节覆盖、`rain` 简写、exit 时清理、`surface` 的预设与报错、闪电按 `w.rand` 排期并发事件、`active` 为 false 时不打、闪光期间环境光变亮之后恢复。
 
+M3.5 第 13 步改（19.4）：天气从 `atmosphere` 拆成 `weather` 积木，在 `kits/realistic/weather.ts`。上面 `atmosphere` 的 `rain`、`weather`、`lightning` 属性与闪电状态都搬过去，`atmosphere` 不再有状态，预设里也不再有 `weather` 节，exit 不再碰天气。
+
+`weather`：一个场景的天气，放在任意一个实体上（一个场景只放一个）。
+
+- 属性：`rain`（0 到 1，缺省 0）；`wetness`、`puddles`（缺省 null，按雨量取 `min(1, rain × 2)` 与 `rain`，即原来的简写规则）；`rainColor`、`wind`（null 时用 Runner 的缺省）；`sound`（雨声在雨量为 1 时的音量，缺省 0.78，0 不放）；`lightning`（同原来，`sound` 的缺省改为 true：天气自己管雷声）；`shaderRain`（同原来）。
+- 状态与模拟：闪电的 `active`、`next`、`t`、`power`、`strikes`、`delay`，排期、`w.rand` 的用法与 `lightning` 事件不变。
+- 表现：enter 时 `scene.weather`（雨量、湿度、积水、雨色、风）。内置雨滴数取 `atmosphere` 当前画质档的 `drops`（`shaderRain` 且着色器可用时为 0），档位变化时重下。雨量与 `sound` 都大于 0 时放雨声循环，音量 `sound × rain`，叠加状态（`w.overlayActive`，暂停）时乘 0.23。闪电后按 `delay` 放雷声，强度大于 0.6 为近雷。exit 时雨量、湿度、积水归零，雨声随之停。
+- 读天气：`currentWeather(w)` 返回 `{ rain, wetness, puddles }`，场景里没有 `weather` 时为 undefined。给地图自己画的雨幕、积水用（harbor）。按 `w.registry` 登记，积木与界面拿到的 World 代理都读得到。
+- 与 `atmosphere` 的交点只有闪电：`atmosphere` 每帧读 `weather` 的闪电状态，自己按固定步插值算闪光值，有后处理链时写 `uThunder` 与新闪电的 `uFlashDir`，没有链时提亮环境光与雾。两个实体谁先谁后都没有一帧的延迟。`atmosphere` 在画质档变化时登记当前档的 `drops`，给 `weather` 读。
+- `lightningValue` 移到 `weather.ts`，仍从 `@pot/kit/realistic` 导出。
+
 ### 17.9 文件清单
 
 新增：`kits/topdown/`、`kits/fps/`、`kits/realistic/`、`js/runtime/src/world/kit.ts`（`defineKit`、展开与冲突检查、全局目录）、`js/runtime/src/world/collide.ts`（碰撞表、网格、`move`、`raycast`、`overlap`）、`js/runtime/src/world/blocks/body.ts`、`packages/com.pot.core/Runtime/Resources/pot/kits.json`（生成）。
@@ -2064,6 +2075,7 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。实施中加入：加载进度的修正（17.13 的“M3.5 第 10 步改”）。
 11. 港口作为一个地方（19.2 末段）：harbor 导出 `<Harbor>`（关卡碰撞盒、天气、港区模型），saltline 删除 `parts/level.tsx`、`parts/stage.tsx`；撤离点信标归导演组件（它是任务目标，导演点亮它），环境声直接写在 `game.tsx` 的 `scene` 里。`game.tsx` 的场景读起来是“港口、突击队员、任务、环境声”。
 12. 港口不再读游戏的数据：港区本身的样子（堆场、仓库、围栏、道具、起重机、远景）第 8 步起就由 harbor 的 `origlevel`（原版关卡代码）建，`level.json` 里只有码头的 `quay`（码头边、轨道）还在用，集装箱、杂物、桅杆、系缆桩、起重机、仓库、围栏、楼梯、栈桥、配色只被 `buildLevel` 已经走不到的分支（`origStatic` 为假）读。码头参数改为 harbor 的常量，删除死分支与这些字段；`buildLevel()`、`levelBoxes()`（改名 `harborBoxes()`）不再取数据，`harborLevel` 去掉 `level` 属性，`<Harbor>`、`<HarborColliders>` 去掉 `data`、`level`，不给属性也能放出来（预览要用）。saltline 的 `level.json` 只留这一关在港口里的点位（中继、开局位置、敌人出生点、撤离点、标题镜头路线），`level` 从此只指“这一关”。
+13. 天气单独成积木（规格见 17.8 末段）：玩家说“黄昏下暴雨”，黄昏是时段与画面，暴雨是天气。realistic 的 `atmosphere` 只管主光、天空、环境光、雾、后处理（链）、画质档位、反射；新增 `weather` 积木管雨（雨量、湿度、积水、雨色、风、雨声）与闪电（排期、事件、雷声）。闪光提亮画面是两者唯一的交点，由 `atmosphere` 读 `weather` 的闪电状态。`<Harbor>` 放两个实体：`atmosphere`（黄昏）与 `weather`（暴雨）。saltline 的 `parts/audio.ts` 去掉雨声，只剩配乐（低鸣、交战紧张感）与提示音。顺带的修正：港口的雨幕与积水地坪原来写死雨量 0.6、全湿，不跟 `<Harbor weather>` 走；改为每帧读 `weather`。分两次提交：先拆 `weather`（realistic、harbor 的 `place.tsx`、saltline），再港口跟随天气。
 
 ### 19.5 实施记录
 
@@ -2287,6 +2299,17 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - saltline：`level.json` 只留点位（7751 降到 2577 字节），note 写明港口布局在 harbor 里。`player.tsx` 用 `harborBoxes()` 取边界与地面范围；`enemies.ts` 的 `foeSpawns(tuning)` 用 `QUAY.X` 判断脚下是地面还是海面；`game.tsx` 写 `<Harbor weather quality tex />`。点位仍由游戏读 `level.json` 再交给 `levelPoints` 转坐标：出生点、中继、撤离点、敌人出生点属于这局任务，不属于港口。
 - 验证：`npm test` 303/304（仅 pot_gfx 一致性），玩家金标准、敌人回归、harbor 套件测试不变；`tsc`、`pot check` 通过；冒烟 hash 由 9d8db754 变为 f404422a（只因 `harborLevel` 的属性少了 `level`）。与 HEAD 对比开局后 1500 步：581 个实体、随机种子、vars 全同，只有 `harborLevel` 实体的属性与挂载记录少了 `level: 'level.json'`。没有做 Runner 实机验证。
 - 字节数：harbor 的 `.ts`/`.tsx` 由 76473 降到 62090（`level.ts` 20284 降到 6172），`place.tsx` 3910；saltline 的 `src` 83369。
+
+第 13 步（天气积木）：
+
+- 起因：saltline 的 `parts/audio.ts` 自己放雨声，固定 0.35、暂停时 0.08，和港口下多大的雨无关；雨量、湿度、闪电又都是 `atmosphere` 的属性。玩家说“黄昏下暴雨”，黄昏和暴雨是两样东西，雨声应跟着雨走。
+- realistic：新增 `weather.ts`，`weather` 积木按 17.8 末段的规格实现（雨、雨声、闪电排期与雷声，`currentWeather`、`resolveWeather` 导出）。`atmosphere` 去掉 `weather`、`rain`、`lightning`、`shaderRain` 属性和全部状态（不再有 `step`），三个预设去掉干燥的 `weather` 节；画质档的 `drops` 用 `setWeatherDrops` 交给 weather，闪光用 `lightningNow(w, alpha)` 读 weather 的闪电状态（链上 `uFlashDir`、`uThunder`，没有链时提亮环境光与雾，算法不变）。`lightningValue` 移到 `weather.ts`，`index.ts` 转导出。发布与缓存都按 `w.registry` 作键。
+- harbor：`<Harbor>` 放两个实体，`atmosphere`（黄昏、链、画质档）和紧随其后的 `weather`（缺省黄昏暴雨 `DUSK_STORM`，`lightning` 开时为 `{}`，`shaderRain: true`）。`weather` 属性的类型改为 `Partial<WeatherProps>`。weather 实体占原来 atmosphere 的位置，消耗 `w.rand` 的先后不变。
+- saltline：`audio.ts` 只剩配乐（低鸣、交战紧张感）与提示音，去掉雨声循环；`game.tsx` 的注释由“环境声”改为“配乐与提示音”。雨声音量由 0.35 变为 `0.78 × 0.45` = 0.351，暂停时由 0.08 变为约 0.081（`× 0.23`）；暂停判断由 `phaseOf(w) === 'paused'` 改为 `w.overlayActive`，saltline 的暂停就是叠加状态。
+- 测试：`helpers.js` 的测试宿主记下循环音音量（`loopVolumes`）。`kit-realistic.test.js` 改为 atmosphere 与 weather 分开写，新增“雨滴数跟画质档”“雨声音量与暂停压低”两例。
+- 验证：`npm test` 305/306（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归、harbor 套件测试不变；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 f404422a 变为 d304293d（多了 weather 实体，闪电状态从 `atmosphere` 搬到 `weather`）。与 HEAD 对比开局后 1500 步：随机种子、vars、其余 580 个实体全同；闪电状态（`next` 3.07163、`t` 124.5、`strikes` 0）原样出现在 weather 实体上，atmosphere 实体只剩画面属性。没有做 Runner 实机验证。
+- 遗留：港口的雨幕与积水地坪写死雨量 0.6，不跟 `<Harbor weather>`，下一步改为读 `currentWeather(w)`。
+- 字节数：realistic 的 `index.ts` 18278、`weather.ts` 8449；harbor 的 `place.tsx` 4026；saltline 的 `audio.ts` 3835，`src` 83363。
 
 ### 19.6 后续：积木预览
 

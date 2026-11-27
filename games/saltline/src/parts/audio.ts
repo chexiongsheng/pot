@@ -1,15 +1,15 @@
 /**
- * 声音（只有表现）：雨声、低鸣、交战紧张感三条循环音，按阶段与是否交战调音量；设置里的总音量变化时调 ctx.audio.volume；
- * 无线电、命中、击杀的提示音（按 w.vars.slHud 里的序号变化放）。
+ * 配乐与提示音（只有表现）：低鸣、交战紧张感两条循环音，按阶段与是否交战调音量；设置里的总音量变化时调 ctx.audio.volume；
+ * 无线电、命中、击杀的提示音（按 w.vars.slHud 里的序号变化放）。雨声与雷声归天气（realistic 的 weather，<Harbor> 里放）。
  *
- * 听到的：雨声一直在（暂停时压得很低）；低沉的嗡鸣在标题画面更响；被敌人发现后，战斗中慢慢升起紧张的配乐。
+ * 听到的：低沉的嗡鸣在标题画面更响；被敌人发现后，战斗中慢慢升起紧张的配乐。
  */
 import { defineBlock, type LoopHandle } from '@pot/core'
 import { registerSfx, sfx } from '@pot/kit/realistic'
 import { phaseOf, type Settings, type Sl, type SlHud } from './state'
 
-/** 一个声音实体的混音状态：三条循环音、紧张感当前音量、已设的总音量、帧间隔、已响过的无线电与命中序号 */
-interface Mix { rain: LoopHandle; drone: LoopHandle; tension: LoopHandle; tensionVol: number; volume: number; time: number; frame: number; dt: number; radio: number; marker: number }
+/** 一个声音实体的混音状态：两条循环音、紧张感当前音量、已设的总音量、帧间隔、已响过的无线电与命中序号 */
+interface Mix { drone: LoopHandle; tension: LoopHandle; tensionVol: number; volume: number; time: number; frame: number; dt: number; radio: number; marker: number }
 const mixes = new WeakMap<object, Map<number, Mix>>()
 const of = (w: object) => {
   let m = mixes.get(w)
@@ -17,9 +17,9 @@ const of = (w: object) => {
   return m
 }
 
-/** 停掉三条循环音（实体销毁、热重载重建时） */
+/** 停掉两条循环音（实体销毁、热重载重建时） */
 function stop(m: Mix) {
-  for (const l of [m.rain, m.drone, m.tension]) {
+  for (const l of [m.drone, m.tension]) {
     try {
       l.stop()
     } catch {
@@ -30,7 +30,7 @@ function stop(m: Mix) {
 
 export const slAudio = defineBlock({
   name: 'slAudio',
-  about: 'saltline 声音：雨声、低鸣、交战紧张感（暂停时压低），总音量（slSettings.volume），无线电、命中、击杀的提示音',
+  about: 'saltline 配乐与提示音：低鸣、交战紧张感（暂停时静音），总音量（slSettings.volume），无线电、命中、击杀的提示音。雨声在天气里',
   props: {},
   view: {
     enter(_me, e, ctx, w) {
@@ -38,7 +38,6 @@ export const slAudio = defineBlock({
       const all = of(w), old = all.get(e.id)
       if (old) stop(old)
       all.set(e.id, {
-        rain: ctx.audio.loop(sfx('rain'), { volume: 0.35 }),
         drone: ctx.audio.loop(sfx('drone'), { volume: 0.25 }),
         tension: ctx.audio.loop(sfx('tension'), { volume: 0 }),
         tensionVol: 0, volume: -1, time: ctx.clock.time, frame: ctx.clock.frame, dt: 0,
@@ -60,8 +59,7 @@ export const slAudio = defineBlock({
       const combat = sl?.alerted && ph === 'playing' ? 1 : 0
       m.tensionVol += (combat * 0.4 - m.tensionVol) * Math.min(1, m.dt * 0.8)
       m.tension.set({ volume: paused ? 0 : m.tensionVol })
-      // 雨声暂停时压到很小；低鸣在标题画面最响，暂停时静音
-      m.rain.set({ volume: paused ? 0.08 : 0.35 })
+      // 低鸣在标题画面最响，暂停时静音
       m.drone.set({ volume: paused ? 0 : ph === 'title' ? 0.35 : 0.2 })
       // 设置面板的总音量
       const vol = s?.volume ?? 0.8
