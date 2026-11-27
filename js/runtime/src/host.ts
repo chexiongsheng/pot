@@ -163,7 +163,8 @@ export interface RaycastResult {
 export type VecProp = 'position' | 'rotation' | 'scale' | 'localPosition' | 'localRotation'
 
 export interface Host {
-  platform: 'unity' | 'node'
+  /** 宿主：Unity（Runner 与发布包）、Node（测试与无画面宿主）、Web（浏览器原生宿主，004 第 20 节） */
+  platform: 'unity' | 'node' | 'web'
   log(level: LogLevel, text: string): void
   /** 读游戏文件（游戏目录相对路径，如 manifest.json、src/plugins/player.ts、data/levels/1.json）。不存在返回 null */
   readText(path: string): string | null

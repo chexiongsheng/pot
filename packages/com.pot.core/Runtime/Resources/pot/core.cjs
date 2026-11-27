@@ -26,6 +26,7 @@ var pot = (() => {
     ANCHORS: () => ANCHORS,
     API_VERSION: () => API_VERSION,
     AudioService: () => AudioService,
+    BLOCKED_GLOBALS: () => BLOCKED_GLOBALS,
     BUFFER_HEAD: () => BUFFER_HEAD,
     BUILTIN_BLOCKS: () => BUILTIN_BLOCKS,
     BUILTIN_PREFABS: () => BUILTIN_PREFABS,
@@ -61,6 +62,7 @@ var pot = (() => {
     MAX_EVENT_ROUNDS: () => MAX_EVENT_ROUNDS,
     MAX_VERTEX_INPUTS: () => MAX_VERTEX_INPUTS,
     NativeBlocks: () => NativeBlocks,
+    PORTABLE_HOST_GLOBALS: () => PORTABLE_HOST_GLOBALS,
     PREFAB: () => PREFAB,
     PluginsService: () => PluginsService,
     PostChain: () => PostChain,
@@ -157,6 +159,7 @@ var pot = (() => {
     rayPlane: () => rayPlane,
     resolveConfig: () => resolveConfig,
     runModule: () => runModule,
+    shieldModuleSource: () => shieldModuleSource,
     slerpQuaternion: () => slerpQuaternion,
     sourcePrefix: () => sourcePrefix,
     symbols: () => symbols,
@@ -10887,6 +10890,62 @@ TS：${r.layout.text}
     bindEntry("unity.info", () => unity.info());
   }
   bindUnity();
+
+  // runtime/src/portable.ts
+  var PORTABLE_HOST_GLOBALS = [
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "queueMicrotask",
+    "performance",
+    "URL",
+    "TextEncoder",
+    "TextDecoder",
+    "console",
+    "globalThis"
+  ];
+  var BLOCKED_GLOBALS = [
+    "window",
+    "self",
+    "document",
+    "navigator",
+    "location",
+    "history",
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "caches",
+    "fetch",
+    "XMLHttpRequest",
+    "WebSocket",
+    "EventSource",
+    "Worker",
+    "SharedWorker",
+    "Image",
+    "Audio",
+    "AudioContext",
+    "HTMLElement",
+    "HTMLCanvasElement",
+    "OffscreenCanvas",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "requestIdleCallback",
+    "alert",
+    "confirm",
+    "prompt",
+    "open",
+    "close",
+    "process",
+    "Buffer",
+    "global",
+    "CS",
+    "puer"
+  ];
+  function shieldModuleSource(code) {
+    return `(function (${BLOCKED_GLOBALS.join(", ")}) { return function (exports, require, module, __filename) {${code}
+} })()`;
+  }
 
   // runtime/src/world/dmath.ts
   var f64 = new Float64Array(1);
