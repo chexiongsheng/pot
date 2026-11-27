@@ -1,6 +1,6 @@
 /**
  * harbor 的场景积木（004 第 19.5 节第 8 步）：harborLevel 与 harborStatics 建出港口整张图，
- * 中继状态读 w.vars.harborRelays，keep 时跨流程状态不重建，去掉后对象全部销毁、着色器不重复编译。
+ * 中继状态读 w.vars.harborRelays，keep 时跨流程状态不重建，去掉后对象全部销毁、着色器不重复编译；雨幕与积水跟随场景里的 weather。
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -10,7 +10,7 @@ const { startGame, frames, run, readGameFiles } = require('./helpers')
 const GAME = 'src/plugins/game.tsx'
 const SALTLINE = path.resolve(__dirname, '../../games/saltline')
 
-function source({ scenery = true } = {}) {
+function source({ scenery = true, weather = '' } = {}) {
   return `import { defineGame } from '@pot/core'
 import realistic from '@pot/kit/realistic'
 import harbor from '@pot/kit/harbor'
@@ -18,6 +18,7 @@ export default defineGame({
   kits: [realistic, harbor],
   flow: { start: 'a', states: { a: { on: { go: 'b' } }, b: { on: { go: 'a' } } } },
   scene: (s) => <>
+    ${weather ? `<entity key="storm" keep weather={${weather}} />` : ''}
     ${scenery ? `<entity key="harbor" keep harborLevel />
     {[0, 1, 2].map((i) => <entity key={'s' + i} keep harborStatics={{ chunk: i, of: 3 }} />)}` : ''}
     <entity key={'marker-' + s.state} name="marker" />
@@ -78,5 +79,34 @@ test('harborLevel、harborStatics：建出地面、海面、雨幕、关卡几�
   frames(g.runtime, 2)
   assert.equal(named(g, /^level:/).length, statics)
   assert.equal(g.engine.objects.size, count)
+  assert.deepEqual(errors(g), [])
+})
+
+test('harborLevel：雨幕与地坪跟随 weather（雨量 × 4/3、湿度 ÷ 0.85），改天气随之变化，没有天气时是干的', async () => {
+  const g = await start({ weather: "{ rain: 0.45, wetness: 0.85 }" })
+  assert.deepEqual(errors(g), [])
+  const apron = () => named(g, /^apron$/)[0].gfx.uniforms
+  const rain = () => named(g, /^rain$/)[0]
+  const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-3, `${msg} 期望 ${b}，实际 ${a}`)
+  near(apron().uRain[0], 0.6, '黄昏暴雨：地坪雨量与迁移前相同')
+  near(apron().uWetG[0], 1, '黄昏暴雨：地坪湿度与迁移前相同')
+  near(rain().gfx.uniforms.uRain[0], 0.6, '雨幕')
+  const me = g.runtime.root.world.query().find((e) => e.b.weather).b.weather
+  me.rain = 0.9
+  me.wetness = 0.425
+  frames(g.runtime, 2)
+  near(apron().uRain[0], 1, '雨量不超过 1')
+  near(apron().uWetG[0], 0.5, '湿度')
+  frames(g.runtime, 600)
+  near(rain().gfx.uniforms.uRain[0], 1, '雨幕缓动到新雨量')
+  // 去掉天气：干
+  g.files.set(GAME, source())
+  const reply = await run(g.runtime, g.pot.devtools.handle({ id: 1, type: 'changed', paths: [GAME] }))
+  assert.equal(reply.data.ok, true, reply.data.error)
+  frames(g.runtime, 2)
+  near(apron().uRain[0], 0, '没有天气时地坪不下雨')
+  near(apron().uWetG[0], 0, '没有天气时地坪干')
+  frames(g.runtime, 600)
+  assert.equal(rain().active, false, '雨幕停了就隐藏')
   assert.deepEqual(errors(g), [])
 })

@@ -2,10 +2,12 @@
  * harbor 的场景积木（004 第 19.5 节第 8 步）：港口整张图的样子。
  * - harborLevel（一个实体）：原版地面（apron）、海面、雨幕、buildLevel 的码头几何（常量，不读游戏数据）、原版动态网格（闸杆、中继等，
  *   每帧同步原版动画）、远景闪灯与海鸥、原版点光、中继灯。中继状态读 w.vars.harborRelays（游戏写）。
+ *   雨幕的雨量与地坪的积水、湿度跟随场景里的 weather（realistic 的 currentWeather），没有天气时是干的。
  * - harborStatics（若干实体，chunk / of 分份）：原版合并后的静态网格。分成几份，启动预热在实体之间让帧，加载界面不卡。
  * 材质（GPU 烘焙的原版材质）、表面贴图、喷字、闪灯与海鸥着色器按 World 缓存，几个积木共用；场景对象按实体建，exit 倒序销毁。
  */
 import { defineBlock } from '@pot/core'
+import { currentWeather } from '@pot/kit/realistic'
 import type { Context, Entity, MaterialOptions, Texture } from '@pot/core'
 import { createMats, MATS, type Mat, type Mats } from '@pot/kit/realistic/mats'
 import { toMesh } from '@pot/kit/realistic/geo'
@@ -220,6 +222,9 @@ interface LevelLook {
   dynData: Float32Array
   lights: { l: any; ent: Entity; last: number }[]
   relays: { ud: any; light: Entity }[]
+  /** 已下发给雨幕与地坪的雨量、湿度（-1 为未下发） */
+  rainLevel: number
+  wet: number
   time: number
   frame: number
   dt: number
@@ -231,7 +236,7 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
   const { scene } = ctx
   const M = mats(S, ctx, me.tex)
   shaders(S, ctx)
-  const L: LevelLook = { objs: [], dynamic: [], dynIds: new Int32Array(0), dynData: new Float32Array(0), lights: [], relays: [], time: ctx.clock.time, frame: ctx.clock.frame, dt: 0 }
+  const L: LevelLook = { objs: [], dynamic: [], dynIds: new Int32Array(0), dynData: new Float32Array(0), lights: [], relays: [], rainLevel: -1, wet: -1, time: ctx.clock.time, frame: ctx.clock.frame, dt: 0 }
   const add = <E extends Entity>(o: E): E => (L.objs.push(o), o)
   const rand = rng(1931)
 
@@ -354,9 +359,30 @@ function dropLevel(L: LevelLook) {
   L.relays = []
 }
 
+/**
+ * 雨幕与地坪跟随天气。港区的着色器按原版调过：雨幕与地坪 uRain 0.6、地坪 uWetG 1 是 saltline 的黄昏暴雨（weather 雨量 0.45、湿度 0.85），
+ * 所以雨量乘 4/3、湿度除以 0.85 再交给着色器（都不超过 1）；值变了才下发
+ */
+export function harborRainLevels(now: { rain: number; wetness: number } | undefined): { rain: number; wet: number } {
+  return { rain: Math.min(1, (now?.rain ?? 0) * 4 / 3), wet: Math.min(1, (now?.wetness ?? 0) / 0.85) }
+}
+
+function followWeather(L: LevelLook, w: { registry: object }) {
+  const { rain, wet } = harborRainLevels(currentWeather(w))
+  if (rain !== L.rainLevel) {
+    L.rainLevel = rain
+    L.rain?.setRain(rain)
+    L.apron?.setRain(rain)
+  }
+  if (wet !== L.wet) {
+    L.wet = wet
+    L.apron?.setWet(wet)
+  }
+}
+
 export const harborLevel = defineBlock({
   name: 'harborLevel',
-  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
+  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕（雨量与积水跟随场景里的 weather，没有天气时是干的）、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
   props: LEVEL_PROPS,
   view: {
     // 实测（Windows）约 350 ms：地面遮罩与细节、海面、雨幕、关卡几何、动态网格；harborStatics 每份约 80 ms，缺省 1
@@ -374,6 +400,7 @@ export const harborLevel = defineBlock({
       const relays: string[] = w.vars.harborRelays ?? []
       L.relays.forEach((r, i) => r.ud.setState?.(relays[i] ?? 'live'))
       syncOrig(L, ctx as any, dt)
+      followWeather(L, w)
       L.rain?.update(dt)
       for (const r of L.relays) {
         const c = hdr(r.ud.emissiveMaterial.color)

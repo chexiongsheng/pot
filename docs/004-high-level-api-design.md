@@ -2311,6 +2311,14 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 遗留：港口的雨幕与积水地坪写死雨量 0.6，不跟 `<Harbor weather>`，下一步改为读 `currentWeather(w)`。
 - 字节数：realistic 的 `index.ts` 18278、`weather.ts` 8449；harbor 的 `place.tsx` 4026；saltline 的 `audio.ts` 3835，`src` 83363。
 
+第 13 步续（港口跟随天气）：
+
+- 起因：第 13 步的遗留。港口的雨幕与积水地坪写死雨量 0.6、全湿，`<Harbor weather>` 改成小雨或去掉天气，地面照样是湿的。
+- harbor：`scene.ts` 的 `harborLevel` 每帧在 `syncOrig` 之后读 `currentWeather(w)`，值变了才调雨幕的 `setRain` 与地坪的 `setRain`、`setWet`。换算写在 `harborRainLevels`：雨量 ×4/3、湿度 ÷0.85，都封顶 1。`DUSK_STORM` 的雨量 0.45、湿度 0.85，换算后正是原来写死的 0.6 与全湿，所以缺省黄昏暴雨的画面与第 13 步前一致（地坪 `uRain` 0.6、`uWetG` 1）。没有 weather 实体时雨量与湿度为 0，港口是干的，雨幕随之淡出。
+- 测试：`kit-harbor.test.js` 新增一例：黄昏暴雨时地坪 0.6/1、雨幕 0.6；改为雨量 0.9、湿度 0.425 后地坪 1/0.5，600 帧后雨幕到 1；去掉天气后地坪 0/0，再过 600 帧雨幕停用。
+- 验证：`npm test` 306/307（仅 pot_gfx 一致性），玩家金标准、敌人回归不变；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 仍为 d304293d（只改表现层）。没有做 Runner 实机验证。
+- 字节数：harbor 的 `scene.ts` 21904。
+
 ### 19.6 后续：积木预览
 
 需求：单独看一个套件提供的东西，不进具体游戏，例如预览港口、机械猎犬、机械飞鸥。设计待定，先记约束：
