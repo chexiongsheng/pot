@@ -183,6 +183,22 @@ export class WebScene {
     return this.objects.has(id)
   }
 
+  /** 给 spawn('skin:名字') 的对象绑定骨骼（PotScene.Skin）；成功返回空串 */
+  skin(id: number, boneIds: ArrayBuffer | ArrayBufferView | null): string {
+    const o = this.objects.get(id)
+    const mesh = o && o.shape.startsWith('skin:') ? this.meshes.get(o.shape.slice(5)) : undefined
+    if (!o || !mesh) return '对象不是蒙皮网格'
+    const need = mesh.skin ? mesh.skin.bindPoses.length / 16 : 0
+    if (need === 0) return '网格没有骨骼数据（注册网格时需要 boneIndices）'
+    const b = boneIds && boneIds.byteLength >= 4 ? viewOf(boneIds, Int32Array) : null
+    if (!b || b.length < need) return `骨骼数量不足：网格需要 ${need} 根，只给了 ${b ? b.length : 0} 根`
+    for (let i = 0; i < b.length; i++) if (!this.objects.has(b[i])) return `第 ${i} 根骨骼不存在`
+    o.ext.bones = Array.from(b)
+    // 物体空间三平面改用静止姿态采样（PotLit 的 _Rest）
+    ;(o.ext.floats ??= {})._Rest = 1
+    return ''
+  }
+
   /** 由 pot 创建的存活对象数（不含相机） */
   count(): number {
     return this.objects.size - 1

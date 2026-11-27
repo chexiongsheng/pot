@@ -6,9 +6,12 @@
  */
 import { M4, multiply, perspective, rotateVector, srgbToLinear, viewFromCamera } from './math'
 import { primitiveMesh } from './geometry'
+import type { MeshSkinData } from './mesh'
 import { WebObject, WebScene } from './scene'
 
 const MAX_LIGHTS = 8
+/** 骨骼矩阵贴图占用的纹理单元（0 起留给材质贴图） */
+const BONE_UNIT = 7
 
 const VS = `#version 300 es
 layout(location = 0) in vec3 aPos;
@@ -16,17 +19,33 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
 layout(location = 3) in vec4 aColor;
 layout(location = 4) in vec4 aTangent;
+layout(location = 12) in uvec4 aBones;
+layout(location = 13) in vec4 aWeights;
 uniform mat4 uModel;
 uniform mat3 uNormalMat;
 uniform mat4 uViewProj;
+uniform int uSkinned;
+uniform highp sampler2D uBones;
 out vec3 vWorld;
 out vec3 vNormal;
 out vec2 vUV;
 out vec4 vColor;
+mat4 boneMatrix(uint i) {
+  int y = int(i);
+  return mat4(texelFetch(uBones, ivec2(0, y), 0), texelFetch(uBones, ivec2(1, y), 0), texelFetch(uBones, ivec2(2, y), 0), texelFetch(uBones, ivec2(3, y), 0));
+}
 void main() {
-  vec4 w = uModel * vec4(aPos, 1.0);
+  vec4 w;
+  if (uSkinned == 1) {
+    // 骨骼矩阵 = 骨骼世界矩阵 × bindPose，蒙皮结果直接在世界空间（同 SkinnedMeshRenderer）
+    mat4 s = boneMatrix(aBones.x) * aWeights.x + boneMatrix(aBones.y) * aWeights.y + boneMatrix(aBones.z) * aWeights.z + boneMatrix(aBones.w) * aWeights.w;
+    w = s * vec4(aPos, 1.0);
+    vNormal = mat3(s) * aNormal;
+  } else {
+    w = uModel * vec4(aPos, 1.0);
+    vNormal = uNormalMat * aNormal;
+  }
   vWorld = w.xyz;
-  vNormal = uNormalMat * aNormal;
   vUV = aUV;
   vColor = aColor;
   gl_Position = uViewProj * w;
@@ -213,6 +232,12 @@ export class WebRenderer {
   private proj: M4 = new Float32Array(16)
   private viewProj: M4 = new Float32Array(16)
   private nmat = new Float32Array(9)
+  private boneTex: WebGLTexture
+  private boneRows = 1
+  private boneData = new Float32Array(16)
+  private tmp: M4 = new Float32Array(16)
+  private static readonly IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+  private static readonly IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])
   /** 最近一帧的视投影矩阵与视口尺寸（worldToScreen / 拾取用） */
   lastViewProj: M4 = new Float32Array(16)
   lastWidth = 1
@@ -224,13 +249,52 @@ export class WebRenderer {
     const names = [
       'uModel', 'uNormalMat', 'uViewProj', 'uColor', 'uEmission', 'uMetallic', 'uSmooth', 'uLit', 'uFogMode', 'uCutoff', 'uCamPos',
       'uMainDir', 'uMainColor', 'uLightCount', 'uLightPos', 'uLightColor', 'uLightDir', 'uLightSpot',
-      'uAmbSky', 'uAmbEquator', 'uAmbGround', 'uReflection', 'uFogColor', 'uFogDensity', 'uVColor',
+      'uAmbSky', 'uAmbEquator', 'uAmbGround', 'uReflection', 'uFogColor', 'uFogDensity', 'uVColor', 'uSkinned', 'uBones',
     ]
     for (const n of names) this.loc[n] = gl.getUniformLocation(this.program, n)
-    // 未启用的顶点属性取常量：没 UV 为 0，没顶点色为白，没切线为 +X
+    // 未启用的顶点属性取常量：没 UV 为 0，没顶点色为白，没切线为 +X，没蒙皮为骨骼 0 权重 1
     gl.vertexAttrib2f(2, 0, 0)
     gl.vertexAttrib4f(3, 1, 1, 1, 1)
     gl.vertexAttrib4f(4, 1, 0, 0, 1)
+    gl.vertexAttribI4ui(12, 0, 0, 0, 0)
+    gl.vertexAttrib4f(13, 1, 0, 0, 0)
+    gl.useProgram(this.program)
+    gl.uniform1i(this.loc.uBones, BONE_UNIT)
+    this.boneTex = gl.createTexture()!
+    gl.activeTexture(gl.TEXTURE0 + BONE_UNIT)
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 4, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(16))
+    gl.activeTexture(gl.TEXTURE0)
+  }
+
+  /** 蒙皮对象：把骨骼矩阵（骨骼世界矩阵 × bindPose）写进骨骼贴图；不是蒙皮或还没绑骨骼返回 false */
+  private uploadBones(scene: WebScene, o: WebObject): boolean {
+    const bones: number[] | undefined = o.ext.bones
+    if (!bones || !o.shape.startsWith('skin:')) return false
+    const skin = scene.meshes.get(o.shape.slice(5))?.skin
+    if (!skin) return false
+    const n = skin.bindPoses.length / 16
+    if (this.boneData.length < n * 16) this.boneData = new Float32Array(n * 16)
+    const bd = this.boneData
+    for (let i = 0; i < n; i++) {
+      const b = scene.get(bones[i])
+      if (b) multiply(scene.worldMatrix(b), skin.bindPoses.subarray(i * 16, i * 16 + 16), this.tmp)
+      else this.tmp.set(skin.bindPoses.subarray(i * 16, i * 16 + 16))
+      bd.set(this.tmp, i * 16)
+    }
+    const gl = this.gl
+    gl.activeTexture(gl.TEXTURE0 + BONE_UNIT)
+    gl.bindTexture(gl.TEXTURE_2D, this.boneTex)
+    if (this.boneRows !== n) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 4, n, 0, gl.RGBA, gl.FLOAT, bd, 0)
+      this.boneRows = n
+    } else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 4, n, gl.RGBA, gl.FLOAT, bd, 0)
+    gl.activeTexture(gl.TEXTURE0)
+    return true
   }
 
   private link(vs: string, fs: string): WebGLProgram {
@@ -262,7 +326,7 @@ export class WebRenderer {
       }
       if (!data || data.vertexCount === 0 || data.indices.length === 0) return null
       if (!g) {
-        g = this.upload(data.positions, data.normals, data.uvs, data.colors, data.tangents, data.indices)
+        g = this.upload(data.positions, data.normals, data.uvs, data.colors, data.tangents, data.indices, data.skin)
         g.version = data.version
         this.custom.set(name, g)
       }
@@ -276,24 +340,29 @@ export class WebRenderer {
   }
 
   private upload(positions: Float32Array, normals: Float32Array, uvs: Float32Array | null, colors: Float32Array | null,
-    tangents: Float32Array | null, indices: Uint32Array): GpuMesh {
+    tangents: Float32Array | null, indices: Uint32Array, skin: MeshSkinData | null = null): GpuMesh {
     const gl = this.gl
     const vao = gl.createVertexArray()!
     const buffers: WebGLBuffer[] = []
     gl.bindVertexArray(vao)
-    const attrib = (loc: number, arr: Float32Array, size: number) => {
+    const attrib = (loc: number, arr: Float32Array | Uint32Array, size: number) => {
       const buf = gl.createBuffer()!
       buffers.push(buf)
       gl.bindBuffer(gl.ARRAY_BUFFER, buf)
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW)
       gl.enableVertexAttribArray(loc)
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0)
+      if (arr instanceof Uint32Array) gl.vertexAttribIPointer(loc, size, gl.UNSIGNED_INT, 0, 0)
+      else gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0)
     }
     attrib(0, positions, 3)
     attrib(1, normals, 3)
     if (uvs) attrib(2, uvs, 2)
     if (colors) attrib(3, colors, 4)
     if (tangents) attrib(4, tangents, 4)
+    if (skin) {
+      attrib(12, skin.bones, 4)
+      attrib(13, skin.weights, 4)
+    }
     const ib = gl.createBuffer()!
     buffers.push(ib)
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib)
@@ -430,10 +499,18 @@ export class WebRenderer {
     const gl = this.gl
     const L = this.loc
     const mi = modeInfo(o.mat.mode)
-    const model = scene.worldMatrix(o)
-    const det = normalMatrix(model, this.nmat)
-    gl.uniformMatrix4fv(L.uModel, false, model)
-    gl.uniformMatrix3fv(L.uNormalMat, false, this.nmat)
+    const skinned = this.uploadBones(scene, o)
+    let det = 1
+    if (skinned) {
+      gl.uniformMatrix4fv(L.uModel, false, WebRenderer.IDENTITY)
+      gl.uniformMatrix3fv(L.uNormalMat, false, WebRenderer.IDENTITY3)
+    } else {
+      const model = scene.worldMatrix(o)
+      det = normalMatrix(model, this.nmat)
+      gl.uniformMatrix4fv(L.uModel, false, model)
+      gl.uniformMatrix3fv(L.uNormalMat, false, this.nmat)
+    }
+    gl.uniform1i(L.uSkinned, skinned ? 1 : 0)
 
     const cull = o.mat.cull ?? mi.cull
     if (cull === 'none') gl.disable(gl.CULL_FACE)
@@ -466,6 +543,7 @@ export class WebRenderer {
     for (const m of this.custom.values()) this.free(m)
     this.prims.clear()
     this.custom.clear()
+    gl.deleteTexture(this.boneTex)
     gl.deleteProgram(this.program)
   }
 }

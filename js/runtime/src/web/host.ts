@@ -63,7 +63,6 @@ const NEUTRAL: Record<string, any> = {
   gfxInstances: 'Web 宿主暂不支持实例缓冲',
   audioClip: false,
   audioHas: false,
-  skin: 'Web 宿主暂不支持蒙皮',
   colliderShape: '',
 }
 
@@ -126,6 +125,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     meshColors: (name, colors, linear) => scene.meshes.colors(name, colors, linear),
     meshAttribute: (name, channel, attr, size, data) => scene.meshes.attribute(name, channel, attr, size, data),
     meshSkin: (name, boneIndices, weights, bindPoses) => scene.meshes.skin(name, boneIndices, weights, bindPoses),
+    skin: (id, bones) => scene.skin(id, bones),
   }
   scene.warn = (text) => log('warn', text)
 
