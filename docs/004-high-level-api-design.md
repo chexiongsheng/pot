@@ -1,8 +1,8 @@
 # 004 pot：高层游戏编写方式（积木与 TSX）设计文档
 
-状态：M1 已完成，M2 实施中。方向已定：可序列化的实体数据内核，加 TSX 作为唯一的编写前端。第 14 节是远期的待决事项，M1、M2 用到的部分分别在第 15、16 节给出临时决定
+状态：M1 到 M4 已完成，M3.5 已完成，M6 实施中（计划调整，先于 M5）。方向已定：可序列化的实体数据内核，加 TSX 作为唯一的编写前端。第 14 节是远期的待决事项，各阶段用到的部分在第 15 到 20 节的实施规格里给出临时决定
 上级文档：`001-game-runner-design.md` 第 7 节（Game API 设计原则）、`002-hot-reload-design.md`
-修订：第 4 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节），第 4 版加入套件（6.12）：积木与预制件分系统、套件、游戏三层，系统级只留与玩法和风格无关的部分；第 5 版补充 M2 实施规格（第 16 节）
+修订：第 4 版。第 1 版推荐“数据内核加 JSON 与 TS 双前端”，第 2 版把两种前端合并为 TSX，第 3 版补充 M1 实施规格（第 15 节），第 4 版加入套件（6.12）：积木与预制件分系统、套件、游戏三层，系统级只留与玩法和风格无关的部分；第 5 版补充 M2 实施规格（第 16 节）；之后依次补充 M3（第 17 节）、M4（第 18 节）、M3.5（第 19 节）、M6（第 20 节）的实施规格
 
 ## 0. 摘要
 
@@ -723,7 +723,7 @@ TSX 没有带来新的障碍：`scene` 是纯函数，各端求值结果相同�
 | M3.5 saltline 全面迁移（施工说明见第 19 节） | 套件资源（着色器等数据文件进套件）；saltline 的模型、贴图、着色器、渲染、特效进 `realistic`，港口场景进 `harbor`，机械敌人进 `mech`，枪械逻辑进 `fps`；导演逻辑改为积木、流程与 `vars`；界面改为 `ui` 树；全游戏只有 `game.tsx` 一个 `defineGame` | `games/saltline` 只剩 TSX 与配置数据；玩家金标准与敌人回归测试通过，实机行为一致；手写源码大幅减少 |
 | M4 C# 积木 | 原生实现注册、列共享与跨语言开销实测、`pot block verify`；移植碰撞和一个移动积木；评估 wasm 物理库 | 同一录像两种实现结果一致，给出性能对比 |
 | M5 联机 | `ctx.net`、房间服务、本地回环驱动与录像回放、权威同步、帧同步、回合制，按此顺序 | 每种驱动各有一个示例游戏和 Node 上的自动化用例 |
-| M6 Web 原生宿主（远期） | `Engine` 子集的 Web 实现、可移植契约的屏蔽层 | hello 的高层版本在不含 Unity 的网页里运行 |
+| M6 Web 原生宿主（施工说明见第 20 节，先于 M5 实施） | `Engine` 子集的 Web 实现、可移植契约的屏蔽层 | hello 的高层版本在不含 Unity 的网页里运行；最终 saltline 在网页里运行 |
 
 每个阶段结束都可以停下来评估，M1 的结果决定是否继续。
 
@@ -2391,3 +2391,128 @@ F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` �
 - 地图组件不给属性也能放出来，用套件自带的缺省数据（第 12 步把港区布局移进 harbor 就是为此）。
 - 敌人预览要能不依赖玩家：没有目标时站着待机或按巡逻走，`mechFrozen` 可以冻结行为只看模型与动画。
 - 入口可能是 `pot preview <套件> <组件或预制件>`，在 Runner 里起一个只挂这一项、带自由相机的临时游戏；也可能放进 devtools。实施前再定。
+
+## 20. M6 实施规格
+
+M6 的目标见第 12 节：`Engine` 的 Web 实现与可移植契约的屏蔽层，游戏不经 Unity 在普通网页里运行。计划调整后 M6 先于 M5 实施。验收分两档：先让 hello-tsx 跑起来（20.2 的 web-1），最后让 saltline 跑起来（web-3）。本节是实施规格，与第 8 节不一致的以这里为准。
+
+### 20.1 临时决定
+
+- 渲染自己写，直接用 WebGL2，不引入 three.js 的渲染器。原因：一是坐标、光照、雾、阴影的约定要和 Unity 侧（`PotScene.cs`、`PotLit.shader`、pot_gfx）一致，套一层 three 的场景图反而要处处换算；二是 saltline 的 gfx 着色器本来就写成 GLSL ES（gfx.ts 开头），在 WebGL2 上只需要换版本头与少量宏，pot_gfx 的 WebGL 后端（`Plugins/WebGL/pot_gfx/backend_gles3.cpp`）就是这么做的，可以照着移植；三是体积小，web-1 只需要几个图元和一个光照着色器。
+- 宿主代码放在 `js/runtime/src/web/`（TS，参与 typecheck），单独打包为 `dist/web.js`（含运行时核心，esbuild iife，`globalThis.pot`），不进 `core.cjs`，也不进 Unity 包。
+- 浏览器里只跑发布包，不转译 TS、不热重载。开发期仍用 Runner；网页是发布目标。`pot web <游戏目录> [输出目录]` 先走 `buildRelease`，再产出静态站点（20.6）。
+- `readText` 是同步接口，所以游戏的文本文件（`manifest.json`、`data/**`、套件资源）在构建时打进 `game.js` 的文件表，启动前全部在内存里；`bundle.cjs` 包成 `globalThis.__potBundle` 工厂（与 `PotBuild.cs` 的 bundle-factory 相同），浏览器不需要 `eval`。
+- `host.platform` 增加 `'web'`。`cacheRead/cacheWrite` 用 `localStorage`（键前缀 `pot:<游戏 id>:`），state 存档同样走它；`nativeBlocks` 不提供，原生积木一律用 TS 实现（18.4 的回退本来就有）。
+- 没实现的 `Engine` 方法不报错：第一次调用时 `warn` 一次“Web 宿主不支持 X”，返回中性值（与 `headless.js` 的 `wrapEngine` 同一约定：字符串方法返回 `''`，查询返回 `null` 或 0）。这样能力不全的游戏也能先跑起来，缺什么一眼可见。
+
+### 20.2 能力分档
+
+按真实游戏实际调用的 `Engine` 方法分档（在无画面宿主上把 hello-tsx、saltline 的各流程状态各推进 120 帧统计得出）：
+
+| 档 | 方法 | 目标游戏 |
+|---|---|---|
+| web-1 | `spawn`（cube、sphere、capsule、cylinder、plane、quad、empty）、`destroy`、`exists`、`count`、`setVec`、`getVec`、`setTransforms`、`lookAt`、`setColor`、`setActive`、`visible`、`light`、`lightIntensity`、`cameraId`、`setBackground`、`view`、`axis`、`key`、`mouse`、`screen`、`wheel`、`focused`、`textInput`、`cursor`、`cursorLocked`、`uiSubmit`、`uiMeasure`、`gfxBackend` | hello-tsx |
+| web-2 | `material`、`surface`、`emission`、`fog`、`ambient`、`ambientTrilight`、`lightOptions`、`mesh`、`meshCached`、`meshTangents`、`meshColors`、`meshAttribute`、`texture`、`destroyTexture`、`matTexture`、`matFloat`、`matVector`、`collider`、`colliderShape`、`layer`、`raycast`、`sphereCast`、`audio*` | 带材质、网格、音效、射线的中等游戏 |
+| web-3 | `gfxProgram`、`gfxDestroyProgram`、`gfxBind`、`gfxUniform`、`gfxUniformArray`、`gfxTexture`、`gfxInstances`、`gfxBakeBegin`、`gfxBake`、`gfxPost`、`gfxPostEnable`、`render`（sky、fog、weather、reflection、quality、post、refresh）、`textTexture`、`canvasText`、`burst`、`skin`、`meshSkin` | saltline |
+
+`manifest.capabilities` 的静态推导（第 8 节末段）不在 M6 做；M6 用上表的运行时统计代替，`pot web` 构建后可以打印游戏用到而 Web 宿主没实现的方法（20.8）。
+
+### 20.3 场景与坐标
+
+- 场景数据与渲染分开：`web/scene.ts` 的 `WebScene` 是纯 JS 的对象表（层级、局部变换、颜色、灯光、相机、环境），不碰 DOM，Node 上可测；`web/gl.ts` 每帧读它画出来。
+- 坐标沿用 Unity：左手系，Y 向上，相机看 +Z；欧拉角是度，旋转顺序与 Unity 相同（先 Z，再 X，再 Y，与 `scene.ts` 的 `eulerToQuaternion` 一致）。`getVec('rotation')` 返回 0 到 360 的欧拉角（与 Unity 的 `eulerAngles` 同一范围）。
+- 视矩阵 = diag(1, 1, -1) × 相机世界矩阵的逆，投影用 OpenGL 约定的透视矩阵（竖直 fov）。z 翻转不改变屏幕上的 x、y，所以 Unity 约定的网格（顺时针为正面）在 WebGL 里用 `frontFace(CW)`。
+- 图元尺寸与 Unity 内置相同：cube 边长 1；sphere 直径 1；capsule 高 2、半径 0.5；cylinder 高 2、半径 0.5；plane 10 × 10、法线 +Y；quad 1 × 1、法线 -Z。
+- 默认值与 `PotScene.Clear` / `ResetEnvironment` 相同：相机在 (0, 1, -10)、无旋转，fov 60、near 0.3、far 1000，背景 (0.1, 0.1, 0.12)，平坦环境光 (0.35, 0.35, 0.38)，无雾。
+- `setColor` 的颜色是 sRGB。绘制在线性空间做光照，最后转回 sRGB 输出（Unity 工程用线性色彩空间）。
+- web-1 的光照：一个主平行光（第一个 directional 灯，`RenderSettings.sun` 同一规则）加最多 8 个点光或聚光，漫反射用 Lambert，高光用 Blinn-Phong，光滑度缺省 0.5，近似 URP Lit；点光衰减按 Unity URP 的平滑衰减（距离平方反比，到 range 处平滑降到 0）。阴影放到 web-3。
+
+### 20.4 输入
+
+`web/input.ts` 把 DOM 事件折算成 `PotInput.cs` 的语义：
+
+- 键名：`KeyboardEvent.code` 映射到 Unity `KeyCode` 名的小写，例如 `KeyW` → `w`、`Digit1` → `alpha1`（也接受 `1`）、`Space` → `space`、`Escape` → `escape`、`Enter` → `return`、`ShiftLeft` → `leftshift`、`ArrowUp` → `uparrow`；鼠标按键 0、1、2 → `mouse0`、`mouse1`、`mouse2`。
+- `key(name, mode)`：mode 0 按住、1 本帧按下、2 本帧抬起。按下与抬起的边沿在每帧 `tick` 之后清空；窗口失焦时清空所有按住的键，避免卡键。
+- `axis('move')`：WASD 或方向键，左为 x = -1，W 为 y = +1，两个方向同时按为 0；不做归一化（与 `PotInput.cs` 相同）。`axis('look')`：本帧鼠标移动量（锁定指针时用 `movementX/Y`，y 向上为正）。
+- `mouse()`：画布内的像素坐标，左上角为原点；`screen()`：画布的像素尺寸（CSS 尺寸 × `devicePixelRatio`）；`wheel()`：本帧滚轮量，向上为正；`focused()`：页面可见且有焦点；`textInput()`：本帧输入的字符，退格为 `\b`，回车为 `\n`。
+- `cursor(true)` 请求 Pointer Lock，浏览器要求在用户手势里调用，所以失败时在下一次点击画布时重试；`cursorLocked()` 读实际状态。
+- 浏览器的默认行为（空格滚页、方向键、Tab、右键菜单）在画布有焦点时屏蔽。
+
+### 20.5 界面
+
+`web/ui.ts` 用一张叠在 WebGL 画布上的 Canvas2D 复刻 `PotUI.cs` 的命令（记录分隔 `\u001e`，字段分隔 `\u001f`，颜色 rrggbbaa）：
+
+- `r` 圆角矩形、`b` 描边、`l` 线、`a` 弧（度，0 度朝上、顺时针）、`g` 渐变（按预乘 alpha 插值，Canvas2D 的 `createLinearGradient` 也是预乘插值）、`t` 文字、`i` 图片（贴图 id 指向 `texture` 建的贴图，web-2 起支持）、`c`/`C` 裁剪压栈与出栈。
+- 文字：字体族 `"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif`；行高 1.32 em；九宫格对齐与 w、h 为 0 时以 (x, y) 为锚点的规则同 `PotUI.cs`；flags 的粗体、阴影（黑色、alpha 0.75、偏移 1 像素）、换行（按宽度断行，中文逐字可断）、等宽、字重（位 4 到 7 为字重 / 100）。
+- `uiMeasure` 用同一套断行与行高，返回 [宽, 高]，保证布局与绘制一致。
+- `uiSubmit` 只保存命令串，绘制在每帧渲染之后统一做；命令串不变时不重画。
+
+### 20.6 构建与页面
+
+- `js/scripts/build.js` 增加 `dist/web.js`（入口 `js/runtime/src/web/index.ts`，含运行时核心）。
+- `pot web <游戏目录> [输出目录]`（缺省 `<游戏目录>/.pot/web`）：先 `buildRelease` 到临时目录，再写出：
+  - `index.html`：一个全屏画布、加载提示，依次加载 `pot-web.js`、`game.js`，然后调用 `pot.web.boot()`。
+  - `pot-web.js`：`dist/web.js` 的副本。
+  - `game.js`：`globalThis.__potFiles = { 路径: 文本 }`（manifest.json、data/**）与屏蔽层包裹的 `globalThis.__potBundle`（20.7）。
+- 页面入口 `pot.web.boot(options?)`：建画布与宿主，`createRuntime(host)` 后 `start()`；启动期间每帧调 `root.loading.pump()` 并把 `host.loading` 的进度显示在加载提示上；运行后每帧 `runtime.tick(dt)`（dt 上限 0.1 秒），再渲染场景与界面。页面隐藏时暂停。
+- 验收时用 `pot web` 产出的目录做静态预览，在浏览器里实际操作。
+
+### 20.7 可移植契约与屏蔽层
+
+- 清单（`js/runtime/src/portable.ts` 导出 `PORTABLE_GLOBALS`）：JS 内置对象（`Object`、`Math`、`JSON`、`Promise`、`Map`、`Set`、`WeakMap`、`WeakRef`、`Symbol`、类型化数组、`Error` 系列等）加 `setTimeout`、`clearTimeout`、`setInterval`、`clearInterval`、`queueMicrotask`、`performance`、`URL`、`TextEncoder`、`TextDecoder`、`console`、`globalThis`。
+- 屏蔽名单（`BLOCKED_GLOBALS`）：`window`、`self`、`document`、`navigator`、`location`、`history`、`localStorage`、`sessionStorage`、`indexedDB`、`fetch`、`XMLHttpRequest`、`WebSocket`、`Worker`、`Image`、`Audio`、`HTMLElement`、`HTMLCanvasElement`、`requestAnimationFrame`、`cancelAnimationFrame`、`alert`、`process`、`require`、`module`（`require`、`module` 由模块包装另给）、`Buffer`、`CS`、`puer`。
+- Web 构建的屏蔽做法：`game.js` 里把 bundle 包成 `globalThis.__potBundle = (function (window, self, document, ...) { return function (exports, require, module, __filename) { 代码 } })()`，外层不传参数，名单里的名字在游戏代码里全部是 `undefined`，第三方库的特性检测自然走非浏览器分支。运行时核心不包这一层。
+- `pot check` 增加一项：游戏源码（`src/**`，不含套件）里把名单内的名字当自由变量用时报警告，指出文件与行号。做法是用 TypeScript 的语法树找没有本地声明的标识符，属性访问与对象键不算。
+
+### 20.8 web-2、web-3 的要点
+
+- 材质：`material` 的 mode（lit、lit-fade、lit-cutout、lit-twosided、unlit、unlit-fade、additive）对应混合、深度写入与剔除；`surface` 的金属度与光滑度进 web-1 的光照着色器（改为 GGX 近似）；`emission` 直接加到输出。
+- 网格：`mesh` 的参数与 Unity 侧相同（位置、法线、UV、顶点色、索引的 ArrayBuffer），`key` 相同的网格共用缓冲区；`meshAttribute` 的通道进 location 5 起的顶点属性（与 gfx.ts 的 `vertexInputs` 一致）。
+- 贴图：`texture` 的数据是 RGBA8，`linear` 决定是否按 sRGB 采样，mipmap、wrap、filter、aniso 照参数设。
+- 碰撞与射线：`colliderShape` 记录 box、sphere、capsule、mesh，`raycast`/`sphereCast` 在 JS 里做（对象数不多，先遍历；慢了再加网格加速），结果格式与 Unity 相同；`layer` 与 mask 按位过滤。
+- 音频：WebAudio。`audioClip` 收 PCM16 base64；空间音效用 `PannerNode`，听者跟随相机；浏览器要求用户手势后才能出声，第一次点击或按键时 `resume()`。
+- gfx：照 `backend_gles3.cpp` 移植。着色器预置代码与 `BUILTIN_UNIFORMS`、`LIBRARY` 由运行时传入，Web 宿主只把 `#version 310 es` 换成 `#version 300 es` 并按 WebGL2 的限制处理（`layout(location)` 只用于顶点输入与片元输出）；uniform 按名字缓存位置；`pot_*` 内置 uniform 每帧、每个对象填充，约定与 `PotGfx.cs` 的 `FrameBuiltins`、`ObjectBuiltins` 相同。`gfxBake` 用帧缓冲（MRT 用 `drawBuffers`，浮点目标要 `EXT_color_buffer_float`），`gfxPost` 按 pass 链在 HDR 帧缓冲上执行。
+- `render`：sky、fog、weather、reflection、quality 各有一份 JSON 配置，Web 宿主照 `PotRender.cs` 实现对应的效果；quality 里 Web 做不到的项忽略并告警一次。
+- 阴影：主平行光的级联阴影贴图，参数与 `pot_ShadowMatrix`、`pot_ShadowSpheres` 约定一致，pot_gfx 着色器的 `<pot/shadow>` 可直接用。
+- 以上每一项先对照 Unity 侧实现读清楚约定，再写 Web 版；做不到逐像素一致，目标是画面观感与玩法一致。
+
+### 20.9 文件清单
+
+新增：`js/runtime/src/portable.ts`；`js/runtime/src/web/`（`index.ts` 入口与 `pot.web.boot`、`host.ts` 宿主、`scene.ts` 场景数据、`math.ts` 矩阵与四元数、`geometry.ts` 图元、`gl.ts` 渲染、`input.ts`、`keys.ts` 键名映射、`ui.ts`，web-2、web-3 再加 `mesh.ts`、`audio.ts`、`physics.ts`、`gfx.ts`、`render.ts`）；`js/devserver/web.js`（`pot web` 构建）；测试见 20.10。
+
+修改：`host.ts`（`platform` 加 `'web'`）、`js/scripts/build.js`（`dist/web.js`）、`cli.js`、`mcp.js`（`pot web`）、`builder.js`（`pot check` 的全局对象检查）、Skill。
+
+### 20.10 测试
+
+| 文件 | 覆盖 |
+|---|---|
+| `web-keys.test.js` | DOM `code` 到 Unity 键名的映射；`move` 轴的合成；按下、抬起边沿只在一帧内为真 |
+| `web-scene.test.js` | `WebScene` 的层级与局部、世界变换；`setTransforms` 的四种 flags；`getVec('rotation')` 与 Unity 一致的欧拉角范围；`lookAt`；默认相机与环境 |
+| `web-ui.test.js` | 命令串解析；`uiMeasure` 的断行与行高（用假的测量函数） |
+| `web-build.test.js` | `pot web` 产出三个文件；`game.js` 在 `vm` 里执行后 `__potFiles`、`__potBundle` 可用，屏蔽名单里的名字在游戏代码里为 `undefined` |
+| `web-host.test.js` | 不含 DOM 的 Web 宿主（`WebScene` 加空渲染）上跑 hello-tsx 的发布包与 `tests/*.json`，结果哈希与无画面宿主相同 |
+| `portable.test.js` | `pot check` 能指出游戏源码里的 `window`、`document.title` 等，属性访问 `a.window` 与局部变量不报 |
+
+画面靠浏览器里实际运行验收：hello-tsx 能从标题进游戏、WASD 移动、吃金币、Esc 暂停、吃光后进结束页；saltline 能进菜单、开始关卡、移动射击，画面与 Unity 版观感一致。
+
+### 20.11 实施顺序
+
+每一步单独提交。
+
+1. 第 20 节规格。
+2. `platform: 'web'` 与可移植契约清单（20.7 的 `portable.ts`）。
+3. `web/math.ts`、`web/scene.ts`：场景数据与变换，Node 测试。
+4. `web/keys.ts`、`web/input.ts`：输入。
+5. `web/ui.ts`：界面绘制与测量。
+6. `web/geometry.ts`、`web/gl.ts`：图元与 web-1 光照渲染。
+7. `web/host.ts`、`web/index.ts` 与 `dist/web.js`；`pot web` 与屏蔽层；hello-tsx 在浏览器里跑通（web-1 验收）。
+8. `web-host.test.js`、`web-build.test.js`；`pot check` 的全局对象检查。
+9. web-2：材质与网格、贴图、雾与环境光、碰撞与射线、音频，各自一次提交。
+10. web-3：gfx 程序与绑定、bake、实例、post、render 各项、阴影、文字贴图、蒙皮，各自一次提交。
+11. saltline 在浏览器里跑通（web-3 验收）。
+12. Skill 与文档同步。
+
+### 20.12 实施时补充的约定
+
+（实施过程中逐步记录。）
+
