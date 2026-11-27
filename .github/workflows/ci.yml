@@ -296,6 +296,14 @@ jobs:
         shell: bash
         run: node js/devserver/cli.js native --platform macos --force --unity "$UNITY_EDITOR_PATH"
 
+      - name: Diagnose Unity PluginAPI
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          app="${UNITY_EDITOR_PATH%%.app/*}.app"
+          echo "UNITY_EDITOR_PATH=$UNITY_EDITOR_PATH"
+          ls -la "$app/Contents" || true
+          find "$(dirname "$app")" -maxdepth 8 \( -name 'IUnityGraphics*.h' -o -type d -name PluginAPI \) 2>/dev/null | head -n 50 || true
       - name: Build Runner (macOS)
         id: runner
         shell: bash
