@@ -3,13 +3,19 @@
  * 光照照 PotLit 前向通道：URP BRDF（主光 + 最多 8 盏附加光）+ 平坦或三色环境光 + 发光 + exp2 雾，线性空间计算后转 sRGB 输出。
  * 材质模式：lit / lit-twosided / lit-cutout / lit-fade / unlit / unlit-fade / additive。
  * 网格：图元（geometry.ts）与 mesh:/skin: 自定义网格（mesh.ts，按 WebMesh.version 重建缓冲）；顶点属性 0 位置、1 法线、2 UV、3 顶点色（线性）、4 切线。
+ * 材质贴图照 PotLit 的 PotSample：_MainTex/_BumpMap/_MaskMap 占单元 0/1/2，_Tiling、_UVMode（网格 UV、世界或物体三平面）、_Rest、_BumpScale、_Occlusion（只作用于间接光）。
  */
 import { M4, multiply, perspective, rotateVector, srgbToLinear, viewFromCamera } from './math'
 import { primitiveMesh } from './geometry'
 import type { MeshSkinData } from './mesh'
+import type { WebTexture } from './texture'
 import { WebObject, WebScene } from './scene'
 
 const MAX_LIGHTS = 8
+/** 材质贴图单元：0 _MainTex、1 _BumpMap、2 _MaskMap */
+const UNIT_MAIN = 0
+const UNIT_BUMP = 1
+const UNIT_MASK = 2
 /** 骨骼矩阵贴图占用的纹理单元（0 起留给材质贴图） */
 const BONE_UNIT = 7
 
@@ -30,6 +36,10 @@ out vec3 vWorld;
 out vec3 vNormal;
 out vec2 vUV;
 out vec4 vColor;
+out vec4 vTangent;
+out vec3 vPosOS;
+out vec3 vNormOS;
+out vec3 vRestT;
 mat4 boneMatrix(uint i) {
   int y = int(i);
   return mat4(texelFetch(uBones, ivec2(0, y), 0), texelFetch(uBones, ivec2(1, y), 0), texelFetch(uBones, ivec2(2, y), 0), texelFetch(uBones, ivec2(3, y), 0));
@@ -41,13 +51,19 @@ void main() {
     mat4 s = boneMatrix(aBones.x) * aWeights.x + boneMatrix(aBones.y) * aWeights.y + boneMatrix(aBones.z) * aWeights.z + boneMatrix(aBones.w) * aWeights.w;
     w = s * vec4(aPos, 1.0);
     vNormal = mat3(s) * aNormal;
+    vTangent = vec4(mat3(s) * aTangent.xyz, aTangent.w);
   } else {
     w = uModel * vec4(aPos, 1.0);
     vNormal = uNormalMat * aNormal;
+    vTangent = vec4(mat3(uModel) * aTangent.xyz, aTangent.w);
   }
   vWorld = w.xyz;
   vUV = aUV;
   vColor = aColor;
+  // 物体空间位置与法线：蒙皮网格的顶点数据本身就是静止姿态（PotLit 的 restPos、restN）
+  vPosOS = aPos;
+  vNormOS = aNormal;
+  vRestT = aTangent.xyz;
   gl_Position = uViewProj * w;
 }`
 
@@ -57,6 +73,23 @@ in vec3 vWorld;
 in vec3 vNormal;
 in vec2 vUV;
 in vec4 vColor;
+in vec4 vTangent;
+in vec3 vPosOS;
+in vec3 vNormOS;
+in vec3 vRestT;
+uniform mat4 uModel;
+uniform sampler2D uMainTex;
+uniform sampler2D uBumpMap;
+uniform sampler2D uMaskMap;
+uniform vec4 uTiling;
+uniform float uUVMode;
+uniform float uHasBump;
+uniform float uHasMask;
+uniform float uBumpScale;
+uniform float uOcclusion;
+uniform float uRest;
+uniform float uOddNeg;
+uniform vec3 uObjScale;
 uniform vec4 uColor;
 uniform float uVColor;
 uniform vec3 uEmission;
@@ -107,28 +140,107 @@ float fogTransmittance() {
   return exp(-od * od);
 }
 
+vec3 potUnpack(vec4 t) {
+  vec3 n = t.xyz * 2.0 - 1.0;
+  n.xy *= uBumpScale;
+  n.z = sqrt(clamp(1.0 - dot(n.xy, n.xy), 0.0, 1.0));
+  return n;
+}
+
+// 照 PotLit.shader 的 PotSample：基础色、遮罩、世界空间法线
+void potSample(vec3 geomN, out vec4 base, out vec4 mask, out vec3 nWS) {
+  mask = vec4(1.0);
+  nWS = geomN;
+  if (uUVMode < 0.5) {
+    vec2 uv = vUV * uTiling.xy + uTiling.zw;
+    base = texture(uMainTex, uv);
+    if (uHasMask > 0.5) mask = texture(uMaskMap, uv);
+    if (uHasBump > 0.5) {
+      vec3 tn = potUnpack(texture(uBumpMap, uv));
+      vec3 T = normalize(vTangent.xyz - geomN * dot(vTangent.xyz, geomN));
+      vec3 B = cross(geomN, T) * (vTangent.w > 0.0 ? 1.0 : -1.0) * uOddNeg;
+      nWS = normalize(tn.x * T + tn.y * B + tn.z * geomN);
+    }
+    return;
+  }
+  vec3 p;
+  vec3 n;
+  vec3 s = vec3(1.0);
+  if (uUVMode < 1.5) {
+    p = vWorld;
+    n = geomN;
+  } else {
+    if (uRest < 0.5) s = uObjScale;
+    p = vPosOS * s;
+    n = normalize(vNormOS / s);
+  }
+  vec3 bw = pow(abs(n), vec3(6.0));
+  bw /= (bw.x + bw.y + bw.z);
+  vec3 sg = vec3(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0);
+  vec2 uvX = p.zy; uvX.x *= sg.x;
+  vec2 uvY = p.xz; uvY.x *= sg.y;
+  vec2 uvZ = p.xy; uvZ.x *= -sg.z;
+  uvX = uvX * uTiling.xy + uTiling.zw;
+  uvY = uvY * uTiling.xy + uTiling.zw;
+  uvZ = uvZ * uTiling.xy + uTiling.zw;
+  base = texture(uMainTex, uvX) * bw.x + texture(uMainTex, uvY) * bw.y + texture(uMainTex, uvZ) * bw.z;
+  if (uHasMask > 0.5) mask = texture(uMaskMap, uvX) * bw.x + texture(uMaskMap, uvY) * bw.y + texture(uMaskMap, uvZ) * bw.z;
+  if (uHasBump > 0.5) {
+    vec3 tx = potUnpack(texture(uBumpMap, uvX));
+    vec3 ty = potUnpack(texture(uBumpMap, uvY));
+    vec3 tz = potUnpack(texture(uBumpMap, uvZ));
+    tx.x *= sg.x; ty.x *= sg.y; tz.x *= -sg.z;
+    tx = vec3(tx.xy + n.zy, abs(tx.z) * n.x);
+    ty = vec3(ty.xy + n.xz, abs(ty.z) * n.y);
+    tz = vec3(tz.xy + n.xy, abs(tz.z) * n.z);
+    vec3 nb = normalize(tx.zyx * bw.x + ty.xzy * bw.y + tz.xyz * bw.z);
+    if (uUVMode < 1.5) nWS = nb;
+    else if (uRest > 0.5) {
+      // 静止标架（rT、rB、n）到蒙皮后的世界标架（T、B、geomN）
+      vec3 rT = normalize(vRestT - n * dot(vRestT, n));
+      vec3 rB = cross(n, rT);
+      vec3 T = normalize(vTangent.xyz - geomN * dot(vTangent.xyz, geomN));
+      vec3 B = cross(geomN, T);
+      nWS = normalize(dot(nb, rT) * T + dot(nb, rB) * B + dot(nb, n) * geomN);
+    } else nWS = normalize(mat3(uModel) * (nb / s));
+  }
+}
+
 void main() {
-  vec4 base = uColor;
-  if (uVColor > 0.5) base *= vColor;
-  if (uCutoff > 0.0 && base.a < uCutoff) discard;
+  vec4 base;
   vec3 color;
   if (uLit == 1) {
-    vec3 n = normalize(vNormal);
-    if (!gl_FrontFacing) n = -n;
+    vec3 geomN = normalize(vNormal);
+    if (!gl_FrontFacing) geomN = -geomN;
+    vec4 mask;
+    vec3 n;
+    potSample(geomN, base, mask, n);
+    base *= uColor;
+    if (uVColor > 0.5) base *= vColor;
+    if (uCutoff > 0.0 && base.a < uCutoff) discard;
+    float metallic = uMetallic;
+    float smoothness = uSmooth;
+    float occ = 1.0;
+    if (uHasMask > 0.5) {
+      metallic *= mask.r;
+      occ = mix(1.0, mask.g, uOcclusion);
+      smoothness *= mask.a;
+    }
     vec3 v = normalize(uCamPos - vWorld);
-    float oneMinusRefl = 0.96 * (1.0 - uMetallic);
+    float oneMinusRefl = 0.96 * (1.0 - metallic);
     vec3 diffuse = base.rgb * oneMinusRefl;
-    vec3 specular = mix(vec3(0.04), base.rgb, uMetallic);
-    float pr = 1.0 - uSmooth;
+    vec3 specular = mix(vec3(0.04), base.rgb, metallic);
+    float pr = 1.0 - smoothness;
     float roughness = max(pr * pr, 0.0078125);
     float r2 = max(roughness * roughness, 6.103515625e-5);
     float normTerm = roughness * 4.0 + 2.0;
-    float grazing = clamp(uSmooth + (1.0 - oneMinusRefl), 0.0, 1.0);
+    float grazing = clamp(smoothness + (1.0 - oneMinusRefl), 0.0, 1.0);
     float NoV = clamp(dot(n, v), 0.0, 1.0);
     float x = 1.0 - NoV;
     float fres = x * x * x * x;
     vec3 refl = ambientFor(reflect(-v, n)) * uReflection;
-    color = ambientFor(n) * diffuse + refl * (1.0 / (r2 + 1.0)) * mix(specular, vec3(grazing), fres);
+    // 遮罩 AO 只作用于间接光（URP indirectAmbientOcclusion）
+    color = (ambientFor(n) * diffuse + refl * (1.0 / (r2 + 1.0)) * mix(specular, vec3(grazing), fres)) * occ;
     color += directBRDF(diffuse, specular, r2, normTerm, n, v, uMainDir, uMainColor * clamp(dot(n, uMainDir), 0.0, 1.0));
     for (int i = 0; i < ${MAX_LIGHTS}; i++) {
       if (i >= uLightCount) break;
@@ -153,7 +265,10 @@ void main() {
     }
     color += uEmission;
   } else {
-    color = base.rgb;
+    base = texture(uMainTex, vUV * uTiling.xy + uTiling.zw) * uColor;
+    if (uVColor > 0.5) base *= vColor;
+    if (uCutoff > 0.0 && base.a < uCutoff) discard;
+    color = base.rgb + uEmission;
   }
   float t = fogTransmittance();
   if (uFogMode == 2) color *= t;
@@ -236,8 +351,16 @@ export class WebRenderer {
   private boneRows = 1
   private boneData = new Float32Array(16)
   private tmp: M4 = new Float32Array(16)
+  /** 贴图缓存：按 WebTexture 对象身份失效（id 不复用，destroy 或 clear 后对象不再存在） */
+  private texs = new Map<number, { src: WebTexture; tex: WebGLTexture }>()
+  private white: WebGLTexture
+  private flatBump: WebGLTexture
+  private bound: (WebGLTexture | null)[] = [null, null, null]
+  private anisoExt: any
+  private maxAniso = 1
   private static readonly IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
   private static readonly IDENTITY3 = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1])
+  private static readonly TILING = [1, 1, 0, 0]
   /** 最近一帧的视投影矩阵与视口尺寸（worldToScreen / 拾取用） */
   lastViewProj: M4 = new Float32Array(16)
   lastWidth = 1
@@ -250,6 +373,8 @@ export class WebRenderer {
       'uModel', 'uNormalMat', 'uViewProj', 'uColor', 'uEmission', 'uMetallic', 'uSmooth', 'uLit', 'uFogMode', 'uCutoff', 'uCamPos',
       'uMainDir', 'uMainColor', 'uLightCount', 'uLightPos', 'uLightColor', 'uLightDir', 'uLightSpot',
       'uAmbSky', 'uAmbEquator', 'uAmbGround', 'uReflection', 'uFogColor', 'uFogDensity', 'uVColor', 'uSkinned', 'uBones',
+      'uMainTex', 'uBumpMap', 'uMaskMap', 'uTiling', 'uUVMode', 'uHasBump', 'uHasMask', 'uBumpScale', 'uOcclusion', 'uRest',
+      'uOddNeg', 'uObjScale',
     ]
     for (const n of names) this.loc[n] = gl.getUniformLocation(this.program, n)
     // 未启用的顶点属性取常量：没 UV 为 0，没顶点色为白，没切线为 +X，没蒙皮为骨骼 0 权重 1
@@ -269,6 +394,86 @@ export class WebRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 4, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array(16))
     gl.activeTexture(gl.TEXTURE0)
+    gl.uniform1i(this.loc.uMainTex, UNIT_MAIN)
+    gl.uniform1i(this.loc.uBumpMap, UNIT_BUMP)
+    gl.uniform1i(this.loc.uMaskMap, UNIT_MASK)
+    this.white = this.solid(255, 255, 255, 255)
+    this.flatBump = this.solid(128, 128, 255, 255)
+    this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
+    if (this.anisoExt) this.maxAniso = gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1
+  }
+
+  /** 1×1 纯色贴图（缺省 _MainTex 为白，缺省 _BumpMap 为平坦法线） */
+  private solid(r: number, g: number, b: number, a: number): WebGLTexture {
+    const gl = this.gl
+    const t = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, t)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([r, g, b, a]))
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.bindTexture(gl.TEXTURE_2D, null)
+    return t
+  }
+
+  /** WebTexture → GPU 贴图（首次使用时上传）；颜色贴图用 SRGB8_ALPHA8，采样即得线性值 */
+  private gpuTexture(t: WebTexture): WebGLTexture {
+    const hit = this.texs.get(t.id)
+    if (hit && hit.src === t) return hit.tex
+    const gl = this.gl
+    if (hit) gl.deleteTexture(hit.tex)
+    const tex = gl.createTexture()!
+    gl.activeTexture(gl.TEXTURE0 + UNIT_MAIN)
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    this.bound[UNIT_MAIN] = tex
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texImage2D(gl.TEXTURE_2D, 0, t.linear ? gl.RGBA8 : gl.SRGB8_ALPHA8, t.width, t.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, t.data)
+    if (t.mipmaps) gl.generateMipmap(gl.TEXTURE_2D)
+    const wrap = t.wrap === 1 ? gl.CLAMP_TO_EDGE : gl.REPEAT
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap)
+    const mag = t.filter === 0 ? gl.NEAREST : gl.LINEAR
+    const min = !t.mipmaps ? mag : t.filter === 0 ? gl.NEAREST_MIPMAP_NEAREST : t.filter === 1 ? gl.LINEAR_MIPMAP_NEAREST : gl.LINEAR_MIPMAP_LINEAR
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, mag)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, min)
+    if (this.anisoExt && t.aniso > 1 && t.filter > 0) {
+      gl.texParameterf(gl.TEXTURE_2D, this.anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(t.aniso, this.maxAniso))
+    }
+    this.texs.set(t.id, { src: t, tex })
+    return tex
+  }
+
+  /** 释放已销毁贴图的 GPU 资源 */
+  private sweepTextures(scene: WebScene): void {
+    for (const [id, e] of this.texs) {
+      if (scene.textures.get(id) !== e.src) {
+        this.gl.deleteTexture(e.tex)
+        this.texs.delete(id)
+        for (let u = 0; u < this.bound.length; u++) if (this.bound[u] === e.tex) this.bound[u] = null
+      }
+    }
+  }
+
+  private bindUnit(unit: number, tex: WebGLTexture): void {
+    if (this.bound[unit] === tex) return
+    const gl = this.gl
+    gl.activeTexture(gl.TEXTURE0 + unit)
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    this.bound[unit] = tex
+  }
+
+  /** 对象的材质贴图槽（o.ext.textures）→ 绑定到单元；不存在的贴图回到缺省 */
+  private bindMaterialTextures(scene: WebScene, o: WebObject): void {
+    const slots: Record<string, number> | undefined = o.ext.textures
+    const pick = (slot: string, fallback: WebGLTexture) => {
+      const t = slots && slots[slot] ? scene.textures.get(slots[slot]) : undefined
+      return t ? this.gpuTexture(t) : fallback
+    }
+    const main = pick('map', this.white)
+    const bump = pick('normal', this.flatBump)
+    const mask = pick('mask', this.white)
+    this.bindUnit(UNIT_MAIN, main)
+    this.bindUnit(UNIT_BUMP, bump)
+    this.bindUnit(UNIT_MASK, mask)
   }
 
   /** 蒙皮对象：把骨骼矩阵（骨骼世界矩阵 × bindPose）写进骨骼贴图；不是蒙皮或还没绑骨骼返回 false */
@@ -399,6 +604,7 @@ export class WebRenderer {
     const camPos = [camWorld[12], camWorld[13], camWorld[14]]
 
     gl.useProgram(this.program)
+    if (this.texs.size) this.sweepTextures(scene)
     const L = this.loc
     gl.uniformMatrix4fv(L.uViewProj, false, this.viewProj)
     gl.uniform3f(L.uCamPos, camPos[0], camPos[1], camPos[2])
@@ -501,6 +707,7 @@ export class WebRenderer {
     const mi = modeInfo(o.mat.mode)
     const skinned = this.uploadBones(scene, o)
     let det = 1
+    let sx = 1, sy = 1, sz = 1
     if (skinned) {
       gl.uniformMatrix4fv(L.uModel, false, WebRenderer.IDENTITY)
       gl.uniformMatrix3fv(L.uNormalMat, false, WebRenderer.IDENTITY3)
@@ -509,8 +716,13 @@ export class WebRenderer {
       det = normalMatrix(model, this.nmat)
       gl.uniformMatrix4fv(L.uModel, false, model)
       gl.uniformMatrix3fv(L.uNormalMat, false, this.nmat)
+      sx = Math.hypot(model[0], model[1], model[2])
+      sy = Math.hypot(model[4], model[5], model[6])
+      sz = Math.hypot(model[8], model[9], model[10])
     }
     gl.uniform1i(L.uSkinned, skinned ? 1 : 0)
+    gl.uniform1f(L.uOddNeg, det < 0 ? -1 : 1)
+    gl.uniform3f(L.uObjScale, sx, sy, sz)
 
     const cull = o.mat.cull ?? mi.cull
     if (cull === 'none') gl.disable(gl.CULL_FACE)
@@ -523,15 +735,26 @@ export class WebRenderer {
     if (mi.blend === 'add') gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
     else if (mi.blend === 'alpha') gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 
+    const floats: Record<string, number> = o.ext.floats ?? {}
+    const cutoff = floats._Cutoff ?? mi.cutoff
     const c = lin3(o.color)
-    gl.uniform4f(L.uColor, c[0], c[1], c[2], mi.blend === 'none' && mi.cutoff === 0 ? 1 : o.color[3])
+    gl.uniform4f(L.uColor, c[0], c[1], c[2], mi.blend === 'none' && cutoff <= 0 ? 1 : o.color[3])
     gl.uniform3fv(L.uEmission, linHdr(o.mat.emission))
     gl.uniform1f(L.uMetallic, o.mat.metallic)
     gl.uniform1f(L.uSmooth, o.mat.smoothness)
     gl.uniform1i(L.uLit, mi.lit ? 1 : 0)
-    gl.uniform1i(L.uFogMode, mi.fog)
-    gl.uniform1f(L.uCutoff, mi.cutoff)
-    gl.uniform1f(L.uVColor, o.ext.floats?._VColor ?? 0)
+    gl.uniform1i(L.uFogMode, mi.lit ? mi.fog : Math.round(floats._FogMode ?? mi.fog))
+    gl.uniform1f(L.uCutoff, cutoff)
+    gl.uniform1f(L.uVColor, floats._VColor ?? 0)
+    const tiling: number[] = o.ext.vectors?._Tiling ?? WebRenderer.TILING
+    gl.uniform4f(L.uTiling, tiling[0], tiling[1], tiling[2], tiling[3])
+    gl.uniform1f(L.uUVMode, floats._UVMode ?? 0)
+    gl.uniform1f(L.uHasBump, floats._HasBump ?? 0)
+    gl.uniform1f(L.uHasMask, floats._HasMask ?? 0)
+    gl.uniform1f(L.uBumpScale, floats._BumpScale ?? 1)
+    gl.uniform1f(L.uOcclusion, floats._Occlusion ?? 1)
+    gl.uniform1f(L.uRest, floats._Rest ?? 0)
+    this.bindMaterialTextures(scene, o)
 
     gl.bindVertexArray(m.vao)
     gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0)
@@ -544,6 +767,10 @@ export class WebRenderer {
     this.prims.clear()
     this.custom.clear()
     gl.deleteTexture(this.boneTex)
+    for (const e of this.texs.values()) gl.deleteTexture(e.tex)
+    this.texs.clear()
+    gl.deleteTexture(this.white)
+    gl.deleteTexture(this.flatBump)
     gl.deleteProgram(this.program)
   }
 }

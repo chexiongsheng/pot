@@ -8,6 +8,7 @@ import {
   quatToEuler, transformPoint,
 } from './math'
 import { WebMeshes } from './mesh'
+import { WebTextures } from './texture'
 
 export const CAMERA_ID = 1
 
@@ -110,6 +111,8 @@ export class WebScene {
   readonly objects = new Map<number, WebObject>()
   /** 注册的网格（mesh:名字、skin:名字） */
   readonly meshes = new WebMeshes()
+  /** 由 JS 像素创建的贴图（texture 返回的 id） */
+  readonly textures = new WebTextures()
   env: WebEnvironment = defaultEnvironment()
   /** 任一局部变换或层级变化时加一，世界矩阵缓存据此失效 */
   version = 0
@@ -210,6 +213,7 @@ export class WebScene {
     this.objects.set(CAMERA_ID, this.makeCamera())
     this.env = defaultEnvironment()
     this.meshes.clear()
+    this.textures.clear()
     this.version++
   }
 
@@ -421,6 +425,55 @@ export class WebScene {
   emission(id: number, r: number, g: number, b: number): void {
     const o = this.objects.get(id)
     if (o) o.mat.emission = [r, g, b]
+  }
+
+  /** 有渲染器的对象（PotScene 里 GetComponent<Renderer>() 非空） */
+  private rendererOf(id: number): WebObject | undefined {
+    const o = this.objects.get(id)
+    return o && o.id !== CAMERA_ID && o.shape !== 'empty' ? o : undefined
+  }
+
+  /**
+   * 绑定贴图（PotScene.MatTexture）：map 基础色（0 回到白贴图）、normal 法线（同时设 _HasBump）、
+   * mask 遮罩（同时设 _HasMask）、其余以 _ 开头的名字原样记录。状态存在 o.ext.textures / o.ext.floats
+   */
+  matTexture(id: number, slot: string, tex: number): void {
+    const o = this.rendererOf(id)
+    if (!o) return
+    const t = tex ? this.textures.get(tex) : undefined
+    const texs: Record<string, number> = (o.ext.textures ??= {})
+    const floats: Record<string, number> = (o.ext.floats ??= {})
+    switch (slot) {
+      case 'map':
+        texs.map = t ? t.id : 0
+        break
+      case 'normal':
+        if (t) texs.normal = t.id
+        floats._HasBump = t ? 1 : 0
+        break
+      case 'mask':
+        if (t) texs.mask = t.id
+        floats._HasMask = t ? 1 : 0
+        break
+      default:
+        if (t) texs[slot] = t.id
+    }
+  }
+
+  /** 任意浮点属性（PotScene.MatFloat）；_Metallic、_Glossiness 与 surface 写同一处 */
+  matFloat(id: number, prop: string, value: number): void {
+    const o = this.rendererOf(id)
+    if (!o || !prop) return
+    if (prop === '_Metallic') o.mat.metallic = value
+    else if (prop === '_Glossiness') o.mat.smoothness = value
+    else (o.ext.floats ??= {})[prop] = value
+  }
+
+  /** 任意向量属性（PotScene.MatVector），例如 _Tiling（xy 缩放、zw 偏移） */
+  matVector(id: number, prop: string, x: number, y: number, z: number, w: number): void {
+    const o = this.rendererOf(id)
+    if (!o || !prop) return
+    ;(o.ext.vectors ??= {})[prop] = [x, y, z, w]
   }
 
   // ---- 相机与环境 ----

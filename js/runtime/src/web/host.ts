@@ -52,7 +52,6 @@ const NEUTRAL: Record<string, any> = {
   raycast: null,
   sphereCast: null,
   canvasText: null,
-  texture: 0,
   textTexture: 0,
   audioLoop: 0,
   gfxBakeBegin: 0,
@@ -126,8 +125,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
     meshAttribute: (name, channel, attr, size, data) => scene.meshes.attribute(name, channel, attr, size, data),
     meshSkin: (name, boneIndices, weights, bindPoses) => scene.meshes.skin(name, boneIndices, weights, bindPoses),
     skin: (id, bones) => scene.skin(id, bones),
+    texture: (data, width, height, linear, mipmaps, wrap, filter, aniso) => scene.textures.create(data, width, height, linear, mipmaps, wrap, filter, aniso),
+    destroyTexture: (id) => scene.textures.destroy(id),
+    matTexture: (id, slot, tex) => scene.matTexture(id, slot, tex),
+    matFloat: (id, prop, value) => scene.matFloat(id, prop, value),
+    matVector: (id, prop, x, y, z, w) => scene.matVector(id, prop, x, y, z, w),
   }
   scene.warn = (text) => log('warn', text)
+  scene.textures.error = (text) => log('error', text)
 
   const engine = new Proxy(impl as Engine, {
     get(target, key) {

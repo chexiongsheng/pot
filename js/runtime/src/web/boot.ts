@@ -6,6 +6,7 @@
 import { blocksDefault } from './keys'
 import { WebInput } from './input'
 import { WebScene } from './scene'
+import { texturePixels } from './texture'
 import { WebUI } from './ui'
 import { WebRenderer } from './gl'
 import { createWebHost, WebHost, WebPlatform } from './host'
@@ -79,7 +80,27 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
 
   const scene = new WebScene()
   const input = new WebInput()
-  const ui = new WebUI(ctx as any)
+  // 界面的 i 命令：贴图像素转成 canvas（按贴图对象与 tint 缓存，贴图销毁后自然失效）
+  const imageCache = new Map<string, { src: unknown; canvas: HTMLCanvasElement }>()
+  const images = (texId: number, tint: string) => {
+    const t = scene.textures.get(texId)
+    if (!t) return null
+    const key = `${texId}|${tint}`
+    let e = imageCache.get(key)
+    if (!e || e.src !== t) {
+      if (imageCache.size > 256) imageCache.clear()
+      const canvas = document.createElement('canvas')
+      canvas.width = t.width
+      canvas.height = t.height
+      const c2 = canvas.getContext('2d')
+      if (!c2) return null
+      c2.putImageData(new ImageData(texturePixels(t, tint), t.width, t.height), 0, 0)
+      e = { src: t, canvas }
+      imageCache.set(key, e)
+    }
+    return { image: e.canvas, width: t.width, height: t.height }
+  }
+  const ui = new WebUI(ctx as any, images)
   const renderer = new WebRenderer(gl)
 
   // ---- 指针锁 ----
