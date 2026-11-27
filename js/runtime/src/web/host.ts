@@ -4,6 +4,7 @@
  * 没实现的 Engine 方法第一次调用时 warn 一次并返回中性值（与 headless.js 的 wrapEngine 同一约定）。
  */
 import type { Engine, Host, LogLevel } from '../host'
+import { WebAudio } from './audio'
 import { WebInput } from './input'
 import { WebPhysics } from './physics'
 import { CAMERA_ID, WebScene } from './scene'
@@ -29,6 +30,8 @@ export interface WebHostOptions {
   files: Record<string, string>
   scene?: WebScene
   input?: WebInput
+  /** 音频（boot.ts 传入带 AudioContext 工厂的实例；缺省为静默实例） */
+  audio?: WebAudio
   ui: WebUI
   platform: WebPlatform
   storage?: WebStorage | null
@@ -41,6 +44,7 @@ export interface WebHost extends Host {
   platform: 'web'
   scene: WebScene
   physics: WebPhysics
+  audio: WebAudio
   input: WebInput
   ui: WebUI
   /** 游戏 id（manifest.json），缓存键前缀用 */
@@ -53,15 +57,12 @@ export interface WebHost extends Host {
 const NEUTRAL: Record<string, any> = {
   canvasText: null,
   textTexture: 0,
-  audioLoop: 0,
   gfxBakeBegin: 0,
   gfxBake: '!Web 宿主暂不支持 gfxBake',
   gfxProgram: 'Web 宿主暂不支持运行时着色器',
   gfxPost: 'Web 宿主暂不支持后处理',
   gfxPostEnable: 'Web 宿主暂不支持后处理',
   gfxInstances: 'Web 宿主暂不支持实例缓冲',
-  audioClip: false,
-  audioHas: false,
 }
 
 const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -80,7 +81,8 @@ export function createWebHost(options: WebHostOptions): WebHost {
   } catch {}
   const unsupported = new Set<string>()
   const physics = new WebPhysics(scene)
-
+  const audio = options.audio ?? new WebAudio(null)
+  audio.warn = (text) => log('warn', text)
   const impl: Partial<Engine> = {
     spawn: (shape, name, parent) => scene.spawn(shape, name, parent),
     destroy: (id) => scene.destroy(id),
@@ -135,6 +137,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
     layer: (id, layer) => physics.layer(id, layer),
     raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => physics.raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask),
     sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => physics.sphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask),
+    audioClip: (name, rate, channels, pcm) => audio.clip(name, rate, channels, pcm),
+    audioHas: (name) => audio.has(name),
+    audioPlay: (name, volume, pitch, x, y, z, spatial) => audio.play(name, volume, pitch, x, y, z, spatial),
+    audioLoop: (name, volume, pitch) => audio.loop(name, volume, pitch),
+    audioSetLoop: (handle, volume, pitch, x, y, z, spatial) => audio.setLoop(handle, volume, pitch, x, y, z, spatial),
+    audioStop: (handle) => audio.stop(handle),
+    audioVolume: (volume) => audio.setVolume(volume),
+    audioPause: (paused) => audio.pause(paused),
   }
   scene.warn = (text) => log('warn', text)
   scene.textures.error = (text) => log('error', text)
@@ -158,6 +168,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     platform: 'web',
     scene,
     physics,
+    audio,
     input,
     ui,
     gameId,

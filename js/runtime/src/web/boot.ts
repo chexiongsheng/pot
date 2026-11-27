@@ -5,10 +5,12 @@
  */
 import { blocksDefault } from './keys'
 import { WebInput } from './input'
-import { WebScene } from './scene'
+import { CAMERA_ID, WebScene } from './scene'
 import { texturePixels } from './texture'
 import { WebUI } from './ui'
 import { WebRenderer } from './gl'
+import { AudioContextLike, WebAudio } from './audio'
+import { rotateVector } from './math'
 import { createWebHost, WebHost, WebPlatform } from './host'
 
 export interface WebBootOptions {
@@ -133,10 +135,16 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
     storage = g.localStorage ?? null
   } catch {}
 
+  const audio = new WebAudio(() => {
+    const Ctor = g.AudioContext ?? g.webkitAudioContext
+    return Ctor ? (new Ctor() as AudioContextLike) : null
+  })
+
   const host = createWebHost({
     files,
     scene,
     input,
+    audio,
     ui,
     platform,
     storage,
@@ -152,6 +160,7 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
   }
 
   on(window, 'keydown', (e: KeyboardEvent) => {
+    audio.unlock()
     if (!e.repeat) input.keyEvent(e.code, true)
     if (blocksDefault(e.code)) e.preventDefault()
     if (e.isComposing) return
@@ -172,6 +181,7 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
   }
   on(glCanvas, 'mousedown', (e: MouseEvent) => {
     container.focus()
+    audio.unlock()
     if (retryLock && wantLock) requestLock()
     input.buttonEvent(e.button, true)
     e.preventDefault()
@@ -257,6 +267,11 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
       if (!failed) fail(error)
     }
     renderer.render(scene, glCanvas.width, glCanvas.height)
+    const cam = scene.objects.get(CAMERA_ID)
+    if (cam) {
+      const q = scene.worldRotation(cam)
+      audio.listen(scene.worldPosition(cam), rotateVector(q, [0, 0, 1]), rotateVector(q, [0, 1, 0]))
+    }
     ui.render(cssW, cssH)
     input.endFrame()
   }
@@ -273,6 +288,7 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
       stopped = true
       cancelAnimationFrame(frame)
       for (const [target, type, fn, opts] of listeners) target.removeEventListener(type, fn, opts)
+      audio.clear()
       runtime?.stop?.().catch?.(() => {})
     },
   }
