@@ -15,7 +15,7 @@ export class WebInput {
   private lookY = 0
   private wheelDelta = 0
   private typed = ''
-  /** 画布内的鼠标位置（设备像素，左上角为原点） */
+  /** 画布内的鼠标位置（CSS 像素，左上角为原点，与界面坐标一致） */
   mouseX = 0
   mouseY = 0
 
@@ -42,7 +42,7 @@ export class WebInput {
     }
   }
 
-  /** 鼠标移动：x、y 为画布内设备像素；dx、dy 为本次位移（CSS 像素，DOM 的方向，y 向下） */
+  /** 鼠标移动：x、y 为画布内 CSS 像素；dx、dy 为本次位移（CSS 像素，DOM 的方向，y 向下） */
   moveEvent(x: number, y: number, dx: number, dy: number): void {
     this.mouseX = x
     this.mouseY = y
