@@ -301,6 +301,28 @@ test('health：扣血、damaged/died 事件、回血、死后不再扣', async (
   assert.ok(a(), 'died 不销毁实体')
 })
 
+test('feedbackFps：受伤累加红屏与震屏、计 hits 并按 hurtFade 褪去；从高处落下计一次重落地', async () => {
+  const g = await start('<entity key="p" at={[0, 3, 0]} moveFps cameraFps health feedbackFps />')
+  const damage = globalThis.fpsDamage
+  const p = () => g.at('p')
+  steps(g.runtime, 60)
+  assert.equal(p().b.feedbackFps.lands, 1, '从 3 米落下（约 11 米/秒）算重落地')
+  assert.equal(p().b.feedbackFps.hits, 0)
+  damage(g.w, p(), 20)
+  steps(g.runtime, 1)
+  const f = p().b.feedbackFps
+  assert.equal(f.hits, 1)
+  near(f.hurt, 0.35 + 20 / 40, 0.03, '红屏 hurtBase + 伤害/hurtDamage')
+  assert.ok(p().b.cameraFps.shake > 0.5, `震屏：${p().b.cameraFps.shake}`)
+  damage(g.w, p(), 40)
+  steps(g.runtime, 1)
+  assert.equal(p().b.feedbackFps.hurt, 1, '红屏封顶 1')
+  steps(g.runtime, 30)
+  near(p().b.feedbackFps.hurt, 1 - 0.6, 0.03, '每秒褪 1.2')
+  steps(g.runtime, 30)
+  assert.equal(p().b.feedbackFps.hurt, 0)
+})
+
 // ---------------------------------------------------------------- gunFps
 
 const LOG_GUN = `w.on('gunFired', (w, p) => { (w.vars.fired ??= []).push(p.shot) })

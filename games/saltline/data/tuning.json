@@ -10,7 +10,7 @@
     "bobY": 0.024, "bobX": 0.013,
     "regenDelay": 4, "regenRate": 25, "maxHealth": 100,
     "pitchLimit": 86, "adsLook": 0.6,
-    "seaY": -1.6, "rescueDamage": 12
+    "rescueDamage": 12
   },
   "weapon": {
     "name": "KR-7", "mag": 30, "reserve": 150, "rpm": 720, "damage": 26, "range": 300,

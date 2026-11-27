@@ -19,7 +19,8 @@
 import { defineBlock, defineKit, parseColor } from '@pot/core'
 import type { Color, Entity, FogOptions, MaterialOptions, Over, PostOptions, SkyOptions, Vec3 } from '@pot/core'
 import { viewGun } from './viewgun'
-import { createPost, type PostFx } from './post'
+import { viewFeedback, type ViewFeedbackProps } from './feedback'
+import { createPost, takePostValues, type PostFx } from './post'
 import { VIEW_LAYER } from './layers'
 import { weather, lightningNow, setWeatherDrops } from './weather'
 
@@ -203,19 +204,6 @@ function frameDt(h: { time: number; frame: number; dt?: number }, clock: { time:
 }
 const held = new Map<number, Held>()
 
-/** 游戏驱动的后处理参数（受伤、低血量、开镜等），按 World 存，atmosphere 的表现每帧写进链 */
-const postValues = new WeakMap<object, Record<string, number | number[]>>()
-
-/**
- * 写后处理链的参数（uDamage、uLowHealth、uAds 等）；没有链时忽略。
- * 按 w.registry 存：游戏传进来的 ctx.world 是服务代理，表现钩子拿到的是 World 本体
- */
-export function setPostValues(w: { registry: object }, values: Record<string, number | number[]>) {
-  const cur = postValues.get(w.registry)
-  if (cur) Object.assign(cur, values)
-  else postValues.set(w.registry, { ...values })
-}
-
 function applyQuality(ctx: any, me: AtmosphereProps, h: Held, index: number, w: { registry: object }) {
   const levels = me.quality!
   const q = levels[Math.max(0, Math.min(levels.length - 1, index))]
@@ -270,11 +258,8 @@ export const atmosphere = defineBlock({
       if (me.quality?.length && (w.vars.renderQuality ?? 2) !== h.quality) applyQuality(ctx, me, h, w.vars.renderQuality ?? 2, w)
       if (h.post) {
         h.post.update(dt)
-        const values = postValues.get(w.registry)
-        if (values) {
-          h.post.set(values)
-          postValues.delete(w.registry)
-        }
+        const values = takePostValues(w)
+        if (values) h.post.set(values)
       }
       // 闪电读 weather：新的一次在链上随机一个闪光方向（第一次见到只记下次数）
       const ln = lightningNow(w, ctx.clock.fixedAlpha)
@@ -419,17 +404,20 @@ declare module '@pot/core' {
     atmosphere?: Over<AtmosphereProps>
     surface?: Over<typeof SURFACE_PROPS>
     viewGun?: boolean | Record<string, never>
+    viewFeedback?: Over<ViewFeedbackProps>
     beacon?: Over<typeof BEACON_PROPS>
   }
 }
 
 export { viewGun, setGunEnv, type GunEnv } from './viewgun'
+export { viewFeedback, type ViewFeedbackProps } from './feedback'
+export { setPostValues } from './post'
 export { registerSfx, sfx } from './sfx'
 export { weather, currentWeather, resolveWeather, paintRain, type WeatherProps, type WeatherNow } from './weather'
 
 export default defineKit({
   name: 'realistic',
-  about: '写实：atmosphere（时段与画面：环境预设 dusk、overcast、night，平面反射，后处理链，画质档位）、weather（天气：雨、雨声、闪电与雷声）、surface（材质预设 wetGround、metal、concrete）、beacon（目标标记）与 viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）',
+  about: '写实：atmosphere（时段与画面：环境预设 dusk、overcast、night，平面反射，后处理链，画质档位）、weather（天气：雨、雨声、闪电与雷声）、surface（材质预设 wetGround、metal、concrete）、beacon（目标标记）、viewGun（第一人称枪的样子，配 fps 的 gunFps；场景查询用 setGunEnv 注入）与 viewFeedback（脚步、落地、受伤的声音与受伤红边、低血量、开镜的后处理，配 fps 的 feedbackFps）',
   vars: { renderQuality: 2 },
-  blocks: [atmosphere, weather, surface, beacon, viewGun],
+  blocks: [atmosphere, weather, surface, beacon, viewGun, viewFeedback],
 })

@@ -1,6 +1,6 @@
 /**
- * fps 套件（004 第 17.5 节）：第一人称移动、相机、生命、枪械与两个简单的 AI。
- * moveFps 逐项照搬 saltline 的玩家控制（games/saltline/src/plugins/player.ts）。
+ * fps 套件（004 第 17.5 节）：第一人称移动、相机、生命、枪械、反馈与两个简单的 AI。
+ * moveFps 逐项照搬 saltline 的玩家控制（games/saltline/src/plugins/player.ts）；feedbackFps 是 saltline 受伤、落地、脚步反馈的规则侧。
  *
  *   import fps, { damage } from '@pot/kit/fps'
  *   export default defineGame({ kits: [fps], ... })
@@ -281,6 +281,72 @@ export function damage(w: any, e: any, n: number, from?: any): boolean {
   w.emit('damaged', { entity: e, amount: n, from: src })
   if (me.hp <= 0) w.emit('died', { entity: e, amount: n, from: src })
   return true
+}
+
+// ---------------------------------------------------------------- feedbackFps
+
+const FEEDBACK_PROPS = {
+  /** 受伤红屏每秒褪去多少 */
+  hurtFade: 1.2,
+  /** 每次受伤红屏至少加多少，另按伤害加 amount / hurtDamage（封顶 1） */
+  hurtBase: 0.35,
+  hurtDamage: 40,
+  /** 受伤震屏：cameraFps.shake 加 amount / shakeDamage（封顶 1） */
+  shakeDamage: 25,
+  /** 落地时下落速度超过 landSpeed（米/秒）算重重落地：计一次 lands，震屏 landShake */
+  landSpeed: 4,
+  landShake: 0.15,
+}
+
+const FEEDBACK_STATE = {
+  /** 受伤红屏程度 0 到 1 */
+  hurt: 0,
+  lastStep: 0,
+  /** 计数：迈步、重落地、受伤（表现按变化放声音） */
+  steps: 0,
+  lands: 0,
+  hits: 0,
+}
+
+export type FeedbackFpsProps = typeof FEEDBACK_PROPS
+export type FeedbackFpsState = typeof FEEDBACK_STATE
+
+/**
+ * 第一人称的反馈规则：只算数、写震屏，不出声不出画（样子交给表现积木，如 realistic 的 viewFeedback）。
+ * 放在 moveFps 之后（order 1）：读这一步的 landed 与 bob；受伤由套件的 damaged 处理累加
+ */
+export const feedbackFps = defineBlock({
+  name: 'feedbackFps',
+  about: '第一人称反馈（规则侧）：受伤（damaged）时红屏程度 hurt 累加、镜头震动并计 hits，hurt 每秒褪去 hurtFade；moveFps 能动时，重重落地（下落速度超过 landSpeed）震屏并计 lands，每迈一步（bob 过整数）计 steps。音效与红边由表现积木按计数变化放，如 realistic 的 viewFeedback',
+  props: FEEDBACK_PROPS,
+  state: FEEDBACK_STATE,
+  order: 1,
+  step(me, e, w) {
+    me.hurt = Math.max(0, me.hurt - w.dt * me.hurtFade)
+    const m = e.b.moveFps as (MoveFpsProps & MoveFpsState) | undefined
+    if (!m || !m.active) return
+    if (m.landed > me.landSpeed) {
+      me.lands++
+      const c = e.b.cameraFps
+      if (c) c.shake = Math.min(1, c.shake + me.landShake)
+    }
+    // 走路的晃动相位每过一个整数算迈了一步；走、跑、蹲的步幅不同，脚步快慢跟着变
+    const n = Math.floor(m.bob)
+    if (n !== me.lastStep) {
+      me.lastStep = n
+      me.steps++
+    }
+  },
+})
+
+/** damaged：有 feedbackFps 的实体受伤，伤得越重红屏越浓、镜头震得越狠 */
+function onDamaged(_w: any, ev: any) {
+  const e = ev?.entity, f = e?.b?.feedbackFps as (FeedbackFpsProps & FeedbackFpsState) | undefined
+  if (!f) return
+  f.hurt = Math.min(1, f.hurt + f.hurtBase + ev.amount / f.hurtDamage)
+  f.hits++
+  const c = e.b.cameraFps
+  if (c) c.shake = Math.min(1, c.shake + ev.amount / f.shakeDamage)
 }
 
 // ---------------------------------------------------------------- AI
@@ -648,16 +714,17 @@ declare module '@pot/core' {
     aiChase?: Over<{ target: string; range: number; speed: number; stopAt: number; sight: boolean; eye: number } & typeof AI_BODY>
     aiPatrol?: Over<{ points: Vec3[]; speed: number; wait: number; loop: boolean; arrive: number } & typeof AI_BODY>
     gunFps?: Over<typeof GUN_PROPS>
+    feedbackFps?: Over<typeof FEEDBACK_PROPS>
   }
 }
 
 export default defineKit({
   name: 'fps',
-  about: '第一人称：moveFps、cameraFps、health（配 damage 函数）、gunFps（开火 gunFired、命中 gunHit）、aiChase、aiPatrol',
-  blocks: [moveFps, cameraFps, health, gunFps, aiChase, aiPatrol],
+  about: '第一人称：moveFps、cameraFps、health（配 damage 函数）、gunFps（开火 gunFired、命中 gunHit）、feedbackFps（受伤红屏、震屏、脚步与落地计数）、aiChase、aiPatrol',
+  blocks: [moveFps, cameraFps, health, gunFps, feedbackFps, aiChase, aiPatrol],
   controls: {
     axes: { move: 'move', look: 'look' },
     actions: { jump: ['space'], sprint: ['leftshift'], crouch: ['c', 'leftcontrol'], fire: ['mouse0'], aim: ['mouse1'], reload: ['r'] },
   },
-  on: { gunReport: onGunReport },
+  on: { gunReport: onGunReport, damaged: onDamaged },
 })

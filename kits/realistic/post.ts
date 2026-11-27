@@ -5,6 +5,26 @@
  */
 import type { Context, PostChain, Texture } from '@pot/core'
 
+/** 游戏驱动的后处理参数（受伤、低血量、开镜等），按 World 存，atmosphere 的表现每帧写进链 */
+const postValues = new WeakMap<object, Record<string, number | number[]>>()
+
+/**
+ * 写后处理链的参数（uDamage、uLowHealth、uAds 等）；没有链时忽略。
+ * 按 w.registry 存：游戏传进来的 ctx.world 是服务代理，表现钩子拿到的是 World 本体
+ */
+export function setPostValues(w: { registry: object }, values: Record<string, number | number[]>) {
+  const cur = postValues.get(w.registry)
+  if (cur) Object.assign(cur, values)
+  else postValues.set(w.registry, { ...values })
+}
+
+/** 取走待写进链的参数（atmosphere 的表现每帧调；没有新值为 undefined） */
+export function takePostValues(w: { registry: object }) {
+  const values = postValues.get(w.registry)
+  if (values) postValues.delete(w.registry)
+  return values
+}
+
 /** 原版 TUNE 中与后处理相关的参数 */
 export const POST_TUNE = {
   bloom: 0.065,

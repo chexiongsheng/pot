@@ -1,6 +1,7 @@
 /** 港口的碰撞盒：<HarborColliders>（map.tsx）据此生成带 body 的实体，玩家、猎犬的 w.move 与敌人的 w.raycast 都查它们 */
 import { buildQuay, buildSolids, QUAY, type Box } from './quay'
 import { origMap } from './origmap'
+import { SEA_Y } from './sea'
 
 export type BoxLayer = 'default' | 'playerWall' | 'bullet'
 
@@ -21,4 +22,22 @@ export function harborBoxes() {
     boxes.push({ box: b, layer: b.bulletOnly ? 'bullet' : b.playerOnly ? 'playerWall' : 'default' })
   }
   return { boxes, bounds: Number.isFinite(walls.min[0]) ? walls : undefined, groundMaxX: QUAY.X }
+}
+
+/**
+ * 港口地图的地面信息（属于地图，不属于游戏）：码头地面 y=0 只到 x=groundMaxX，再往外是海面 y=seaY；
+ * bounds 为空气墙围成的范围。planes 是给 fps 的 gunFps.viewPlanes 用的射线平面：
+ * 打在码头地面上记为 ground（留弹孔），打进海里记为 water（溅水花），对应原版的 physics.raycast
+ */
+export function harborGround() {
+  const { bounds, groundMaxX } = harborBoxes()
+  return {
+    seaY: SEA_Y,
+    groundMaxX,
+    bounds,
+    planes: [
+      { y: 0, region: { maxX: groundMaxX }, tag: 'ground' },
+      { y: SEA_Y, region: { minX: groundMaxX }, tag: 'water' },
+    ],
+  }
 }

@@ -2095,7 +2095,7 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 13. 天气单独成积木（规格见 17.8 末段）：玩家说“黄昏下暴雨”，黄昏是时段与画面，暴雨是天气。realistic 的 `atmosphere` 只管主光、天空、环境光、雾、后处理（链）、画质档位、反射；新增 `weather` 积木管雨（雨量、湿度、积水、雨色、风、雨声）与闪电（排期、事件、雷声）。闪光提亮画面是两者唯一的交点，由 `atmosphere` 读 `weather` 的闪电状态。`<Harbor>` 放两个实体：`atmosphere`（黄昏）与 `weather`（暴雨）。saltline 的 `parts/audio.ts` 去掉雨声，只剩配乐（低鸣、交战紧张感）与提示音。顺带的修正：港口的雨幕与积水地坪原来写死雨量 0.6、全湿，不跟 `<Harbor weather>` 走；改为每帧读 `weather`。分两次提交：先拆 `weather`（realistic、harbor 的 `place.tsx`、saltline），再港口跟随天气。
 14. 地图与关卡分开（名词见 19.2 末）：港口是地图，不该替游戏决定黄昏还是正午、下不下雨。`<Harbor>` 只放碰撞盒与港区模型，去掉 `weather`、`exposure`、`quality`、`lightning` 属性，`place.tsx` 改名 `map.tsx`。时段与天气由游戏的关卡配：saltline 新增 `parts/level.tsx`，`<Level>` 放 `<Harbor>`、`atmosphere`、`weather`；时段与天气写进 `level.json`（`atmosphere`、`weather` 两节），画质档与贴图档仍在 `tuning.json`，删去没人读的 `tuning.look`。`LevelData` 与 `levelPoints` 从 harbor 移到 `parts/level.tsx`（布置属于关卡；harbor 只留原版坐标换算 `P`、`R`）。`weather` 的 `shaderRain` 属性改为地图声明：雨幕真的建出来时 harbor 调 realistic 的 `paintRain(w, owner, true)`，weather 据此不撒内置雨滴，游戏不必知道哪张地图自己画雨。
 15. harbor 内部去掉 `level`：`scene.ts` 改名 `look.ts`，`harborLevel` 改名 `harborLook`；`level.ts` 改名 `quay.ts`，`buildLevel` 改名 `buildQuay`；`origlevel.ts` 改名 `origmap.ts`，`origLevel` 改名 `origMap`；渲染层 `LEVEL_LAYER` 改名 `MAP_LAYER`（realistic 的 `layers.ts`）；碰撞盒的标签 `level` 改为 `map`。
-16. 玩家反馈下沉：saltline 的 `slFeedback` 里大半是任何第一人称游戏都要的。受伤红屏的累积与衰减、重落地震屏、落地与脚步计数进 fps 的新积木 `feedbackFps`（受伤由套件的 `on.damaged` 累加，取代游戏里的 `<rule on="damaged">`）；脚步、落地、受伤的音效与受伤红边、低血量、开镜的后处理是写实风格的，进 realistic 的新积木 `viewFeedback`（读 `feedbackFps`、`health`、`gunFps`；第一人称相机在用时才显示，叠加状态时低血量不再过渡）。地面平面（码头地面与海面，子弹求交用）与海面高度是港口的，harbor 导出 `harborGround()`。游戏留下按阶段开关的 `slControl` 与落水救援 `slRescue`（掉进海里拉回码头、扣血、发提示，是本游戏的规矩）。`moveFps` 不动（有 C# 原生实现，要逐位一致）。
+16. 玩家反馈下沉：saltline 的 `slFeedback` 里大半是任何第一人称游戏都要的。受伤红屏的累积与衰减、重落地震屏、落地与脚步计数进 fps 的新积木 `feedbackFps`（受伤由套件的 `on.damaged` 累加，取代游戏里的 `<rule on="damaged">`）；脚步、落地、受伤的音效与受伤红边、低血量、开镜的后处理是写实风格的，进 realistic 的新积木 `viewFeedback`（读 `feedbackFps`、`health`、`gunFps`；第一人称相机在用时才显示，叠加状态时低血量不再过渡）。地面平面（码头地面与海面，子弹求交用）、海面高度、码头边界与空气墙范围是港口地图的，harbor 导出 `harborGround()`，saltline 的玩家与敌人都从它取，`tuning.json` 去掉 `player.seaY`。游戏留下按阶段开关的 `slControl` 与落水救援 `slRescue`（掉进海里拉回码头、扣血、发提示，是本游戏的规矩）。`moveFps` 不动（有 C# 原生实现，要逐位一致）。
 
 ### 19.5 实施记录
 
@@ -2356,6 +2356,18 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 引用方：saltline 的 `level.tsx`、`enemies.ts` 改从 `@pot/kit/harbor/quay` 取 `P`、`R`、`QUAY`，`player.tsx` 改用 `MAP_LAYER`；`kit-harbor.test.js` 按新的对象名前缀数；Skill 的 `world.md`、`pitfalls.md` 里“整张关卡”“关卡碰撞盒”改为地图。
 - 验证：`npm test` 306/307（仅 pot_gfx 一致性）；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 5acea5cb 变为 a470d649（积木名与标签变了）。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同，把 `map` 标签、`harborLook` 换回旧名后逐行相同。没有做 Runner 实机验证。
 - 字节数：harbor 的 `look.ts` 22090、`quay.ts` 5134、`origmap.ts` 8896、`map.tsx` 3177、`rain.ts` 5633。
+
+第 16 步（玩家反馈下沉）：
+
+- 起因：saltline 的 `player.tsx` 有三块，只有阶段控制和落水救援是本游戏的规矩，受伤红屏、重落地震屏、脚步计数任何第一人称游戏都要，脚步声与受伤红边、低血量、开镜后处理是写实风格的样子，地面与海面平面是港口地图的数据。
+- fps：新增 `feedbackFps`（order 1，属性 `hurtFade` 1.2、`hurtBase` 0.35、`hurtDamage` 40、`shakeDamage` 25、`landSpeed` 4、`landShake` 0.15，状态 `hurt`、`lastStep`、`steps`、`lands`、`hits`）。`step` 做红屏衰减、重落地与迈步计数；受伤由套件的 `on.damaged` 累加红屏与震屏、计 `hits`，取代游戏里的 `<rule on="damaged">`。套件的 `on` 先于场景里的 rule 注册，两者都在同一次事件派发里被调用（`w.emit` 入队、延后派发），所以累加的时机与原来相同。
+- realistic：新增 `feedback.ts` 的 `viewFeedback`（只有表现，属性 `lowFrom` 0.55、`lowTo` 0.12、`lowRate` 4），读同一实体的 `feedbackFps`、`health`、`gunFps`、`moveFps`。原来按阶段判断“是否在局内”，现在改为 `cameraFps.active`（saltline 的 `slControl` 在 title、complete 关相机，与原判断一致）；原来“暂停时低血量不过渡”改为 `w.overlayActive`。`setPostValues` 与新增的 `takePostValues` 移进 `post.ts`（`viewFeedback` 与 `atmosphere` 都要用，避免循环引用），`index.ts` 照旧导出 `setPostValues`。
+- harbor：`physics.ts` 新增 `harborGround()`，返回 `seaY`（`SEA_Y` -1.6）、`groundMaxX`（`QUAY.X` 30）、`bounds` 与射线平面 `planes`（地面 y=0、x≤30 记 ground；海面 y=-1.6、x≥30 记 water）。
+- saltline：`player.tsx` 删去 `slFeedback` 与 `hurt` 规则，新增 `slRescue`（order 1，只做落水救援，属性 `seaY`、`rescueDamage`、`rescued`）；玩家实体加 `feedbackFps`、`viewFeedback`，`gunFps.viewPlanes` 用 `harborGround().planes`；`playerBlocks` 为 `[slControl, slRescue]`。`enemies.ts` 的地面与海面改取 `harborGround()`，不再读 `QUAY` 与 `tuning.player.seaY`；`tuning.json` 删去 `seaY`。
+- 顺序：`slRescue` 与 `feedbackFps` 同为 order 1，套件积木先登记，`feedbackFps` 先执行，与原 `slFeedback` 先计数后救援一致；`slRescue` 和原来一样在 `moveFps` 不活跃时不救援。
+- 测试：`kit-fps.test.js` 加 `feedbackFps` 一例（从 3 米落下计一次重落地；受伤 20 红屏约 0.85、震屏、`hits` 加一；再受伤封顶 1，每秒褪 1.2）。玩家金标准（含第 300 步落水救援扣血）不改即通过。
+- 验证：`npm test` 307/308（仅 pot_gfx 一致性）；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 a470d649 变为 39eebbf5（玩家的积木换了）。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同；玩家实体把 `feedbackFps` 的状态与 `slRescue` 的属性合回 `slFeedback` 后完全相同（`hits` 都是 13），其余实体与挂载记录逐行相同。没有做 Runner 实机验证。
+- 字节数：fps 的 `index.ts` 27939，realistic 的 `feedback.ts` 3631、`index.ts` 17988，harbor 的 `physics.ts` 2354；saltline 的 `player.tsx` 由 9524 降到 6178，`src` 82769。
 
 ### 19.6 后续：积木预览
 
