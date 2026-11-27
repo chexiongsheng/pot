@@ -1,6 +1,6 @@
 /**
- * Web 原生宿主入口（004 第 20 节），构建为 dist/web.js，挂到 globalThis.pot.web。
- * 浏览器里先加载 core.cjs（globalThis.pot），再加载本文件。
+ * Web 原生宿主（004 第 20 节）。build.js 把运行时核心与本模块一起打成 dist/web.js：
+ * globalThis.pot 为运行时核心，本模块的导出在 pot.web 下。
  */
 export * from './math'
 export * from './scene'

@@ -4,7 +4,7 @@
  *   runtime/src  → packages/com.pot.core/Runtime/Resources/pot/core.cjs      (globalThis.pot)
  *   devtools/src → packages/com.pot.devtools/Runtime/Resources/pot/devtools.cjs (globalThis.pot.devtools)
  * 同时在 js/dist/ 下各放一份，供 Node 测试与 Dev Server 使用。
- *   runtime/src/web → js/dist/web.js（globalThis.pot.web，Web 原生宿主，004 第 20 节；只给 pot web 用，不进 Unity 包）
+ *   runtime/src + web → js/dist/web.js（含运行时核心，globalThis.pot，Web 宿主在 pot.web；004 第 20 节，只给 pot web 用，不进 Unity 包）
  *   kits/        → packages/com.pot.core/Runtime/Resources/pot/kits.json （套件源码与资源 .json/.vert/.frag/.glsl，Runner 没有套件目录时读它，004 第 17.1、19.3 节）
  */
 const esbuild = require('esbuild')
@@ -64,10 +64,14 @@ async function main() {
     path.join(root, 'dist/devtools.cjs'),
   ])
   await emit('web', {
-    entryPoints: [path.join(root, 'runtime/src/web/index.ts')],
-    globalName: '__potWeb',
-    footer: { js: 'globalThis.pot.web = __potWeb;' },
-    plugins: [potShim],
+    stdin: {
+      contents: "export * from './index'\nexport * as web from './web/index'\n",
+      resolveDir: path.join(root, 'runtime/src'),
+      sourcefile: 'web-entry.ts',
+      loader: 'ts',
+    },
+    globalName: 'pot',
+    footer: { js: 'globalThis.pot = pot;' },
   }, [
     path.join(root, 'dist/web.js'),
   ])

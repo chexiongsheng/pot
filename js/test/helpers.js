@@ -16,6 +16,19 @@ function loadPot() {
   return globalThis.pot
 }
 
+/**
+ * Web 宿主测试用：加载 dist/web.js（运行时核心 + pot.web，004 第 20.1 节）代替 core.cjs，再加载 devtools。
+ * 须在本进程第一次 loadPot 之前调用（node --test 每个文件一个进程）
+ */
+function loadWebPot() {
+  if (!globalThis.pot) {
+    vm.runInThisContext(fs.readFileSync(path.join(dist, 'web.js'), 'utf8'), { filename: 'pot/web.js' })
+    vm.runInThisContext(fs.readFileSync(path.join(dist, 'devtools.cjs'), 'utf8'), { filename: 'pot/devtools.cjs' })
+  }
+  if (!globalThis.pot.web) throw new Error('本进程已加载 core.cjs；Web 测试须先调用 loadWebPot')
+  return globalThis.pot
+}
+
 class MockEngine {
   constructor() {
     this.nextId = 2
@@ -304,4 +317,4 @@ function unit(name, body) {
   return `"use strict";\nexports.name = ${JSON.stringify(name)};\nexports.apply = function (ctx, config) {\n${body}\n};\n`
 }
 
-module.exports = { loadPot, createHost, startGame, startHello, readGameFiles, frames, run, unit, helloDir, MockEngine }
+module.exports = { loadPot, loadWebPot, createHost, startGame, startHello, readGameFiles, frames, run, unit, helloDir, MockEngine }

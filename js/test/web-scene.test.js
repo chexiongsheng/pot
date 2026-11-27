@@ -3,16 +3,9 @@
  */
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('fs')
-const path = require('path')
-const vm = require('vm')
-const { loadPot } = require('./helpers')
+const { loadWebPot } = require('./helpers')
 
-function loadWeb() {
-  const pot = loadPot()
-  if (!pot.web) vm.runInThisContext(fs.readFileSync(path.resolve(__dirname, '../dist/web.js'), 'utf8'), { filename: 'pot/web.js' })
-  return pot.web
-}
+const loadWeb = () => loadWebPot().web
 
 const near = (a, b, eps = 1e-4) => {
   assert.equal(a.length, b.length)
