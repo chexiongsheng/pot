@@ -2350,6 +2350,13 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 验证：`npm test` 306/307（仅 pot_gfx 一致性），玩家金标准、敌人回归、harbor 套件测试不变；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 d304293d 变为 5acea5cb。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同，只有 weather 少了 `shaderRain`，挂载记录的 key 多了一层 `Level#0/`。没有做 Runner 实机验证。
 - 字节数：harbor 的 `map.tsx` 3181，realistic 的 `weather.ts` 9315；saltline 的 `parts/level.tsx` 2597，`level.json` 2996，`tuning.json` 2790，`src` 86086。
 
+第 15 步（harbor 内部去掉 level）：
+
+- 改名：`scene.ts` → `look.ts`（`harborLevel` → `harborLook`，`buildLevelLook` → `buildMapLook`，`LevelLook` → `MapLook`，`HarborLevelProps` → `HarborLookProps`）；`level.ts` → `quay.ts`（`buildLevel` → `buildQuay`）；`origlevel.ts` → `origmap.ts`（`origLevel` → `origMap`）；realistic 的 `LEVEL_LAYER` → `MAP_LAYER`；碰撞盒标签 `level` → `map`；港区网格的对象名前缀 `level:`、`level-dyn:` → `map:`、`map-dyn:`，码头几何缺省名 `level` → `quay`；雨幕的 `createRain` 参数 `level` → `map`（类型 `RainMap`），`Rain.level` → `Rain.amount`，`harborRainLevels` → `harborRainTargets`。注释里的“场景积木”“关卡几何”改为“外观积木”“码头几何”“地图几何”。`orig/port.ts` 里的 `createLevel`、`level-merged` 是原版代码的名字，不改。
+- 引用方：saltline 的 `level.tsx`、`enemies.ts` 改从 `@pot/kit/harbor/quay` 取 `P`、`R`、`QUAY`，`player.tsx` 改用 `MAP_LAYER`；`kit-harbor.test.js` 按新的对象名前缀数；Skill 的 `world.md`、`pitfalls.md` 里“整张关卡”“关卡碰撞盒”改为地图。
+- 验证：`npm test` 306/307（仅 pot_gfx 一致性）；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 5acea5cb 变为 a470d649（积木名与标签变了）。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同，把 `map` 标签、`harborLook` 换回旧名后逐行相同。没有做 Runner 实机验证。
+- 字节数：harbor 的 `look.ts` 22090、`quay.ts` 5134、`origmap.ts` 8896、`map.tsx` 3177、`rain.ts` 5633。
+
 ### 19.6 后续：积木预览
 
 需求：单独看一个套件提供的东西，不进具体游戏，例如预览港口、机械猎犬、机械飞鸥。设计待定，先记约束：

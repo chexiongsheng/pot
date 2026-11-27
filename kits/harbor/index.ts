@@ -7,8 +7,8 @@
  *   <><Harbor /><entity key="weather" keep weather={{ rain: 0.45 }} /><Player data={data} /></>   // 角色放在港口后面
  *   setGunEnv(ctx.world, harborGunEnv())   // realistic 的 viewGun：港口的表面种类与室内盒
  *
- * 组成：原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、码头几何常量与原版坐标换算（level）、碰撞盒（physics），
- * 地面积水（apron）、海面（sea）、雨幕（rain）与着色器；场景积木 harborLevel（整张图的地面、海面、雨幕、关卡几何、
+ * 组成：原版地图构建（origmap，运行 realistic/orig/port 的原版关卡代码）、码头几何常量与原版坐标换算（quay）、碰撞盒（physics），
+ * 地面积水（apron）、海面（sea）、雨幕（rain）与着色器；外观积木 harborLook（整张图的地面、海面、雨幕、码头几何、
  * 原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，chunk / of 分份），由 <Harbor> 摆好。
  */
 import { defineKit } from '@pot/core'
@@ -16,10 +16,10 @@ import type { Over, Vec3 } from '@pot/core'
 import realistic, { type GunEnv } from '@pot/kit/realistic'
 import { isPuddle } from './apron'
 import { surfaceAt } from '@pot/kit/realistic/decals'
-import { origLevel } from './origlevel'
-import { harborLevel, harborStatics, type HarborLevelProps, type HarborStaticsProps } from './scene'
+import { origMap } from './origmap'
+import { harborLook, harborStatics, type HarborLookProps, type HarborStaticsProps } from './look'
 
-export { harborLevel, harborStatics }
+export { harborLook, harborStatics }
 export { Harbor, HarborColliders, type HarborProps } from './map'
 
 /**
@@ -27,11 +27,11 @@ export { Harbor, HarborColliders, type HarborProps } from './map'
  * 相机在第一个室内盒里时雨淋程度为 0.3，否则为 1。坐标是 Unity 的，原版盒子是 three 的（z 取反）
  */
 export function harborGunEnv(): GunEnv {
-  const interior = () => origLevel().data?.interiorBoxes ?? []
+  const interior = () => origMap().data?.interiorBoxes ?? []
   return {
     surface(pt: Vec3, n: Vec3, tag?: string) {
       if (tag === 'water') return 'water'
-      const s = surfaceAt(origLevel().boxes, pt)
+      const s = surfaceAt(origMap().boxes, pt)
       if (s !== 'water' && n[1] > 0.7 && pt[1] < 0.08 && isPuddle(pt[0], -pt[2], interior())) return 'water'
       return s
     },
@@ -46,15 +46,15 @@ export function harborGunEnv(): GunEnv {
 
 declare module '@pot/core' {
   interface GameBlockProps {
-    harborLevel?: Over<HarborLevelProps>
+    harborLook?: Over<HarborLookProps>
     harborStatics?: Over<HarborStaticsProps>
   }
 }
 
 export default defineKit({
   name: 'harbor',
-  about: '港口这张地图：地图组件 <Harbor>（碰撞盒与港区模型，不含时段与天气，雨幕与积水跟着 weather 走；角色放在它后面）；积木 harborLevel（地面积水、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，分份）；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
+  about: '港口这张地图：地图组件 <Harbor>（碰撞盒与港区模型，不含时段与天气，雨幕与积水跟着 weather 走；角色放在它后面）；积木 harborLook（地面积水、海面、雨幕、码头几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，分份）；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
   vars: { harborRelays: [] as string[] },
-  blocks: [harborLevel, harborStatics],
+  blocks: [harborLook, harborStatics],
   requires: [realistic],
 })

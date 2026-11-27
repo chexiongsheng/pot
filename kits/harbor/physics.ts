@@ -1,6 +1,6 @@
-/** 港口的碰撞盒：<HarborColliders>（place.tsx）据此生成带 body 的实体，玩家、猎犬的 w.move 与敌人的 w.raycast 都查它们 */
-import { buildLevel, buildSolids, QUAY, type Box } from './level'
-import { origLevel } from './origlevel'
+/** 港口的碰撞盒：<HarborColliders>（map.tsx）据此生成带 body 的实体，玩家、猎犬的 w.move 与敌人的 w.raycast 都查它们 */
+import { buildQuay, buildSolids, QUAY, type Box } from './quay'
+import { origMap } from './origmap'
 
 export type BoxLayer = 'default' | 'playerWall' | 'bullet'
 
@@ -10,10 +10,10 @@ export type BoxLayer = 'default' | 'playerWall' | 'bullet'
  * bounds 为空气墙围成的 XZ 矩形，groundMaxX 为地面（y=0）存在的最大 x（码头外是海），给 fps 的 moveFps 判断出界与落水
  */
 export function harborBoxes() {
-  // 码头一带（地面、码头墙、码头边空气墙）来自 buildLevel；堆场、仓库、道具、中继的碰撞盒来自机械移植的原版关卡（已转 Unity 坐标）
-  const boxes: { box: Box; layer: BoxLayer }[] = buildSolids(buildLevel()).map((box) => ({ box, layer: 'default' }))
+  // 码头一带（地面、码头墙、码头边空气墙）来自 buildQuay；堆场、仓库、道具、中继的碰撞盒来自机械移植的原版关卡（已转 Unity 坐标）
+  const boxes: { box: Box; layer: BoxLayer }[] = buildSolids(buildQuay()).map((box) => ({ box, layer: 'default' }))
   const walls = { min: [Infinity, Infinity] as [number, number], max: [-Infinity, -Infinity] as [number, number] }
-  for (const b of origLevel().boxes) {
+  for (const b of origMap().boxes) {
     if (b.playerOnly) {
       walls.min[0] = Math.min(walls.min[0], b.min[0]); walls.min[1] = Math.min(walls.min[1], b.min[2])
       walls.max[0] = Math.max(walls.max[0], b.max[0]); walls.max[1] = Math.max(walls.max[1], b.max[2])

@@ -49,28 +49,28 @@ function seedQuads(count: number, drips: number, rng: () => number) {
 export interface Rain {
   /** 目标雨量 0..1（原版每帧以 0.8/s 缓动） */
   setRain(v: number): void
-  readonly level: number
+  readonly amount: number
   update(dt: number): void
   /** 销毁雨丝与溅射 */
   destroy(): void
 }
 
-export interface RainLevel {
-  /** 原版 level.interiorBoxes（three 坐标 Box3） */
+export interface RainMap {
+  /** 原版地图的 interiorBoxes（three 坐标 Box3） */
   interiorBoxes?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }[]
-  /** 原版 level.skylights */
+  /** 原版地图的 skylights */
   skylights?: { x: number; z: number; w: number; d?: number }[]
 }
 
-export function createRain(ctx: Context, opts: { mask: Texture; quality?: number; level?: RainLevel; seed?: number }): Rain | undefined {
+export function createRain(ctx: Context, opts: { mask: Texture; quality?: number; map?: RainMap; seed?: number }): Rain | undefined {
   const { scene, gfx } = ctx
   if (!gfx.supported) return undefined
   const rng = mulberry32(opts.seed ?? 9431)
   const n = Math.max(0.15, opts.quality ?? 0.5)
   const drops = Math.round(9000 * n), drips = 260, splashes = Math.round(900 * n)
 
-  // 室内盒子外扩、天窗（原版每帧刷新，这里关卡静态，建一次）
-  const boxes = opts.level?.interiorBoxes ?? []
+  // 室内盒子外扩、天窗（原版每帧刷新，这里地图静态，建一次）
+  const boxes = opts.map?.interiorBoxes ?? []
   const boxMin: number[] = [], boxMax: number[] = []
   for (let i = 0; i < 4; i++) {
     const b = boxes[i]
@@ -80,7 +80,7 @@ export function createRain(ctx: Context, opts: { mask: Texture; quality?: number
     } else { boxMin.push(0, 0, 0, 0); boxMax.push(0, 0, 0, 0) }
   }
   const sky: number[] = []
-  const lights = opts.level?.skylights ?? []
+  const lights = opts.map?.skylights ?? []
   for (let i = 0; i < 8; i++) {
     const s = lights[i]
     if (s && s.w > 0) sky.push(s.x, s.z, s.w * 0.5, (s.d || s.w) * 0.5)
@@ -102,7 +102,7 @@ export function createRain(ctx: Context, opts: { mask: Texture; quality?: number
   let level = 0.6, target = 0.6, visible = true
   return {
     setRain(v) { target = Math.min(1, Math.max(0, v)) },
-    get level() { return level },
+    get amount() { return level },
     update(dt) {
       if (Math.abs(target - level) < 1e-4) return
       level += (target - level) * Math.min(1, dt * 0.8)

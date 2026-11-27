@@ -3,7 +3,7 @@
  * 机械移植：Saltline 原版的建模辅助、道具库（$g）、关卡（cv）与远景（backdrop）。
  * 由 _orig/extract-level.cjs 从原版美化代码按行号抽取，只在文件头补齐 three.js 名字映射；正文改动：C1、pv 去掉 async（体内无 await），跳过海鸥 wb。
  * 原版行号：17182–17378（建模辅助）、19796–22547（道具库与关卡）、22549–23489（远景）。
- * 适配层（材质、物理、场景图展平、输出给 Runner）见 ../origlevel.ts。
+ * 适配层（材质、物理、场景图展平、输出给 Runner）见 harbor/origmap.ts。
  */
 import * as lt from '../vendor/three-geo'
 

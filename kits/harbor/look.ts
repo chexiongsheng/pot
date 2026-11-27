@@ -1,6 +1,6 @@
 /**
- * harbor 的场景积木（004 第 19.5 节第 8 步）：港口整张图的样子。
- * - harborLevel（一个实体）：原版地面（apron）、海面、雨幕、buildLevel 的码头几何（常量，不读游戏数据）、原版动态网格（闸杆、中继等，
+ * harbor 的外观积木（004 第 19.5 节第 8 步）：港口整张图的样子。
+ * - harborLook（一个实体）：原版地面（apron）、海面、雨幕、buildQuay 的码头几何（常量，不读游戏数据）、原版动态网格（闸杆、中继等，
  *   每帧同步原版动画）、远景闪灯与海鸥、原版点光、中继灯。中继状态读 w.vars.harborRelays（游戏写）。
  *   雨幕的雨量与地坪的积水、湿度跟随场景里的 weather（realistic 的 currentWeather），没有天气时是干的。
  * - harborStatics（若干实体，chunk / of 分份）：原版合并后的静态网格。分成几份，启动预热在实体之间让帧，加载界面不卡。
@@ -16,8 +16,8 @@ import * as T from '@pot/kit/realistic/textures'
 import { createApron, type Apron } from './apron'
 import { createSea } from './sea'
 import { createRain, type Rain } from './rain'
-import { buildLevel, LEVEL_LAYER, type Piece } from './level'
-import { emissiveMaterial, gullMesh, hdr, lampAttributes, origLevel, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from './origlevel'
+import { buildQuay, MAP_LAYER, type Piece } from './quay'
+import { emissiveMaterial, gullMesh, hdr, lampAttributes, origMap, toUnityPos, toUnityTransform, writeUnityTRS, type MatToken } from './origmap'
 
 // ---------------------------------------------------------------- 表面与喷字
 
@@ -42,7 +42,7 @@ const SURFACES: Record<string, SurfaceDef> = {
   chainlink: { bake: () => T.chainlink(256), uv: 'object', tiling: 2, tint: true, extra: { mode: 'lit-cutout', cutoff: 0.5 } },
 }
 
-/** 关卡 tex 键 → 原版命名材质（GPU 烘焙）；tint 为 true 时以 piece.color 覆盖材质颜色 */
+/** 地图 tex 键 → 原版命名材质（GPU 烘焙）；tint 为 true 时以 piece.color 覆盖材质颜色 */
 const SL: Record<string, { mat: string; uv: 'mesh' | 'world' | 'object'; tint: boolean; extra?: MaterialOptions }> = {
   asphalt: { mat: 'asphalt', uv: 'world', tint: false, extra: { planar: 1 } },
   concrete: { mat: 'concrete', uv: 'object', tint: false },
@@ -77,14 +77,14 @@ interface Shared {
   lamp?: any
   gull?: any
   shadersTried: boolean
-  levels: Map<number, LevelLook>
+  looks: Map<number, MapLook>
   statics: Map<number, Entity[]>
 }
 
 const stores = new WeakMap<object, Shared>()
 function store(w: object): Shared {
   let S = stores.get(w)
-  if (!S) stores.set(w, (S = { matsTried: false, surfaces: new Map(), paintMaps: new Map(), decals: new Map(), shadersTried: false, levels: new Map(), statics: new Map() }))
+  if (!S) stores.set(w, (S = { matsTried: false, surfaces: new Map(), paintMaps: new Map(), decals: new Map(), shadersTried: false, looks: new Map(), statics: new Map() }))
   return S
 }
 
@@ -211,9 +211,9 @@ function frameDt(h: { time: number; frame: number; dt: number }, clock: { time: 
   return h.dt
 }
 
-// ---------------------------------------------------------------- harborLevel
+// ---------------------------------------------------------------- harborLook
 
-interface LevelLook {
+interface MapLook {
   objs: Entity[]
   apron?: Apron
   rain?: Rain
@@ -223,24 +223,24 @@ interface LevelLook {
   lights: { l: any; ent: Entity; last: number }[]
   relays: { ud: any; light: Entity }[]
   /** 已下发给雨幕与地坪的雨量、湿度（-1 为未下发） */
-  rainLevel: number
+  rainAmount: number
   wet: number
   time: number
   frame: number
   dt: number
 }
 
-const LEVEL_PROPS = { tex: 0 }
+const LOOK_PROPS = { tex: 0 }
 
-function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelLook {
+function buildMapLook(S: Shared, ctx: Context, me: typeof LOOK_PROPS): MapLook {
   const { scene } = ctx
   const M = mats(S, ctx, me.tex)
   shaders(S, ctx)
-  const L: LevelLook = { objs: [], dynamic: [], dynIds: new Int32Array(0), dynData: new Float32Array(0), lights: [], relays: [], rainLevel: -1, wet: -1, time: ctx.clock.time, frame: ctx.clock.frame, dt: 0 }
+  const L: MapLook = { objs: [], dynamic: [], dynIds: new Int32Array(0), dynData: new Float32Array(0), lights: [], relays: [], rainAmount: -1, wet: -1, time: ctx.clock.time, frame: ctx.clock.frame, dt: 0 }
   const add = <E extends Entity>(o: E): E => (L.objs.push(o), o)
   const rand = rng(1931)
 
-  // 原版地面（积水、干湿、油污、接缝）与海面（Gerstner 波）；不可用时保留 buildLevel 的盒子地面、海面
+  // 原版地面（积水、干湿、油污、接缝）与海面（Gerstner 波）；不可用时保留 buildQuay 的盒子地面、海面
   const big = me.tex >= 1024
   L.apron = createApron(ctx, { maskRes: big ? 1024 : 512, detailRes: big ? 512 : 256 })
   const sea = L.apron ? createSea(ctx, L.apron) : undefined
@@ -248,11 +248,11 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
   const replaced = new Set<string>([...(L.apron ? ['ground', 'quay-deck'] : []), ...(sea ? ['sea'] : [])])
 
   // 码头几何：地面、码头、海面、轨道、空气墙
-  for (const piece of buildLevel()) {
+  for (const piece of buildQuay()) {
     if (piece.hidden || replaced.has(piece.name ?? '')) continue
     const collide = piece.collide !== false
     const { color, material } = resolvePiece(S, ctx, M, piece, rand)
-    const common = { shape: piece.shape ?? 'cube', name: piece.name ?? 'level', color, material, collider: collide, layer: collide ? LEVEL_LAYER : undefined } as const
+    const common = { shape: piece.shape ?? 'cube', name: piece.name ?? 'quay', color, material, collider: collide, layer: collide ? MAP_LAYER : undefined } as const
     const scale = piece.scale ?? piece.size
     if (piece.parentScale) {
       const parent = add(scene.spawn({ shape: 'empty', name: 'gable', position: piece.pos, scale: piece.parentScale }))
@@ -263,8 +263,8 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
   }
 
   // 原版雨丝、檐口滴水、地面溅射
-  const orig = origLevel()
-  if (L.apron) L.rain = createRain(ctx, { mask: L.apron.mask, level: orig.data })
+  const orig = origMap()
+  if (L.apron) L.rain = createRain(ctx, { mask: L.apron.mask, map: orig.data })
 
   // 原版动态网格：中继、闸杆等会动的实心网格也要挡子弹（网格碰撞体 + 运动学刚体）
   const meshKey = { key: orig.stamp }
@@ -278,9 +278,9 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
     const tr = toUnityTransform(d.mesh.matrixWorld)
     const solid = !d.material.transparent && d.material.kind === 'std'
     const ent = add(scene.spawn({
-      shape: `mesh:${name}`, name: `level-dyn:${d.material.name}`, position: tr.position, rotation: tr.rotation, scale: tr.scale,
+      shape: `mesh:${name}`, name: `map-dyn:${d.material.name}`, position: tr.position, rotation: tr.rotation, scale: tr.scale,
       color: r.color, material: { ...r.material, shadows: d.mesh.castShadow },
-      collider: solid ? 'mesh' : false, dynamic: solid, layer: solid ? LEVEL_LAYER : undefined,
+      collider: solid ? 'mesh' : false, dynamic: solid, layer: solid ? MAP_LAYER : undefined,
     }))
     if (r.mat) M!.apply(ent, r.mat, { shadows: d.mesh.castShadow })
     // 闪灯网格包围盒是真实的（只是颜色变），保留视锥剔除
@@ -322,8 +322,8 @@ function buildLevelLook(S: Shared, ctx: Context, me: typeof LEVEL_PROPS): LevelL
 }
 
 /** 原版动画走一帧，变了的动态网格一次下发；点光强度变了才改 */
-function syncOrig(L: LevelLook, ctx: Context, dt: number) {
-  const orig = origLevel()
+function syncOrig(L: MapLook, ctx: Context, dt: number) {
+  const orig = origMap()
   orig.update(dt)
   orig.data.root.updateMatrixWorld(true)
   let moved = 0
@@ -350,7 +350,7 @@ function syncOrig(L: LevelLook, ctx: Context, dt: number) {
   }
 }
 
-function dropLevel(L: LevelLook) {
+function dropLook(L: MapLook) {
   L.rain?.destroy()
   L.apron?.destroy()
   destroyAll(L.objs)
@@ -363,14 +363,14 @@ function dropLevel(L: LevelLook) {
  * 雨幕与地坪跟随天气。港区的着色器按原版调过：雨幕与地坪 uRain 0.6、地坪 uWetG 1 是 saltline 的黄昏暴雨（weather 雨量 0.45、湿度 0.85），
  * 所以雨量乘 4/3、湿度除以 0.85 再交给着色器（都不超过 1）；值变了才下发
  */
-export function harborRainLevels(now: { rain: number; wetness: number } | undefined): { rain: number; wet: number } {
+export function harborRainTargets(now: { rain: number; wetness: number } | undefined): { rain: number; wet: number } {
   return { rain: Math.min(1, (now?.rain ?? 0) * 4 / 3), wet: Math.min(1, (now?.wetness ?? 0) / 0.85) }
 }
 
-function followWeather(L: LevelLook, w: { registry: object }) {
-  const { rain, wet } = harborRainLevels(currentWeather(w))
-  if (rain !== L.rainLevel) {
-    L.rainLevel = rain
+function followWeather(L: MapLook, w: { registry: object }) {
+  const { rain, wet } = harborRainTargets(currentWeather(w))
+  if (rain !== L.rainAmount) {
+    L.rainAmount = rain
     L.rain?.setRain(rain)
     L.apron?.setRain(rain)
   }
@@ -380,27 +380,27 @@ function followWeather(L: LevelLook, w: { registry: object }) {
   }
 }
 
-export const harborLevel = defineBlock({
-  name: 'harborLevel',
-  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕（雨量与积水跟随场景里的 weather，没有天气时是干的）、关卡几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
-  props: LEVEL_PROPS,
+export const harborLook = defineBlock({
+  name: 'harborLook',
+  about: '港口整张图（只有表现）：原版地面积水、海面、雨幕（雨量与积水跟随场景里的 weather，没有天气时是干的）、码头几何、原版动态网格与动画、远景闪灯与海鸥、点光与中继灯。tex 为贴图档（0 缺省，1024 为高）；中继状态读 w.vars.harborRelays（live、cutting、cut 数组）。一个场景放一个，建议标 keep',
+  props: LOOK_PROPS,
   view: {
-    // 实测（Windows）约 350 ms：地面遮罩与细节、海面、雨幕、关卡几何、动态网格；harborStatics 每份约 80 ms，缺省 1
+    // 实测（Windows）约 350 ms：地面遮罩与细节、海面、雨幕、码头几何、动态网格；harborStatics 每份约 80 ms，缺省 1
     cost: 4,
     enter(me, e, ctx, w) {
       const S = store(w)
-      const old = S.levels.get(e.id)
+      const old = S.looks.get(e.id)
       if (old) {
         paintRain(w, old, false)
-        dropLevel(old)
+        dropLook(old)
       }
-      const L = buildLevelLook(S, ctx as any, me)
-      S.levels.set(e.id, L)
+      const L = buildMapLook(S, ctx as any, me)
+      S.looks.set(e.id, L)
       // 雨幕建出来了（着色器可用）：雨由港口画，weather 不再撒内置雨滴
       if (L.rain) paintRain(w, L, true)
     },
     update(_me, e, _objs, ctx, w) {
-      const L = store(w).levels.get(e.id)
+      const L = store(w).looks.get(e.id)
       if (!L) return
       const dt = frameDt(L, ctx.clock)
       const relays: string[] = w.vars.harborRelays ?? []
@@ -416,11 +416,11 @@ export const harborLevel = defineBlock({
     },
     exit(_me, e, _objs, _ctx, w) {
       const S = stores.get(w)
-      const L = S?.levels.get(e.id)
+      const L = S?.looks.get(e.id)
       if (!L) return
-      S!.levels.delete(e.id)
+      S!.looks.delete(e.id)
       paintRain(w, L, false)
-      dropLevel(L)
+      dropLook(L)
     },
   },
 })
@@ -431,7 +431,7 @@ const STATICS_PROPS = { chunk: 0, of: 1, tex: 0 }
 
 export const harborStatics = defineBlock({
   name: 'harborStatics',
-  about: '港口的原版静态网格（只有表现）：堆场、仓库、围栏、道具等合并后的网格，chunk / of 表示建全部的第几份（分份后启动预热在实体之间让帧）。tex 同 harborLevel。建议标 keep',
+  about: '港口的原版静态网格（只有表现）：堆场、仓库、围栏、道具等合并后的网格，chunk / of 表示建全部的第几份（分份后启动预热在实体之间让帧）。tex 同 harborLook。建议标 keep',
   props: STATICS_PROPS,
   view: {
     enter(me, e, ctx, w) {
@@ -439,7 +439,7 @@ export const harborStatics = defineBlock({
       const old = S.statics.get(e.id)
       if (old) destroyAll(old)
       const M = mats(S, ctx as any, me.tex)
-      const orig = origLevel()
+      const orig = origMap()
       const n = orig.statics.length, of = Math.max(1, Math.floor(me.of)), k = Math.min(of - 1, Math.max(0, Math.floor(me.chunk)))
       const from = Math.floor(n * k / of), to = Math.floor(n * (k + 1) / of)
       const meshKey = { key: orig.stamp }
@@ -452,8 +452,8 @@ export const harborStatics = defineBlock({
         const r = resolveToken(M, s.material)
         const solid = !s.material.transparent && s.material.kind === 'std'
         const ent = ctx.scene.spawn({
-          shape: `mesh:${name}`, name: `level:${s.material.name}`, color: r.color,
-          material: { ...r.material, shadows: s.cast }, collider: solid, layer: solid ? LEVEL_LAYER : undefined,
+          shape: `mesh:${name}`, name: `map:${s.material.name}`, color: r.color,
+          material: { ...r.material, shadows: s.cast }, collider: solid, layer: solid ? MAP_LAYER : undefined,
         })
         if (r.mat) M!.apply(ent, r.mat, { shadows: s.cast })
         list.push(ent)
@@ -470,5 +470,5 @@ export const harborStatics = defineBlock({
   },
 })
 
-export type HarborLevelProps = typeof LEVEL_PROPS
+export type HarborLookProps = typeof LOOK_PROPS
 export type HarborStaticsProps = typeof STATICS_PROPS

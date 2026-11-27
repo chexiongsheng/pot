@@ -1,5 +1,5 @@
 /**
- * 原版关卡适配层：用材质令牌、碰撞收集器和空场景运行机械移植的原版关卡（./orig/port.ts），
+ * 原版地图适配层：用材质令牌、碰撞收集器和空场景运行机械移植的原版关卡（./orig/port.ts），
  * 产出 Runner 可用的数据：按材质合并好的静态网格、需要逐帧同步的动态网格与点光源、碰撞盒和玩法点。
  *
  * 坐标仍是原版 Three.js 右手系；网格经 toMesh() 翻转，碰撞盒与点位用 toUnity* 转换。
@@ -9,7 +9,7 @@ import type { MaterialOptions } from '@pot/core'
 import { Color, Group } from '@pot/kit/realistic/vendor/three-geo'
 import { hdr } from '@pot/kit/realistic/three-unity'
 import { moduleStamp } from '@pot/kit/realistic/geo'
-import type { Box } from './level'
+import type { Box } from './quay'
 import { MATS } from '@pot/kit/realistic/mats'
 import * as port from '@pot/kit/realistic/orig/port'
 
@@ -90,7 +90,7 @@ export interface OrigBox extends Box {
   bulletOnly?: boolean
 }
 
-export interface OrigLevel {
+export interface OrigMap {
   /** 合并后的静态网格（世界坐标，原版右手系） */
   statics: { geometry: any; material: MatToken; cast: boolean; recv: boolean }[]
   /** 不合并的动态网格：几何为局部坐标，transform 每帧由 sync 取 */
@@ -99,16 +99,16 @@ export interface OrigLevel {
   boxes: OrigBox[]
   data: any
   backdrop: any
-  /** 关卡构建代码（本模块及其依赖）没变就不变，拼进 scene.mesh 的 key 让网格跨热重载复用 */
+  /** 地图构建代码（本模块及其依赖）没变就不变，拼进 scene.mesh 的 key 让网格跨热重载复用 */
   stamp: string
   update(dt: number): void
 }
 
 const STAMP = moduleStamp()
-let built: OrigLevel | undefined
+let built: OrigMap | undefined
 
-/** 构建原版关卡（模块内缓存；同一游戏包里多个插件共享） */
-export function origLevel(): OrigLevel {
+/** 构建原版地图（模块内缓存；同一游戏包里多个插件共享） */
+export function origMap(): OrigMap {
   if (built) return built
   const boxes: OrigBox[] = []
   const physics = {
@@ -136,8 +136,8 @@ export function origLevel(): OrigLevel {
   const backdrop = port.createBackdrop(ctx)
   const asToken = (m: any): MatToken => (m instanceof MatToken ? m : new MatToken('lamps', 'lamps', { vertexColors: true }))
 
-  const statics: OrigLevel['statics'] = []
-  const dynamics: OrigLevel['dynamics'] = []
+  const statics: OrigMap['statics'] = []
+  const dynamics: OrigMap['dynamics'] = []
   const lights: any[] = []
   const merged = data.root.children.find((c: any) => c.name === 'level-merged')
   for (const m of merged?.children ?? []) {

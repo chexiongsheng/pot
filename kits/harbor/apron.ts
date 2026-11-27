@@ -4,7 +4,7 @@
  * - Cb：可平铺细节 det 与法线 nrm
  * - 着色器见 shaders/apron.frag（TR + AR 片段移植，光照走 <pot/lit>）
  * 坐标：遮罩与着色器都用原版 three 坐标（x, z）；Unity z = -three z，着色器里自行换算。
- * 缺口：Pb 标线贴图用 Canvas2D 绘制（Runner 无 2D 画布），暂用 level.ts 的标线几何代替。
+ * 缺口：Pb 标线贴图用 Canvas2D 绘制（Runner 无 2D 画布），暂用 quay.ts 的标线几何代替。
  */
 import type { Context, Texture } from '@pot/core'
 

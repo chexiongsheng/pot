@@ -7,7 +7,7 @@
  */
 import type { SceneArgs, Vec3 } from '@pot/core'
 import { Harbor } from '@pot/kit/harbor'
-import { P, R } from '@pot/kit/harbor/level'
+import { P, R } from '@pot/kit/harbor/quay'
 import type { AtmosphereProps, WeatherProps } from '@pot/kit/realistic'
 
 /** level.json：时段、天气与布置（点位用原版坐标） */

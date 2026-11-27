@@ -1,8 +1,8 @@
 /**
  * 港口的几何与坐标：原版坐标（three.js 右手系，北为 -z）到 Unity 的换算，码头（quay）的地面、码头墙、轨道、海面、
  * 码头边空气墙与车道标线的方块清单。游戏的布置（点位）也用原版坐标，用这里的 P、R 换算。
- * 港区其余的样子（堆场、仓库、围栏、道具、起重机、远景）由原版关卡代码建（origlevel.ts），这里不再重复。
- * 纯函数、无副作用：harborLevel 用它生成场景，harborBoxes 用它生成碰撞盒，结果一致。
+ * 港区其余的样子（堆场、仓库、围栏、道具、起重机、远景）由原版关卡代码建（origmap.ts），这里不再重复。
+ * 纯函数、无副作用：harborLook 用它生成场景，harborBoxes 用它生成碰撞盒，结果一致。
  * 原版坐标 (x, y, z) → Unity (x, y, -z)；绕 Y 的旋转（弧度）→ 取反后转为角度。
  */
 import type { MaterialOptions, Shape, Vec3 } from '@pot/core'
@@ -28,11 +28,11 @@ export interface Piece {
   /** 父节点缩放（用于山墙这类斜切形状），仅视觉 */
   parentScale?: Vec3
   name?: string
-  /** 表面材质贴图集（scene.ts 的表面表）；'none' 为纯色；不填时受光物体默认 steel */
+  /** 表面材质贴图集（look.ts 的表面表）；'none' 为纯色；不填时受光物体默认 steel */
   tex?: string
   /** 生成时的缩放（网格形状按真实尺寸建模时为 [1,1,1]）；不填用 size。size 仍用于移动碰撞 */
   scale?: Vec3
-  /** 文字贴花（scene.ts 的贴花表） */
+  /** 文字贴花（look.ts 的贴花表） */
   decal?: string
 }
 
@@ -41,7 +41,7 @@ export interface Box {
   max: Vec3
 }
 
-export { LEVEL_LAYER, ENEMY_LAYER, VIEW_LAYER } from '@pot/kit/realistic/layers'
+export { MAP_LAYER, ENEMY_LAYER, VIEW_LAYER } from '@pot/kit/realistic/layers'
 
 /** 原版坐标 → Unity */
 export const P = (x: number, y: number, z: number): Vec3 => [x, y, -z]
@@ -57,9 +57,9 @@ function slab(x0: number, y0: number, z0: number, x1: number, y1: number, z1: nu
 
 /**
  * 码头一带的方块：地面、码头甲板与边线、码头墙、起重机轨道、海面、码头边空气墙（原版 playerOnly）、车道标线与斑马线。
- * 原版地面（apron.ts）与海面（sea.ts）可用时，harborLevel 跳过这里的 ground、quay-deck 与 sea
+ * 原版地面（apron.ts）与海面（sea.ts）可用时，harborLook 跳过这里的 ground、quay-deck 与 sea
  */
-export function buildLevel() {
+export function buildQuay() {
   const pieces: Piece[] = []
   const add = (p: Piece) => (pieces.push(p), p)
   const steel = { metallic: 0.55, smoothness: 0.45 }

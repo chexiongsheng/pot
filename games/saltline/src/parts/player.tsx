@@ -12,7 +12,7 @@ import { harborBoxes } from '@pot/kit/harbor/physics'
 import { levelPoints, type LevelData } from './level'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { setPostValues } from '@pot/kit/realistic'
-import { ENEMY_LAYER, LEVEL_LAYER } from '@pot/kit/realistic/layers'
+import { ENEMY_LAYER, MAP_LAYER } from '@pot/kit/realistic/layers'
 import { phaseOf, slEmit, type Settings } from './state'
 
 /** regen：每秒回血量；fov：设置里没给视野时的缺省视野 */
@@ -159,7 +159,7 @@ export function Player({ data }: { data: SceneArgs['data'] }) {
       moveFps={{ ...move, layers: ['default', 'playerWall'], ground: { y: 0, maxX: groundMaxX }, bounds: bounds ?? null }}
       cameraFps={{ fov, fovAds, fovSprint, bobX, bobY, lockCursor: false, near: 0.02, far: 600 }}
       health={{ max: maxHealth, regen: regenRate, regenDelay }}
-      gunFps={{ ...gun, magSize: mag, reserveStart: reserve, spreadHip: spread, hitscan: 'view', viewMask: (1 << LEVEL_LAYER) | (1 << ENEMY_LAYER), viewPlanes: GROUND_PLANES }}
+      gunFps={{ ...gun, magSize: mag, reserveStart: reserve, spreadHip: spread, hitscan: 'view', viewMask: (1 << MAP_LAYER) | (1 << ENEMY_LAYER), viewPlanes: GROUND_PLANES }}
       viewGun />
     <rule on="damaged" do={hurt} />
   </>

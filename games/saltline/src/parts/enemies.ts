@@ -9,7 +9,7 @@
  *   贴到 3 米内会扑咬（15）；被打死后滑行倒地、沉进地里回收
  */
 import type { Vec3 } from '@pot/core'
-import { QUAY } from '@pot/kit/harbor/level'
+import { QUAY } from '@pot/kit/harbor/quay'
 import type { EnemyType } from './state'
 
 /** 每种敌人生成时要覆盖的积木属性（w.spawn 的第二个参数） */

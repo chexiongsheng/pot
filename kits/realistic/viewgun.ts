@@ -15,7 +15,7 @@ import { createFx } from './fx'
 import { linearColor, toMesh, type RGB } from './geo'
 import { buildPac9, PAC9 } from './gun'
 import { buildHands, LABEL_TEXT, LABELS, markingQuads, sampleTrack, smoother, toUnityEuler, toUnityPos } from './hands'
-import { LEVEL_LAYER, VIEW_LAYER } from './layers'
+import { MAP_LAYER, VIEW_LAYER } from './layers'
 import { clamp, damp, lerp, norm, sub } from './math'
 import { registerSfx, sfx } from './sfx'
 import * as Tex from './textures'
@@ -149,7 +149,7 @@ function resources(S: Store, ctx: Context): Res {
   const log = ctx.logger('realistic')
   const decals = createDecals(ctx)
   if (decals) log.info(`弹孔图集绘制 ${decals.atlasMs} ms`)
-  const fx = createFx(ctx, { mask: 1 << LEVEL_LAYER })
+  const fx = createFx(ctx, { mask: 1 << MAP_LAYER })
   if (fx) log.info(`粒子图集生成 ${fx.atlasMs} ms`)
   const geo = buildPac9()
   for (const key of Object.keys(geo)) scene.mesh(`pac9-${key}`, toMesh(geo[key]))
