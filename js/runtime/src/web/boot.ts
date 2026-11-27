@@ -73,7 +73,8 @@ export function boot(options: WebBootOptions = {}): WebApp | null {
   const glCanvas = makeCanvas(container, 0)
   const uiCanvas = makeCanvas(container, 1)
   uiCanvas.style.pointerEvents = 'none'
-  const gl = glCanvas.getContext('webgl2', { antialias: true, alpha: false })
+  // 场景画在离屏目标（MSAA 由 quality.msaa 决定，URP 资产缺省 1），画布本身不需要多重采样
+  const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false })
   const ctx = uiCanvas.getContext('2d')
   if (!gl || !ctx) {
     showMessage('浏览器不支持 WebGL2，无法运行', true)

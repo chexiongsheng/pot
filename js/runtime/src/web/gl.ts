@@ -1,6 +1,6 @@
 /**
  * WebGL2 场景渲染（004 第 20.3 节，web-1 档）。
- * 光照照 PotLit 前向通道：URP BRDF（主光 + 最多 8 盏附加光）+ 平坦或三色环境光 + 发光 + exp2 雾，线性空间计算后转 sRGB 输出。
+ * 光照照 PotLit 前向通道：URP BRDF（主光 + 最多 8 盏附加光）+ 平坦或三色环境光 + 发光 + exp2 雾，线性空间计算，输出线性颜色到离屏目标（post.ts 负责色调映射与转 sRGB，混合在线性空间进行）。
  * 材质模式：lit / lit-twosided / lit-cutout / lit-fade / unlit / unlit-fade / additive。
  * 网格：图元（geometry.ts）与 mesh:/skin: 自定义网格（mesh.ts，按 WebMesh.version 重建缓冲）；顶点属性 0 位置、1 法线、2 UV、3 顶点色（线性）、4 切线。
  * 材质贴图照 PotLit 的 PotSample：_MainTex/_BumpMap/_MaskMap 占单元 0/1/2，_Tiling、_UVMode（网格 UV、世界或物体三平面）、_Rest、_BumpScale、_Occlusion（只作用于间接光）。
@@ -12,6 +12,7 @@ import type { WebTexture } from './texture'
 import { WebObject, WebScene } from './scene'
 import { kindCurve, MAX_PARTICLES, PARTICLE_KINDS, WebParticles } from './particles'
 import { SkyConfig, SkyInputs, skySH } from './render'
+import { WebPost } from './post'
 
 const MAX_LIGHTS = 8
 /** 材质贴图单元：0 _MainTex、1 _BumpMap、2 _MaskMap */
@@ -35,10 +36,6 @@ uniform float uFogBase;
 uniform float uFogSun;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
-vec3 toSRGB(vec3 c) {
-  c = max(c, vec3(0.0));
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
-}
 float potHash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
@@ -105,7 +102,6 @@ in vec2 vNdc;
 uniform vec3 uFwd;
 uniform vec3 uRight;
 uniform vec3 uUp;
-uniform int uRaw;
 uniform float uTime;
 uniform vec3 uZenith;
 uniform vec3 uHorizon;
@@ -162,7 +158,7 @@ void main() {
   float fogAmt = exp(-max(h, 0.0) * 9.0) * uHorizonFog;
   col = mix(col, potFogColorFor(d), clamp(fogAmt, 0.0, 1.0) * step(0.0001, uFogDensity));
   col *= uExposure;
-  outColor = uRaw == 1 ? vec4(col, 1.0) : vec4(toSRGB(col), 1.0);
+  outColor = vec4(col, 1.0);
 }`
 
 /** 立方体贴图各面（GL 约定）：前向、s 轴、t 轴 */
@@ -432,7 +428,7 @@ void main() {
   }
   if (uFogMode == 2) color *= potFogTransmittance(vWorld, uCamPos);
   else if (uFogMode == 1) color = potApplyFog(color, vWorld, uCamPos);
-  outColor = vec4(toSRGB(color), base.a);
+  outColor = vec4(color, base.a);
 }`
 
 /** 粒子（PotUnlit + _VColor）：CPU 展开的四边形，位置在世界空间 */
@@ -466,7 +462,7 @@ void main() {
   vec3 color = base.rgb;
   if (uFogMode == 2) color *= potFogTransmittance(vWorld, uCamPos);
   else if (uFogMode == 1) color = potApplyFog(color, vWorld, uCamPos);
-  outColor = vec4(toSRGB(color), base.a);
+  outColor = vec4(color, base.a);
 }`
 
 /** 粒子顶点：位置 3 + UV 2 + 颜色 4 */
@@ -568,6 +564,8 @@ export class WebRenderer {
   private emptyVao: WebGLVertexArrayObject
   /** EXT_color_buffer_float：可渲染到 RGBA16F（反射立方体保留 HDR） */
   private colorFloat: boolean
+  /** 离屏目标与后处理链（场景先画线性颜色到离屏，post 未启用时只转 sRGB） */
+  private post: WebPost
   private envCube: WebGLTexture | null = null
   private envCubeSize = 0
   private envFbo: WebGLFramebuffer | null = null
@@ -656,10 +654,11 @@ export class WebRenderer {
 
     // ---- 天空 ----
     this.skyProgram = this.link(FULLSCREEN_VS, SKY_FS)
-    for (const n of ['uFwd', 'uRight', 'uUp', 'uRaw', 'uTime', 'uZenith', 'uHorizon', 'uHorizonAway', 'uGround', 'uSkySun', 'uSunSize', 'uSunGlow',
+    for (const n of ['uFwd', 'uRight', 'uUp', 'uTime', 'uZenith', 'uHorizon', 'uHorizonAway', 'uGround', 'uSkySun', 'uSunSize', 'uSunGlow',
       'uClouds', 'uCloudColor', 'uCloudSpeed', 'uHorizonFog', 'uExposure', ...GLOBAL_UNIFORMS]) this.sLoc[n] = gl.getUniformLocation(this.skyProgram, n)
     this.emptyVao = gl.createVertexArray()!
     this.colorFloat = !!gl.getExtension('EXT_color_buffer_float')
+    this.post = new WebPost(gl, this.colorFloat)
     gl.useProgram(this.program)
   }
 
@@ -868,7 +867,7 @@ export class WebRenderer {
     for (const b of m.buffers) gl.deleteBuffer(b)
   }
 
-  /** 画一帧到当前绑定的默认帧缓冲；width、height 为绘图缓冲像素尺寸，time 为秒（_Time.y） */
+  /** 画一帧到画布（默认帧缓冲）；width、height 为绘图缓冲像素尺寸，time 为秒（_Time.y） */
   render(scene: WebScene, width: number, height: number, particles: WebParticles | null = null, time = 0): void {
     const gl = this.gl
     const env = scene.env
@@ -876,8 +875,9 @@ export class WebRenderer {
     height = Math.max(1, height | 0)
     this.updateFrame(scene, time)
     this.captureEnvironment(scene)
-    gl.viewport(0, 0, width, height)
-    gl.clearColor(env.background[0], env.background[1], env.background[2], 1)
+    this.post.begin(width, height, scene.render.quality)
+    const bg = lin3(env.background)
+    gl.clearColor(bg[0], bg[1], bg[2], 1)
     gl.depthMask(true)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
@@ -901,7 +901,7 @@ export class WebRenderer {
         const l = Math.hypot(x, y, z) || 1
         return [(x / l) * k, (y / l) * k, (z / l) * k]
       }
-      this.drawSky(sky, axis(8, 1), axis(0, tx), axis(4, ty), false)
+      this.drawSky(sky, axis(8, 1), axis(0, tx), axis(4, ty))
     }
 
     gl.useProgram(this.program)
@@ -937,6 +937,9 @@ export class WebRenderer {
     gl.depthMask(true)
     gl.disable(gl.BLEND)
     gl.bindVertexArray(null)
+    this.post.end(scene.render.post, width, height, this.frame.time)
+    // 后处理占用了单元 0、1、2
+    this.bound = [null, null, null]
   }
 
   /**
@@ -976,8 +979,8 @@ export class WebRenderer {
     gl.uniform3fv(L.uSunColor, f.sunColor)
   }
 
-  /** 全屏画程序化天空（PotSky.shader）；raw 为 true 时输出线性 HDR（拍反射立方体） */
-  private drawSky(sky: SkyConfig, fwd: number[], right: number[], up: number[], raw: boolean): void {
+  /** 全屏画程序化天空（PotSky.shader），输出线性 HDR */
+  private drawSky(sky: SkyConfig, fwd: number[], right: number[], up: number[]): void {
     const gl = this.gl
     const L = this.sLoc
     gl.useProgram(this.skyProgram)
@@ -985,7 +988,6 @@ export class WebRenderer {
     gl.uniform3fv(L.uFwd, fwd)
     gl.uniform3fv(L.uRight, right)
     gl.uniform3fv(L.uUp, up)
-    gl.uniform1i(L.uRaw, raw ? 1 : 0)
     gl.uniform1f(L.uTime, this.frame.time)
     gl.uniform3fv(L.uZenith, lin3(sky.zenith))
     gl.uniform3fv(L.uHorizon, lin3(sky.horizon))
@@ -1052,7 +1054,7 @@ export class WebRenderer {
     for (let i = 0; i < 6; i++) {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + i, this.envCube, 0)
       const [fwd, s, t] = CUBE_FACES[i]
-      this.drawSky(sky, fwd, s, t, true)
+      this.drawSky(sky, fwd, s, t)
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.activeTexture(gl.TEXTURE0 + UNIT_ENV)
@@ -1294,6 +1296,7 @@ export class WebRenderer {
     if (this.envFbo) gl.deleteFramebuffer(this.envFbo)
     this.envCube = null
     this.envFbo = null
+    this.post.dispose()
     gl.deleteProgram(this.program)
   }
 }
