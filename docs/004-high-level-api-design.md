@@ -1235,7 +1235,7 @@ export {}
 
 - 积木属性的类型由 `props` 缺省值推出：数、字符串、布尔照搬；三个数的数组为 `Vec3`，其他数组为元素类型的数组；普通对象递归；`null` 为 `any`。
 - `vars` 的类型由合并后的 `w.vars` 推出，规则写法同上。
-- `@pot/core` 里新增空接口 `GameBlockProps`、`GameVars` 和类型 `Over`；`EntityProps` 继承 `GameBlockProps`，`World` 的 `vars` 类型为 `GameVars & Record<string, any>`。实体标签的索引签名在 M2 保留，等套件的类型方案（6.12）一起收紧。
+- `@pot/core` 里新增空接口 `GameBlockProps`、`GameVars` 和类型 `Over`；`EntityProps` 继承 `GameBlockProps`，`World` 的 `vars` 类型为 `GameVars & Record<string, any>`（后来改为 `VarsOf`：生成过类型时就是 `GameVars`；`World` 的范围见 19.3 F）。实体标签的索引签名在 M2 保留，等套件的类型方案（6.12）一起收紧。
 - 游戏模板和示例的 `tsconfig.json` 的 `include` 加 `.pot/*.d.ts`。`.pot/` 不入库。
 - `pot types <游戏目录>` 只做生成这一步。
 
@@ -2076,6 +2076,8 @@ D. 界面。`hud`、`menu` 从即时模式 `ctx.ui` 改为 `ui` 树；罗盘、�
 
 E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realistic`、`harbor`、`mech`，`blocks` 与 `prefabs` 列出 `src/parts` 的定义，`scene` 布置玩家、关卡、环境与导演实体，`ui` 组装界面。
 
+F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` 的 `enter`、`update`、`exit` 另有 `ctx` 与 `objs`。`e` 的类型是 `EntityData`，`pos`、`rot`、`scale` 为 `Vec3`；`w` 的类型是 `World`：给游戏代码（积木、规则的 `do`、流程的 `enter`、界面函数）用的接口，只有时间（`dt`、`tick`、`time`）、`vars`、`flow`、`overlayActive`、`rand`、`cmd`、实体增删查（`spawn`、`destroy`、`get`、`query`、`count`、`matches`）、物理查询（`move`、`raycast`、`overlap`）、事件（`on`、`emit`、`emitUI`）、`goto`、插值用的 `prev`、表现层的部件登记 `view`（`bindPart`、`unbindPart`、`partOf`）与作缓存键的 `registry`。`WorldService` 实现它；挂载、补丁、录制、指令来源、原生实现等框架内部能力不在里面，框架与开发工具照旧用 `WorldService`，游戏 `load` 里的 `ctx.world` 也还是它。`enter` 返回场景对象（`Entity`）、它们的数组或不返回，`objs` 是 `Entity[]`。起因：这些参数原来都是 `any`，导演里写错的 `w.down`（应为 `w.cmd().down`）类型检查发现不了，中继一直切不断。
+
 ### 19.4 步骤
 
 每一步行为不变（或差异有记录），`npm test` 通过、saltline 的 `pot check` 通过、玩家金标准与敌人回归测试通过后单独提交。第 3、8、9、10 步另在 Runner 里实机验证。
@@ -2368,6 +2370,14 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 测试：`kit-fps.test.js` 加 `feedbackFps` 一例（从 3 米落下计一次重落地；受伤 20 红屏约 0.85、震屏、`hits` 加一；再受伤封顶 1，每秒褪 1.2）。玩家金标准（含第 300 步落水救援扣血）不改即通过。
 - 验证：`npm test` 307/308（仅 pot_gfx 一致性）；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 a470d649 变为 39eebbf5（玩家的积木换了）。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同；玩家实体把 `feedbackFps` 的状态与 `slRescue` 的属性合回 `slFeedback` 后完全相同（`hits` 都是 13），其余实体与挂载记录逐行相同。没有做 Runner 实机验证。
 - 字节数：fps 的 `index.ts` 27939，realistic 的 `feedback.ts` 3631、`index.ts` 17988，harbor 的 `physics.ts` 2354；saltline 的 `player.tsx` 由 9524 降到 6178，`src` 82769。
+
+第 17 步（积木钩子的类型，19.3 F）：
+
+- 起因：导演的 `step` 里写了 `w.down('interact')`（World 上没有这个方法，应为 `w.cmd().down`），从 05a6b56 起按住交互键每步都报错，中继切不断，站在中继旁时导演这一步后面的出兵、追兵、撤离判定也被跳过。钩子参数是 `any`，类型检查看不到；积木报错只记一次日志；原有测试没有按交互键。修复与回归测试 `js/test/saltline-director.test.js`（站到中继旁按住交互键，中继切断、进度增加、无报错）单独提交 b975798。
+- 类型：`world.ts` 新增 `World` 接口（成员见 19.3 F），`WorldService implements World`，去掉 `type World = WorldService`；`Handler` 的 `w` 改为 `World`；`EntityData` 的 `pos`、`rot`、`scale` 与 `w.prev` 改为 `Vec3`。`registry.ts` 的 `BlockDef`：`e` 为 `EntityData`，`w` 为 `World`，`objs` 为 `Entity[]`，`enter` 返回 `ViewObjects`（`Entity`、它的数组、`null` 或不返回），泛型缺省值由 `any` 改为 `Record<string, any>`。
+- 连带修改：`kits/mech/foe.ts` 一处 `[...f.home]` 推不出三元组，改为逐个分量；`game.ts` 把 `WorldService` 转成 `GameWorld<V>` 时先经 `World`（生成了 `GameVars` 的游戏里直接转会报不可比较）。
+- 没做：套件与游戏里的辅助函数（如 `findTarget(w: any, …)`、导演的 `cutRelay`、界面组件的 `w`）仍是 `any`，钩子里直接写的调用才受检查；`e.b` 仍是 `Record<string, Record<string, any>>`，按积木名带类型另行评估。
+- 验证：`npm test` 308/309（仅 pot_gfx 一致性）；其中 `pot check（defineGame 游戏）` 用例起初报了上面 `game.ts` 的转换错误（只有生成了 `GameVars` 的游戏才会触发），修后通过；`tsc`、saltline 的 `tsc`、`pot check` 通过；`pot test` 冒烟 hash 39eebbf5 不变（只改了类型）；玩家金标准、敌人回归、导演测试共 8 例通过。saltline 源码未改，字节数不变。
 
 ### 19.6 后续：积木预览
 

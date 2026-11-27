@@ -447,7 +447,7 @@ export const mechHound = defineBlock({
     const res = w.move(e, mover, { radius: B.radius, height: B.height, stepUp: B.stepUp, layers: B.layers, ground: { y: f.ground.y, maxX: f.ground.maxX } })
     me.grounded = mover.grounded
     if (res.hitWall && me.detourT <= 0) { me.detour = (w.rand() < 0.5 ? -1 : 1) * 75; me.detourT = 0.9 }
-    if (e.pos[1] < -3) { e.pos = [...f.home]; f.vel = [0, 0, 0] }
+    if (e.pos[1] < -3) { e.pos = [f.home[0], f.home[1], f.home[2]]; f.vel = [0, 0, 0] }
   },
 })
 

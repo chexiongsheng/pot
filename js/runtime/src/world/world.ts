@@ -26,7 +26,7 @@ import { NativeBlocks } from './native'
 import type { NativeMode } from './native'
 import { verifyNative } from './verify'
 import type { VerifyOptions, VerifyResult } from './verify'
-import type { Host } from '../host'
+import type { Host, Vec3 } from '../host'
 import { initialFlow } from './flow'
 import type { FlowData, FlowDef } from './flow'
 
@@ -44,9 +44,9 @@ export interface EntityData {
   path: string | null
   name?: string
   tags: string[]
-  pos: number[]
-  rot: number[]
-  scale: number[]
+  pos: Vec3
+  rot: Vec3
+  scale: Vec3
   /** 每个积木一个对象：属性与状态放在一起（me） */
   b: Record<string, Record<string, any>>
   /** w.spawn 的覆盖参数，用于重建 */
@@ -82,7 +82,7 @@ export interface WorldData {
 }
 
 export type SpawnProps = Record<string, any> & { at?: number[]; rot?: number[]; scale?: number | number[]; name?: string; tags?: string[] }
-export type Handler = (w: WorldService, ...args: any[]) => any
+export type Handler = (w: World, ...args: any[]) => any
 
 /** w.move 的选项：dt 缺省为 w.dt */
 export type WorldMoveOptions = MoveOptions
@@ -176,7 +176,49 @@ function normalize(spec: EntitySpec) {
 
 const same = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b)
 
-export class WorldService extends Service {
+/**
+ * 积木钩子、规则、事件处理器、flow 的 enter、游戏界面拿到的 w（004 第 19.3 节 F）。
+ * 只列游戏与套件该用的能力；挂载、流程定义、录制、补丁、原生调度等框架内部能力不在这里，要用时经 ctx.world（WorldService）。
+ */
+export interface World {
+  /** 固定步长（秒） */
+  readonly dt: number
+  /** 已执行的模拟步数 */
+  readonly tick: number
+  /** tick * dt */
+  readonly time: number
+  readonly vars: VarsOf
+  /** 当前流程状态；没有 flow 时 state 为 '' */
+  readonly flow: { state: string; params: Record<string, any>; base: string }
+  /** 当前处于叠加状态（如暂停） */
+  readonly overlayActive: boolean
+  /** 积木与预制体登记表；也是表现层缓存的键（各处拿到的 w 是不同的代理，只有它是同一个对象） */
+  readonly registry: Registry
+  /** 上一步的变换（插值用） */
+  readonly prev: ReadonlyMap<number, { pos: Vec3; rot: Vec3 }>
+  /** 部件登记（表现层） */
+  readonly view: Pick<WorldView, 'bindPart' | 'unbindPart' | 'partOf'>
+  /** 本步指令：按键、轴 */
+  cmd(e?: EntityData): Cmd
+  /** 确定性随机数：无参数时为 [0, 1)，否则为 [min, max) */
+  rand(): number
+  rand(min: number, max: number): number
+  spawn(prefab: string | Prefab, props?: SpawnProps): EntityData
+  destroy(target: EntityData | number): void
+  get(id: number): EntityData | undefined
+  matches(e: EntityData, filter?: string): boolean
+  query(filter?: string): EntityData[]
+  count(filter?: string): number
+  move(e: EntityData, mover: Mover, options?: WorldMoveOptions): MoveResult
+  raycast(from: readonly number[], dir: readonly number[], maxDist?: number, options?: QueryOptions): RayHit | null
+  overlap(shape: OverlapShape, at: readonly number[], options?: QueryOptions): EntityData[]
+  on(event: string, filter: string | Handler, fn?: Handler): () => void
+  emit(name: string, payload?: any): void
+  emitUI(name: string, payload?: any): void
+  goto(name: string, params?: Record<string, any>): void
+}
+
+export class WorldService extends Service implements World {
   /** audio、gfx、data 给积木的 view 用（表现层要放音效、建材质、读资源）；它们都在 world 之前装好 */
   static inject = ['clock', 'state', 'input', 'scene', 'ui', 'audio', 'gfx', 'data']
   readonly registry = new Registry()
@@ -199,7 +241,7 @@ export class WorldService extends Service {
   private _pending: number[] = []
   private _pendingSet = new Set<number>()
   /** 上一步的变换（插值用）：id → { pos, rot } */
-  readonly prev = new Map<number, { pos: number[]; rot: number[] }>()
+  readonly prev = new Map<number, { pos: Vec3; rot: Vec3 }>()
   private _axes: Record<string, { x: number; y: number }> = {}
   private _down: Record<string, boolean> = {}
   private _prevDown: Record<string, boolean> = {}
@@ -1235,5 +1277,4 @@ export class WorldService extends Service {
   }
 }
 
-export type World = WorldService
 export type { BlockDef }

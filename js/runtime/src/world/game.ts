@@ -181,7 +181,7 @@ export function defineGame<V extends Record<string, any> = Record<string, any>>(
           }
           let tree: PotChild
           try {
-            tree = ui(w as GameWorld<V>, gui)
+            tree = ui(w as World as GameWorld<V>, gui)
           } catch (error: any) {
             const message = `ui 出错：${error?.stack ?? error?.message ?? error}`
             if (message !== lastError) logger.error(message)

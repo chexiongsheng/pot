@@ -9,6 +9,8 @@ import type { Context } from 'cordis'
 import { PREFAB, isPrefab, makeNode } from './node'
 import type { Prefab, PotNode } from './node'
 import type { NativeHint } from './layout'
+import type { EntityData, World } from './world'
+import type { Entity } from '../scene'
 
 /** 实体标签与 w.spawn 上不是积木名的属性 */
 export const RESERVED = new Set(['key', 'at', 'rot', 'scale', 'name', 'tags', 'keep', 'children'])
@@ -17,7 +19,14 @@ export const PREFAB_RESERVED = new Set(['is', 'tags', 'about'])
 
 const IDENT = /^[a-z][A-Za-z0-9]*$/
 
-export interface BlockDef<P extends object = any, S extends object = any> {
+/** view.enter 的返回值：一个或一组场景对象（之后作为 objs 交给 update、exit）；不建对象时不返回或返回 null */
+export type ViewObjects = Entity | readonly Entity[] | null | undefined | void
+
+/**
+ * 积木定义。钩子参数：me 为这个积木在实体上的属性与状态（e.b[name]），e 为实体，w 为 World（见 World 接口），
+ * objs 为 enter 返回的场景对象，ctx 为表现层的上下文（建对象、放音效、读资源）。
+ */
+export interface BlockDef<P extends object = Record<string, any>, S extends object = Record<string, any>> {
   name: string
   about: string
   props?: P
@@ -25,14 +34,14 @@ export interface BlockDef<P extends object = any, S extends object = any> {
   order?: number
   /** 原生实现的布局提示（18.3）：缺省值推不出类型的字段在这里给出，如 { fallY: 'f?', actions: { jump: 'action' } } */
   native?: Record<string, NativeHint>
-  init?(me: P & S, e: any, w: any): void
-  step?(me: P & S, e: any, w: any): void
+  init?(me: P & S, e: EntityData, w: World): void
+  step?(me: P & S, e: EntityData, w: World): void
   view?: {
     /** 建表现的相对耗时（缺省 1）：启动预热按它加权推进进度条（17.13） */
     cost?: number
-    enter?(me: P & S, e: any, ctx: Context, w: any): any
-    update?(me: P & S, e: any, objs: any[], ctx: Context, w: any): void
-    exit?(me: P & S, e: any, objs: any[], ctx: Context, w: any): void
+    enter?(me: P & S, e: EntityData, ctx: Context, w: World): ViewObjects
+    update?(me: P & S, e: EntityData, objs: Entity[], ctx: Context, w: World): void
+    exit?(me: P & S, e: EntityData, objs: Entity[], ctx: Context, w: World): void
   }
 }
 
