@@ -8,7 +8,7 @@
  * - 机械猎犬 hound（“机器狗”）：140 血，在地面绕行、潜行逼近，8 到 18 米外打四连发（每发 5），
  *   贴到 3 米内会扑咬（15）；被打死后滑行倒地、沉进地里回收
  */
-import type { Vec3 } from '@pot/core'
+import type { Vec3, World } from '@pot/core'
 import { harborGround } from '@pot/kit/harbor/physics'
 import type { EnemyType } from './state'
 
@@ -33,7 +33,7 @@ export function foeSpawns(tuning: any): FoeSpawns {
 }
 
 /** 在 pos 生成一只飞鸥或猎犬；pursuit 为真时一出场就去搜索玩家（切断中继后的增援、追兵），否则原地巡逻 */
-export function spawnFoe(w: any, spawns: FoeSpawns, type: EnemyType, pos: Vec3, pursuit: boolean) {
+export function spawnFoe(w: World, spawns: FoeSpawns, type: EnemyType, pos: Vec3, pursuit: boolean) {
   const { mechFoe, ...rest } = spawns[type]
   return w.spawn(type, { at: [...pos], mechFoe: { pursuit, ...mechFoe }, ...rest })
 }

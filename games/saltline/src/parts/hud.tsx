@@ -6,7 +6,7 @@
  * 正在交战的敌人）；左下生命（10 格）；右下弹药与枪名；正中准星，准星下方是换弹提示与切断进度环；
  * 右上击杀信息；顶部红框敌情警告；中上消息；底部指挥中心字幕；开场时正中是“行动代号 · 港区突击”。
  */
-import type { GameUI, UIService, Vec3 } from '@pot/core'
+import type { GameUI, UIService, Vec3, World, EntityData } from '@pot/core'
 import { crosshairGap, drawCompass, drawCrosshair } from '@pot/kit/fps/hud'
 import { levelPoints, type LevelData } from './level'
 import { formatTime } from '@pot/kit/realistic/math'
@@ -28,7 +28,7 @@ const cache = { pid: -1 }
 type Box = { x: number; y: number; w: number; h: number; alpha: number }
 
 /** 战斗 HUD：标题画面不画；阵亡、撤离成功时只留字幕和渐黑（菜单盖在上面） */
-export function Hud({ w, ui }: { w: any; ui: GameUI }) {
+export function Hud({ w, ui }: { w: World; ui: GameUI }) {
   const ph = phaseOf(w)
   const sl: Sl = w.vars.sl, hud: SlHud = w.vars.slHud
   const p = findPlayer(w, cache)
@@ -66,11 +66,11 @@ export function Hud({ w, ui }: { w: any; ui: GameUI }) {
 }
 
 /** 罗盘（顶部中间）：随视角转动；橙色标出还没切断的中继（甲乙丙），三处都断后标出绿色“撤”，红点是正在交战的敌人 */
-function Compass({ w, p, sl, points, W }: { w: any; p: any; sl: Sl; points: ReturnType<typeof levelPoints>; W: number }) {
+function Compass({ w, p, sl, points, W }: { w: World; p: EntityData; sl: Sl; points: ReturnType<typeof levelPoints>; W: number }) {
   const cw = Math.min(520, W * 0.5)
   const marks = points.relays.flatMap((r, i) => (sl.relays[i] === 'cut' ? [] : [{ pos: r.pos, color: C.signal, label: NAMES[i] ?? r.short }]))
   if (sl.relays.every((r) => r === 'cut')) marks.push({ pos: points.extraction.pos, color: C.ok, label: '撤' })
-  const threats: Vec3[] = w.query('enemy').filter((e: any) => e.b.mechFoe?.mode === 'combat').map((e: any) => e.pos)
+  const threats: Vec3[] = w.query('enemy').filter((e: EntityData) => e.b.mechFoe?.mode === 'combat').map((e: EntityData) => e.pos)
   return <canvas at={[W / 2 - cw / 2, 16]} w={cw} h={56} draw={(d: UIService, b: Box) => drawCompass(d, {
     x: b.x, y: b.y, w: b.w, yaw: p.b.moveFps.yaw, origin: p.pos, marks, threats, alpha: b.alpha,
     colors: { bg: C.ink, text: C.bone, north: C.signal, major: C.bone, minor: C.steel, threat: C.alarm, pointer: C.signal },
@@ -78,7 +78,7 @@ function Compass({ w, p, sl, points, W }: { w: any; p: any; sl: Sl; points: Retu
 }
 
 /** 任务目标（左上）：没断完时是“切断中继 n/3”和三处中继的清单，断完变成“前往码头撤离点”；右边是任务用时 */
-function Objectives({ w, sl, points }: { w: any; sl: Sl; points: ReturnType<typeof levelPoints> }) {
+function Objectives({ w, sl, points }: { w: World; sl: Sl; points: ReturnType<typeof levelPoints> }) {
   const allCut = sl.relays.every((r) => r === 'cut')
   const n = sl.relays.filter((r) => r === 'cut').length
   const stripe = allCut ? 64 : 34 + points.relays.length * 24
@@ -161,7 +161,7 @@ function Interact({ sl, W, H }: { sl: Sl; W: number; H: number }) {
 }
 
 /** 击杀信息（右上）：“机械飞鸥 已摧毁”，弱点击杀用橙色，5 秒后淡出 */
-function Feed({ w, hud, W }: { w: any; hud: SlHud; W: number }) {
+function Feed({ w, hud, W }: { w: World; hud: SlHud; W: number }) {
   const items = hud.feed.map((f) => ({ ...f, age: ageOf(w, f.at) })).filter((f) => f.age < 5)
   if (!items.length) return null
   return <column at={[0, 84]} w={W - 14} align="end" gap={4}>
@@ -175,7 +175,7 @@ function Feed({ w, hud, W }: { w: any; hud: SlHud; W: number }) {
 }
 
 /** 敌情警告（顶部）：红框，刚出现时闪烁，2.6 秒后消失 */
-function Warn({ w, hud, W }: { w: any; hud: SlHud; W: number }) {
+function Warn({ w, hud, W }: { w: World; hud: SlHud; W: number }) {
   const t = ageOf(w, hud.warn.at)
   if (t > 2.6 || t < 0 || !hud.warn.text) return null
   const a = clamp(Math.min(t * 6, (2.6 - t) * 3), 0, 1)
@@ -188,7 +188,7 @@ function Warn({ w, hud, W }: { w: any; hud: SlHud; W: number }) {
 }
 
 /** 消息（中上）：“甲号中继 · 堆场 已断开”“已从水中获救”，显示 2.4 秒 */
-function Message({ w, hud, W, H }: { w: any; hud: SlHud; W: number; H: number }) {
+function Message({ w, hud, W, H }: { w: World; hud: SlHud; W: number; H: number }) {
   const t = ageOf(w, hud.message.at)
   if (t > 2.4 || t < 0 || !hud.message.text) return null
   return <column at={[0, H * 0.32 - 13]} w={W} align="center" opacity={clamp(Math.min(t * 5, (2.4 - t) * 2), 0, 1)}>
@@ -197,7 +197,7 @@ function Message({ w, hud, W, H }: { w: any; hud: SlHud; W: number; H: number })
 }
 
 /** 指挥中心字幕（底部）：每秒打出 40 个字，显示 2.5 秒再加每字 0.09 秒 */
-function Radio({ w, hud, W, H }: { w: any; hud: SlHud; W: number; H: number }) {
+function Radio({ w, hud, W, H }: { w: World; hud: SlHud; W: number; H: number }) {
   const r = hud.radio
   if (!r.text) return null
   const t = ageOf(w, r.at), life = 2.5 + r.text.length * 0.09

@@ -6,7 +6,7 @@
  * 用到的 w.vars：mechFrozen（为真时整体冻结，如标题画面；暂停用 flow 叠加状态，模拟不走）、mechHostile（为假时不感知、不开火、不伤人）、mechTokenGap（攻击令牌间隔）。
  * 发出的 World 事件：mechAlert { entity, pos }（从巡逻或搜索转入交战）。
  */
-import { defineBlock, definePrefab, type Vec3 } from '@pot/core'
+import { defineBlock, definePrefab, type Vec3, type World, type EntityData } from '@pot/core'
 import { damage } from '@pot/kit/fps'
 import { angleDelta, clamp, dist, dist2d, jitter, lerp, norm, RAD, segmentDistance, sub, yawOf } from '@pot/kit/realistic/math'
 import type { EnemyType } from './models'
@@ -57,12 +57,12 @@ export const BOLT_PROPS = {
 }
 
 /** 种类积木（射击参数在这里） */
-const gun = (e: any, f: any): any => (f.kind === 'gull' ? e.b.mechGull : e.b.mechHound)
+const gun = (e: EntityData, f: any): any => (f.kind === 'gull' ? e.b.mechGull : e.b.mechHound)
 const planeY = (f: any, x: number) => (x <= f.ground.maxX ? f.ground.y : f.ground.sea)
 
 /** 每步统计一次存活数与持有令牌数，并让令牌间隔走一步（只是缓存，不是状态） */
 const tallies = new WeakMap<object, { tick: number; alive: number; tokens: number }>()
-function tokens(w: any) {
+function tokens(w: World) {
   let t = tallies.get(w)
   if (!t) tallies.set(w, (t = { tick: -1, alive: 0, tokens: 0 }))
   if (t.tick !== w.tick) {
@@ -79,13 +79,13 @@ function tokens(w: any) {
   return t
 }
 
-function releaseToken(f: any, w: any) {
+function releaseToken(f: any, w: World) {
   if (!f.token) return
   f.token = false
   w.vars.mechTokenGap = f.sense.gap
 }
 
-function enterCombat(f: any, e: any, w: any, at: Vec3) {
+function enterCombat(f: any, e: EntityData, w: World, at: Vec3) {
   const was = f.mode
   f.mode = 'combat'
   f.lastKnown = [...at]
@@ -93,9 +93,9 @@ function enterCombat(f: any, e: any, w: any, at: Vec3) {
   if (was === 'patrol' || was === 'search') w.emit('mechAlert', { entity: e, pos: [...e.pos] })
 }
 
-const sightFrom = (f: any, e: any): Vec3 => (f.kind === 'gull' ? [...e.pos] as Vec3 : [e.pos[0], e.pos[1] + 1.1, e.pos[2]])
+const sightFrom = (f: any, e: EntityData): Vec3 => (f.kind === 'gull' ? [...e.pos] as Vec3 : [e.pos[0], e.pos[1] + 1.1, e.pos[2]])
 
-function canSee(f: any, e: any, w: any, eye: Vec3, d: number) {
+function canSee(f: any, e: EntityData, w: World, eye: Vec3, d: number) {
   const S = f.sense
   if (d > S.range) return false
   if (f.mode !== 'combat' && Math.abs(angleDelta(f.yaw, yawOf(sub(eye, e.pos)))) > S.cone / 2) return false
@@ -104,7 +104,7 @@ function canSee(f: any, e: any, w: any, eye: Vec3, d: number) {
   return !hit || hit.dist > d - 0.4
 }
 
-function fire(f: any, e: any, w: any, target: Vec3) {
+function fire(f: any, e: EntityData, w: World, target: Vec3) {
   const T = gun(e, f), y = f.yaw * RAD, gull = f.kind === 'gull'
   const [mx, my, mz] = MUZZLE[f.kind as EnemyType]
   const origin: Vec3 = [e.pos[0] + Math.sin(y) * mz + Math.cos(y) * mx, e.pos[1] + my, e.pos[2] + Math.cos(y) * mz - Math.sin(y) * mx]
@@ -121,7 +121,7 @@ function fire(f: any, e: any, w: any, target: Vec3) {
 }
 
 /** 死亡的模拟部分；掉旋翼、熄灯等由表现看到 mode 变成 dying 后自己做 */
-function die(f: any, w: any, dir?: Vec3) {
+function die(f: any, w: World, dir?: Vec3) {
   releaseToken(f, w)
   f.mode = 'dying'
   f.dyingT = 0
@@ -136,7 +136,7 @@ function die(f: any, w: any, dir?: Vec3) {
 }
 
 /** 爆炸：火球（表现在 mechBoom），半径内按距离伤害目标，四倍半径内震屏 */
-function explode(w: any, f: any, pos: Vec3, amount: number, radius: number) {
+function explode(w: World, f: any, pos: Vec3, amount: number, radius: number) {
   w.spawn('boom', { at: [...pos] })
   const t = findTarget(w, f.target)
   if (!t || amount <= 0) return
@@ -506,7 +506,7 @@ export interface MechHit {
  * 机甲受到 n 点伤害（已含弱点倍率）：扣血、闪白；给了 dir（射击方向）时做受击动画、飞鸥被打退；
  * 没在交战时转入交战；血量见底时倒下。target 是实体或实体 id；不是机甲或已在倒下时返回 null。
  */
-export function mechHit(w: any, target: any, n: number, dir?: Vec3, weak = false): MechHit | null {
+export function mechHit(w: World, target: EntityData, n: number, dir?: Vec3, weak = false): MechHit | null {
   const e = typeof target === 'number' ? w.get(target) : target, f = e?.b?.mechFoe
   if (!f || f.mode === 'dying') return null
   damage(w, e, n)
@@ -530,18 +530,18 @@ export function mechHit(w: any, target: any, n: number, dir?: Vec3, weak = false
 }
 
 /** fps 的 gunHit：目标是机甲时扣血，再发 mechHurt { ...MechHit, by: 射手 } */
-export function onGunHit(w: any, p: any) {
+export function onGunHit(w: World, p: any) {
   const r = p && mechHit(w, p.target, p.damage, p.dir, !!p.weak)
   if (r) w.emit('mechHurt', { ...r, by: p.entity })
 }
 
 /** fps 的 gunFired：枪声惊动附近的机甲 */
-export function onGunFired(w: any, p: any) {
+export function onGunFired(w: World, p: any) {
   if (p?.origin) mechHear(w, p.origin)
 }
 
 /** 听到 pos 处的声响（如枪声）：听觉半径内、不在交战的机甲转去搜索 */
-export function mechHear(w: any, pos: Vec3) {
+export function mechHear(w: World, pos: Vec3) {
   for (const e of w.query()) {
     const f = e.b.mechFoe
     if (!f || f.mode === 'dying' || f.mode === 'combat' || dist(e.pos, pos) >= f.sense.hear) continue
@@ -552,7 +552,7 @@ export function mechHear(w: any, pos: Vec3) {
 }
 
 /** 清空机甲、弹道与爆炸（销毁在本步末尾生效），令牌间隔归零 */
-export function mechClear(w: any) {
+export function mechClear(w: World) {
   for (const e of w.query()) if (e.b.mechFoe || e.b.mechBolt || e.b.mechBoom) w.destroy(e)
   w.vars.mechTokenGap = 0
 }

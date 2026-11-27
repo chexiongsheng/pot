@@ -6,7 +6,7 @@
  *   export default defineGame({ kits: [fps], ... })
  */
 import { defineBlock, defineKit, dmath } from '@pot/core'
-import type { Over, Vec3 } from '@pot/core'
+import type { EntityData, Over, Vec3, World } from '@pot/core'
 
 // ---------------------------------------------------------------- 小工具
 
@@ -205,7 +205,7 @@ export const moveFps = defineBlock({
 })
 
 /** 起身时头顶是否被挡（saltline：blocked(x, y + 0.05, z, r - 0.02, h - 0.05)） */
-function headBlocked(w: any, e: any, me: MoveFpsProps & MoveFpsState, layers: string[] | undefined) {
+function headBlocked(w: World, e: EntityData, me: MoveFpsProps & MoveFpsState, layers: string[] | undefined) {
   const r = me.radius - 0.02, h = me.height - 0.05
   const at = [e.pos[0], e.pos[1] + 0.05 + h / 2, e.pos[2]]
   return w.overlap({ kind: 'box', size: [2 * r, h, 2 * r] }, at, { layers, ignore: e, solid: true }).length > 0
@@ -272,7 +272,7 @@ export const health = defineBlock({
  * 扣血：实体没有 health 或已死时返回 false。发 damaged，hp 到 0 时再发 died；
  * payload 为 { entity, amount, from }（from 为实体 id 或 null）。died 不销毁实体。
  */
-export function damage(w: any, e: any, n: number, from?: any): boolean {
+export function damage(w: World, e: EntityData, n: number, from?: any): boolean {
   const me = e?.b?.health
   if (!me || !(me.hp > 0) || !(n > 0)) return false
   me.hp = Math.max(0, me.hp - n)
@@ -354,7 +354,7 @@ function onDamaged(_w: any, ev: any) {
 const AI_BODY = { radius: 0.3, height: 1.8, gravity: 21, stepUp: 0.3, layers: null as string[] | null, ground: { y: 0 } as Ground | null }
 
 /** 水平走向 (x, z)：到 stop 以内停下；返回是否已到 */
-function walkTo(w: any, e: any, me: any, x: number, z: number, speed: number, stop: number) {
+function walkTo(w: World, e: EntityData, me: any, x: number, z: number, speed: number, stop: number) {
   const dx = x - e.pos[0], dz = z - e.pos[2]
   const d = Math.hypot(dx, dz)
   const arrived = d <= stop
@@ -365,7 +365,7 @@ function walkTo(w: any, e: any, me: any, x: number, z: number, speed: number, st
   return arrived
 }
 
-function fallAndMove(w: any, e: any, me: any) {
+function fallAndMove(w: World, e: EntityData, me: any) {
   me.vel[1] -= me.gravity * w.dt
   const mover = { vel: me.vel, grounded: me.grounded }
   w.move(e, mover, { radius: me.radius, height: me.height, stepUp: me.stepUp, layers: layersOf(me.layers), ground: me.ground ?? undefined })
@@ -657,14 +657,14 @@ function baseSpread(me: Gun, moving: boolean) {
   return lerp(me.spreadHip, me.spreadAds, me.ads) + (moving ? me.spreadMove * (1 - me.ads * 0.7) : 0) + me.bloom
 }
 
-function writeBack(me: Gun, e: any) {
+function writeBack(me: Gun, e: EntityData) {
   const m = e.b.moveFps
   if (m) m.aim = me.ads
   const cam = e.b.cameraFps
   if (cam) cam.kick = [me.recoilP, me.recoilY]
 }
 
-function fire(me: Gun, e: any, w: any, origin: Vec3, yaw: number, pitch: number, moving: boolean) {
+function fire(me: Gun, e: EntityData, w: World, origin: Vec3, yaw: number, pitch: number, moving: boolean) {
   me.mag--
   me.cooldown += 60 / me.rpm
   const dir = jitter(forward(yaw, pitch), baseSpread(me, moving), () => w.rand())
@@ -685,11 +685,11 @@ function fire(me: Gun, e: any, w: any, origin: Vec3, yaw: number, pitch: number,
 }
 
 /** view 模式的命中回写（emitUI 进指令与录像）：校验后转成 gunHit */
-function onGunReport(w: any, p: any) {
+function onGunReport(w: World, p: any) {
   if (!p || typeof p !== 'object') return
   const shooter = w.get(p.entity)
   const me = shooter?.b?.gunFps as Gun | undefined
-  if (!me) return
+  if (!shooter || !me) return
   const hp = shooter.b.health
   if (hp && !(hp.hp > 0)) return
   const shot = me.fired.find((s) => s.k === p.shot)

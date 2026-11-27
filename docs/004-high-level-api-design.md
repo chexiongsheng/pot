@@ -2379,6 +2379,8 @@ F. 积木钩子的类型。`init`、`step` 的参数是 `(me, e, w)`，`view` �
 - 没做：套件与游戏里的辅助函数（如 `findTarget(w: any, …)`、导演的 `cutRelay`、界面组件的 `w`）仍是 `any`，钩子里直接写的调用才受检查；`e.b` 仍是 `Record<string, Record<string, any>>`，按积木名带类型另行评估。
 - 验证：`npm test` 308/309（仅 pot_gfx 一致性）；其中 `pot check（defineGame 游戏）` 用例起初报了上面 `game.ts` 的转换错误（只有生成了 `GameVars` 的游戏才会触发），修后通过；`tsc`、saltline 的 `tsc`、`pot check` 通过；`pot test` 冒烟 hash 39eebbf5 不变（只改了类型）；玩家金标准、敌人回归、导演测试共 8 例通过。saltline 源码未改，字节数不变。
 
+第 18 步（辅助函数的类型）：套件与 saltline 里把 `w`、实体参数写成 `any` 的辅助函数（mech 的 `findTarget`、`eyeOf`、`mechHit`、`mechClear`、look 的动画函数，fps 的 `damage`、`walkTo`、`onGunReport`，realistic 的 viewgun、weather，saltline 的导演、`findPlayer`、`phaseOf`、`spawnFoe`、界面组件，框架的 `KitHandler`）改为 `World`、`EntityData`，`findTarget`、`findPlayer` 返回 `EntityData | undefined`。类型检查只多报了两处：`phaseOf` 把 flow 状态名当阶段返回（补 `as Phase`），`onGunReport` 没收窄 `shooter`（并进已有的判空）；没有发现新的错误调用。行为不变：`npm test` 308/309（仅 pot_gfx），两处 `tsc`、`pot check` 通过，冒烟 hash 39eebbf5 不变，三组 saltline 回归 8 例通过。
+
 ### 19.6 后续：积木预览
 
 需求：单独看一个套件提供的东西，不进具体游戏，例如预览港口、机械猎犬、机械飞鸥。设计待定，先记约束：

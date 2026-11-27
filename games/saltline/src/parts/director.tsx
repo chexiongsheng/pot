@@ -12,7 +12,7 @@
  * 4. 三处全断：码头南端舷梯旁的撤离点亮起信标，玩家走进去就登艇撤离（complete），敌人全部清走
  * 5. 中途血量归零就是阵亡（dead）：重试时已切断的中继保留，场景重建，敌人按进度重新布置
  */
-import { defineBlock, type Context, type SceneArgs, type Vec3 } from '@pot/core'
+import { defineBlock, type Context, type SceneArgs, type Vec3, type World, type EntityData } from '@pot/core'
 import { mechClear } from '@pot/kit/mech'
 import { levelPoints, type LevelData } from './level'
 import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '@pot/kit/realistic/math'
@@ -39,7 +39,7 @@ type Me = typeof PROPS & { pid: number }
 /** 已切断几处中继 */
 const cutCount = (sl: Sl) => sl.relays.filter((r) => r === 'cut').length
 /** 场上还活着的敌人数（正在坠落、倒地的不算），用来限制同屏敌人数 */
-const aliveFoes = (w: any) => w.query('enemy').filter((e: any) => e.b.mechFoe && e.b.mechFoe.mode !== 'dying').length
+const aliveFoes = (w: World) => w.query('enemy').filter((e: EntityData) => e.b.mechFoe && e.b.mechFoe.mode !== 'dying').length
 
 /** 切换子阶段并从 0 计时（开场渐亮、阵亡渐暗、结算浮现都按 sl.t 算） */
 function setPhase(sl: Sl, phase: SubPhase) {
@@ -66,7 +66,7 @@ function queue(sl: Sl, F: any, counts: { gull: number; hound: number }, pursuit:
  * 飞鸥只用空中点、猎犬只用地面点；离玩家不到 18 米的几乎不选（不在玩家脸上刷怪），最好在 30 米左右；
  * 玩家正看着的方向 30 米内扣分（不让敌人当面凭空出现）；再加一点随机，每次不完全一样
  */
-function pickSpawn(me: Me, w: any, p: any, type: EnemyType): Vec3 {
+function pickSpawn(me: Me, w: World, p: EntityData, type: EnemyType): Vec3 {
   const kind = type === 'gull' ? 'air' : 'ground'
   let best: Vec3 = me.spawns[0].pos, score = -Infinity
   for (const sp of me.spawns) {
@@ -88,7 +88,7 @@ function pickSpawn(me: Me, w: any, p: any, type: EnemyType): Vec3 {
  * 切断完成：屏幕中上方提示“甲号中继 · 堆场 已断开”，指挥中心按已断几处播报（最后一处喊“快撤”），
  * 再按已断几处派一波直奔玩家的增援；从此敌人算是已经警觉
  */
-function cutRelay(me: Me, w: any, sl: Sl, i: number) {
+function cutRelay(me: Me, w: World, sl: Sl, i: number) {
   const F = me.flow
   sl.relays[i] = 'cut'
   sl.interact = -1
@@ -109,14 +109,14 @@ function cutRelay(me: Me, w: any, sl: Sl, i: number) {
 interface Look { frame: number; time: number; dt: number; state: string; titleT: number; cut: number; tickT: number; fade: number }
 /** 按 w.registry 存：积木钩子与界面拿到的 World 是不同上下文的服务代理，registry 是同一个对象 */
 const looks = new WeakMap<object, Look>()
-function look(w: any): Look {
+function look(w: World): Look {
   let L = looks.get(w.registry)
   if (!L) looks.set(w.registry, (L = { frame: -1, time: 0, dt: 0, state: '', titleT: 0, cut: 0, tickT: 0, fade: 0 }))
   return L
 }
 
 /** 当前渐黑（0..1），hud 画 */
-export const directorFade = (w: any) => looks.get(w.registry)?.fade ?? 0
+export const directorFade = (w: World) => looks.get(w.registry)?.fade ?? 0
 
 const ss = (a: number, c: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t) }
 
@@ -304,7 +304,7 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number; bid: number }
 })
 
 /** 撤离点信标（标签 extraction 的实体的 beacon，Director 组件里放的地面光圈与光柱）；bid 是缓存的实体 id */
-function findBeacon(w: any, me: { bid: number }): any {
+function findBeacon(w: World, me: { bid: number }): any {
   const e = me.bid < 0 ? undefined : w.get(me.bid)
   if (e?.b.beacon) return e.b.beacon
   const found = w.query('extraction')[0]
@@ -343,7 +343,7 @@ function titleCamera(ctx: Context, F: any, L: Look, dt: number, now: number) {
 }
 
 /** 菜单改设置（设置面板的滑块、开关、画质按钮发 slSet）：只收认识的键与对的类型；画质同时写给 realistic，暂停中也立刻生效 */
-function applySettings(w: any, patch: Partial<Settings>) {
+function applySettings(w: World, patch: Partial<Settings>) {
   const s: Settings = w.vars.slSettings
   if (!patch || typeof patch !== 'object') return
   for (const k of ['sensitivity', 'volume', 'fov', 'quality'] as const) if (typeof patch[k] === 'number' && Number.isFinite(patch[k])) s[k] = patch[k]!
@@ -361,7 +361,7 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
    * 敌人发现玩家（mech 的 mechAlert）：第一次被发现时指挥中心喊“你已被发现！空中有机械飞鸥，地面有机械猎犬”；
    * 每次都在顶部警告敌人在玩家的哪个方位（八个方向，如“发现敌情 · 东北方”）
    */
-  const alert = (w: any, ev: { pos: Vec3 }) => {
+  const alert = (w: World, ev: { pos: Vec3 }) => {
     const sl: Sl = w.vars.sl, p = findPlayer(w, cache)
     if (phaseOf(w) !== 'playing' || !p) return
     if (!sl.alerted) {
@@ -372,15 +372,15 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
     slEmit(w, 'slWarn', `发现敌情 · ${flow.directions[Math.round(b / 45) % 8]}`)
   }
   /** 打掉一只敌人：击毁数加一（弱点致命再记一次弱点命中），右上角添一条“机械猎犬 已摧毁” */
-  const kill = (w: any, ev: { kind: EnemyType; weak: boolean }) => {
+  const kill = (w: World, ev: { kind: EnemyType; weak: boolean }) => {
     const sl: Sl = w.vars.sl
     sl.stats.kills++
     if (ev.weak) sl.stats.weak++
     slEmit(w, 'slFeed', { text: `${ev.kind === 'gull' ? '机械飞鸥' : '机械猎犬'} 已摧毁`, weak: ev.weak })
   }
   /** 战绩：开枪数（fps 的 gunFired）、命中数（mech 的 mechHurt，击杀时转成 slKill）；每次命中准星上闪一下命中标记 */
-  const fired = (w: any) => { (w.vars.sl as Sl).stats.shots++ }
-  const hurt = (w: any, h: { kind: EnemyType; weak: boolean; killed: boolean }) => {
+  const fired = (w: World) => { (w.vars.sl as Sl).stats.shots++ }
+  const hurt = (w: World, h: { kind: EnemyType; weak: boolean; killed: boolean }) => {
     ;(w.vars.sl as Sl).stats.hits++
     const m = (w.vars.slHud as SlHud).marker
     Object.assign(m, { at: w.tick, kill: !!h.killed, weak: !!h.weak, n: m.n + 1 })
@@ -400,10 +400,10 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
     <rule on="mechHurt" do={hurt} />
     <rule on="slKill" do={kill} />
     {/* HUD 的瞬时提示：记下文字和发生时的步数，界面按步数差算显示了多久（暂停时不走） */}
-    <rule on="slRadio" do={(w: any, text: string) => { const r = (w.vars.slHud as SlHud).radio; Object.assign(r, { text, at: w.tick, n: r.n + 1 }) }} />
-    <rule on="slWarn" do={(w: any, text: string) => { (w.vars.slHud as SlHud).warn = { text, at: w.tick } }} />
-    <rule on="slMessage" do={(w: any, text: string) => { (w.vars.slHud as SlHud).message = { text, at: w.tick } }} />
-    <rule on="slFeed" do={(w: any, f: { text: string; weak: boolean }) => {
+    <rule on="slRadio" do={(w: World, text: string) => { const r = (w.vars.slHud as SlHud).radio; Object.assign(r, { text, at: w.tick, n: r.n + 1 }) }} />
+    <rule on="slWarn" do={(w: World, text: string) => { (w.vars.slHud as SlHud).warn = { text, at: w.tick } }} />
+    <rule on="slMessage" do={(w: World, text: string) => { (w.vars.slHud as SlHud).message = { text, at: w.tick } }} />
+    <rule on="slFeed" do={(w: World, f: { text: string; weak: boolean }) => {
       const hud: SlHud = w.vars.slHud
       hud.feed = [{ text: f.weak ? `${f.text} · 弱点命中` : f.text, weak: !!f.weak, at: w.tick }, ...hud.feed].slice(0, 5)
     }} />

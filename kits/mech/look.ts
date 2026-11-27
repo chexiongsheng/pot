@@ -3,7 +3,7 @@
  * 变换都自己管（enter 不返回对象）：模型由动画器摆放，弹道要朝飞行方向，爆炸要按寿命缩放。
  * 记录按 World 分开存（WeakMap），只是表现的缓存，不进存档。
  */
-import type { Context, Vec3 } from '@pot/core'
+import type { Context, Vec3, World, EntityData } from '@pot/core'
 import { createMats, type Mats } from '@pot/kit/realistic/mats'
 import { registerSfx, sfx } from '@pot/kit/realistic/sfx'
 import { norm, RAD } from '@pot/kit/realistic/math'
@@ -27,7 +27,7 @@ interface Store {
 
 const stores = new WeakMap<object, Store>()
 
-function store(w: any): Store {
+function store(w: World): Store {
   let S = stores.get(w)
   if (!S) stores.set(w, (S = { looks: new Map(), fx: new Map(), matsTried: false, frame: -1, time: 0, dt: 0 }))
   return S
@@ -59,7 +59,7 @@ function frameDt(S: Store, ctx: Context) {
 }
 
 /** 固定步之间按插值取位置 */
-function at(w: any, e: any, a: number): Vec3 {
+function at(w: World, e: EntityData, a: number): Vec3 {
   const q = w.prev.get(e.id)?.pos ?? e.pos
   return [q[0] + (e.pos[0] - q[0]) * a, q[1] + (e.pos[1] - q[1]) * a, q[2] + (e.pos[2] - q[2]) * a]
 }
@@ -86,7 +86,7 @@ function dieFx(L: Look, ctx: Context) {
 }
 
 /** 飞鸥外观：原版姿态、旋翼、频闪、云台、镜头；血量过半冒烟；坠落时拖黑烟 */
-function animateGull(L: Look, e: any, f: any, pos: Vec3, dt: number, t: any, ctx: Context) {
+function animateGull(L: Look, e: EntityData, f: any, pos: Vec3, dt: number, t: EntityData, ctx: Context) {
   const a = L.m.gull!.anim, scene = ctx.scene
   if (f.mode === 'dying') {
     a.dead(dt, pos[0], pos[1], -pos[2])
@@ -116,7 +116,7 @@ function animateGull(L: Look, e: any, f: any, pos: Vec3, dt: number, t: any, ctx
 }
 
 /** 猎犬：原版步态、姿态、炮塔/头部追踪、镜头色；死亡时原版的倒地 */
-function animateHound(L: Look, e: any, f: any, pos: Vec3, dt: number, t: any) {
+function animateHound(L: Look, e: EntityData, f: any, pos: Vec3, dt: number, t: EntityData) {
   const a = L.m.hound!.anim
   if (f.mode === 'dying') { a.dead(dt, pos[0], pos[1], -pos[2]); return }
   if (L.fired !== f.fired) { L.fired = f.fired; a.fired() }
@@ -134,7 +134,7 @@ function animateHound(L: Look, e: any, f: any, pos: Vec3, dt: number, t: any) {
 
 /** mechFoe 的表现 */
 export const foeView = {
-  enter(f: any, e: any, ctx: Context, w: any) {
+  enter(f: any, e: EntityData, ctx: Context, w: World) {
     registerSfx(ctx)
     const S = store(w)
     const m = buildEnemy(ctx, f.kind, `${f.kind}-${e.id}`, mats(S, ctx))
@@ -144,7 +144,7 @@ export const foeView = {
     m.gull?.anim.place(e.pos[0], e.pos[1], -e.pos[2], threeYaw(f.yaw))
     S.looks.set(e.id, { m, dead: false, fired: f.fired, hits: f.hits, attack: f.attack, smokeT: 0 })
   },
-  update(f: any, e: any, _objs: any, ctx: Context, w: any) {
+  update(f: any, e: EntityData, _objs: any, ctx: Context, w: World) {
     const S = store(w), dt = frameDt(S, ctx), L = S.looks.get(e.id)
     const t = findTarget(w, f.target)
     if (!L || w.vars.mechFrozen || w.overlayActive || !t) return
@@ -173,7 +173,7 @@ export const foeView = {
     if (m.hound) syncHound(m.hound)
     else if (m.gull) syncGull(m.gull)
   },
-  exit(_f: any, e: any, _objs: any, _ctx: Context, w: any) {
+  exit(_f: any, e: EntityData, _objs: any, _ctx: Context, w: World) {
     const S = store(w), L = S.looks.get(e.id)
     if (!L) return
     L.m.root.destroy()
@@ -181,7 +181,7 @@ export const foeView = {
   },
 }
 
-function drop(w: any, id: number) {
+function drop(w: World, id: number) {
   const S = store(w), x = S.fx.get(id)
   if (!x) return
   S.fx.delete(id)
@@ -195,14 +195,14 @@ function drop(w: any, id: number) {
 
 /** mechBolt 的表现：发光胶囊朝飞行方向，出现时播开火声 */
 export const boltView = {
-  enter(b: any, e: any, ctx: Context, w: any) {
+  enter(b: any, e: EntityData, ctx: Context, w: World) {
     registerSfx(ctx)
     const o = ctx.scene.spawn({ shape: 'capsule', name: 'bolt', scale: [0.09, 0.32, 0.09], color: b.kind === 'gull' ? '#ff6a40' : '#ffb347', material: { mode: 'additive', shadows: false }, collider: false } as any)
     o.position = [...e.pos] as Vec3
     store(w).fx.set(e.id, { o })
     ctx.audio.play(sfx(b.kind === 'gull' ? 'bolt' : 'houndShot'), { volume: 0.6, position: [...e.pos] as Vec3, pitch: b.pitch })
   },
-  update(b: any, e: any, _objs: any, ctx: Context, w: any) {
+  update(b: any, e: EntityData, _objs: any, ctx: Context, w: World) {
     const x = store(w).fx.get(e.id)
     if (!x || w.vars.mechFrozen || w.overlayActive) return
     const o = x.o, v = b.vel, pos = at(w, e, ctx.clock.fixedAlpha)
@@ -210,14 +210,14 @@ export const boltView = {
     o.lookAt([pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]])
     o.localRotation = [o.localRotation[0] + 90, o.localRotation[1], o.localRotation[2]]
   },
-  exit(_b: any, e: any, _objs: any, _ctx: Context, w: any) {
+  exit(_b: any, e: EntityData, _objs: any, _ctx: Context, w: World) {
     drop(w, e.id)
   },
 }
 
 /** mechBoom 的表现：火球按寿命胀大变淡，点光源随之熄灭；出现时播爆炸声 */
 export const boomView = {
-  enter(_b: any, e: any, ctx: Context, w: any) {
+  enter(_b: any, e: EntityData, ctx: Context, w: World) {
     registerSfx(ctx)
     const o = ctx.scene.spawn({ shape: 'sphere', name: 'boom', color: '#ffb347', material: { mode: 'additive', shadows: false }, collider: false } as any)
     o.position = [...e.pos] as Vec3
@@ -226,7 +226,7 @@ export const boomView = {
     store(w).fx.set(e.id, { o, l })
     ctx.audio.play(sfx('explode'), { volume: 0.9, position: [...e.pos] as Vec3 })
   },
-  update(_b: any, e: any, _objs: any, _ctx: Context, w: any) {
+  update(_b: any, e: EntityData, _objs: any, _ctx: Context, w: World) {
     const x = store(w).fx.get(e.id)
     if (!x || w.vars.mechFrozen || w.overlayActive) return
     const lt = e.b.lifetime
@@ -237,7 +237,7 @@ export const boomView = {
     x.o.color(`#ffb347${Math.round((1 - k) * 200).toString(16).padStart(2, '0')}`)
     x.l.intensity((1 - k) * 6)
   },
-  exit(_b: any, e: any, _objs: any, _ctx: Context, w: any) {
+  exit(_b: any, e: EntityData, _objs: any, _ctx: Context, w: World) {
     drop(w, e.id)
   },
 }

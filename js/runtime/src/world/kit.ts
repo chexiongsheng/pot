@@ -7,7 +7,7 @@
 import { isPrefab } from './node'
 import type { Prefab } from './node'
 import type { BlockDef } from './registry'
-import type { Controls } from './world'
+import type { Controls, World } from './world'
 
 const KIT_NAME = /^[a-z][a-z0-9-]*$/
 const KIT = Symbol.for('pot.kit')
@@ -25,7 +25,7 @@ export interface KitDef {
   requires?: Kit[]
 }
 
-export type KitHandler = (w: any, payload: any) => void
+export type KitHandler = (w: World, payload: any) => void
 
 export interface Kit {
   readonly name: string

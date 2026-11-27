@@ -7,7 +7,7 @@
  * 场景对象按实体建，enter 不返回（挂在相机下，变换自己管），exit 倒序销毁。场景相关的查询由游戏用 setGunEnv 注入。
  */
 import { defineBlock } from '@pot/core'
-import type { Context, Entity, MaterialOptions, StandardMaterial, Vec3 } from '@pot/core'
+import type { Context, Entity, EntityData, MaterialOptions, StandardMaterial, Vec3, World } from '@pot/core'
 import type { GunFpsProps, GunFpsState, GunShot, MoveFpsProps, MoveFpsState } from '@pot/kit/fps'
 import { createPac9Materials, wetness } from './pac9-mats'
 import { createDecals, decalFor } from './decals'
@@ -126,7 +126,7 @@ interface Store {
 }
 
 const stores = new WeakMap<object, Store>()
-function store(w: any): Store {
+function store(w: World): Store {
   let S = stores.get(w)
   if (!S) stores.set(w, (S = { rigs: new Map(), frame: -1, time: 0, dt: 0 }))
   return S
@@ -315,7 +315,7 @@ function impact(ctx: Context, R: Res, point: Vec3, n: Vec3, surface: string, dir
 }
 
 /** 一发的表现：枪口火焰、弹簧冲量、枪声、命中效果、枪口火光与曳光 */
-function shotFx(ctx: Context, w: any, R: Res, r: Rig, e: any, g: Gun, m: Move | undefined, s: GunShot) {
+function shotFx(ctx: Context, w: World, R: Res, r: Rig, e: EntityData, g: Gun, m: Move | undefined, s: GunShot) {
   const { scene } = ctx, rand = Math.random
   r.flashT = r.flashDur = 0.036 + rand() * 0.02
   r.heat = Math.min(1.3, r.heat + 0.05)
@@ -358,7 +358,7 @@ function shotFx(ctx: Context, w: any, R: Res, r: Rig, e: any, g: Gun, m: Move | 
   }
 }
 
-const env = (w: any) => envs.get(w.registry) ?? DEFAULT_ENV
+const env = (w: World) => envs.get(w.registry) ?? DEFAULT_ENV
 
 /** 原版 setWetness：雨淋程度 1（露天）时以 0.6 的速率变湿，否则以 0.25 的速率趋向它 */
 function updateWetness(r: Rig, target: number, dt: number) {
@@ -373,7 +373,7 @@ function updateWetness(r: Rig, target: number, dt: number) {
 
 const tp = new Vector3(), tq = new Quaternion(), tz = new Quaternion(), tm = new Vector3()
 
-function update(ctx: Context, w: any, r: Rig, R: Res, e: any, dt: number) {
+function update(ctx: Context, w: World, r: Rig, R: Res, e: EntityData, dt: number) {
   const g = e.b.gunFps as Gun | undefined
   const m = e.b.moveFps as Move | undefined
   const c = e.b.cameraFps as CameraFpsLike | undefined

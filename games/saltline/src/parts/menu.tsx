@@ -10,7 +10,7 @@
  * - 结算：“Saltline 港区已解除封锁”，行动评级（险象环生到完美突击）与用时、命中率、击毁、弱点命中、重新部署次数，
  *   再次出击或返回标题
  */
-import type { GameUI, UIService } from '@pot/core'
+import type { GameUI, UIService, World } from '@pot/core'
 import { formatTime } from '@pot/kit/realistic/math'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { C } from './palette'
@@ -79,7 +79,7 @@ function menuApi(ui: GameUI) {
 }
 type Api = ReturnType<typeof menuApi>
 
-export function Menu({ w, ui }: { w: any; ui: GameUI }) {
+export function Menu({ w, ui }: { w: World; ui: GameUI }) {
   const sl: Sl = w.vars.sl
   if (!sl) return null
   const ph = phaseOf(w), L = ui.local, input = ui.input, api = menuApi(ui)
@@ -249,7 +249,7 @@ function Stats({ items }: { items: [string, string][] }) {
 }
 
 /** 设置（鼠标灵敏度、视野、音量、反转垂直视角、四档画质）、操作说明、项目介绍面板；点“返回”或按 Esc 关闭 */
-function Panel({ w, ui, api, W, H }: { w: any; ui: GameUI; api: Api; W: number; H: number }) {
+function Panel({ w, ui, api, W, H }: { w: World; ui: GameUI; api: Api; W: number; H: number }) {
   const L = ui.local
   const pw = Math.min(560, W - 80), cw = pw - 56
   const title = L.panel === 'settings' ? '设置' : L.panel === 'controls' ? '操作说明' : '项目介绍'

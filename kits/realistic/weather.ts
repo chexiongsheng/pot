@@ -8,7 +8,7 @@
  * 地图自己画的雨幕、积水用 currentWeather(w) 读雨量与湿度（harbor）；地图自己画了雨就调 paintRain(w, owner, true)，这里就不撒内置雨滴。
  * 闪电提亮画面由 atmosphere 读这里的闪电状态。
  */
-import { defineBlock, type Color, type LoopHandle, type Over } from '@pot/core'
+import { defineBlock, type Color, type LoopHandle, type Over, type World } from '@pot/core'
 import { registerSfx, sfx } from './sfx'
 
 /** 闪光曲线（saltline 原式）：t 为距闪电的秒数，power 为强度 */
@@ -141,8 +141,8 @@ function applyScene(ctx: any, me: WeatherProps, drops: number | undefined, paint
   })
 }
 
-const rainVolume = (me: WeatherProps, w: any) => me.sound * resolveWeather(me).rain * (w.overlayActive ? PAUSED_RAIN : 1)
-const range = (w: any, r: [number, number]) => w.rand(Math.min(r[0], r[1]), Math.max(r[0], r[1]))
+const rainVolume = (me: WeatherProps, w: World) => me.sound * resolveWeather(me).rain * (w.overlayActive ? PAUSED_RAIN : 1)
+const range = (w: World, r: [number, number]) => w.rand(Math.min(r[0], r[1]), Math.max(r[0], r[1]))
 
 export const weather = defineBlock({
   name: 'weather',

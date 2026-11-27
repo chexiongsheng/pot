@@ -3,6 +3,7 @@
  * 阶段：flow 只有 title、play、paused；intro、playing、dead、complete 是 play 里的子阶段（vars.sl.phase）。
  * 这里的东西都进存档、热重载保留：玩到一半改代码，切断了几处中继、打掉了几只敌人都还在。
  */
+import type { EntityData, World } from '@pot/core'
 
 /**
  * play 里的子阶段（导演切换）：
@@ -107,7 +108,7 @@ export function freshHud(): SlHud {
 }
 
 /** 提示的年龄（秒） */
-export const ageOf = (w: any, at: number) => (w.tick - at) * w.dt
+export const ageOf = (w: World, at: number) => (w.tick - at) * w.dt
 
 /** defineGame 的 vars */
 export const slVars = {
@@ -122,9 +123,9 @@ export const slVars = {
  * 合成的阶段：flow 为 play 时取子阶段，否则取 flow 状态名（title、paused）。
  * HUD 画不画、菜单显示哪一页、玩家能不能动、敌人敌不敌对、配乐怎么混，都按它决定
  */
-export function phaseOf(w: any): Phase {
+export function phaseOf(w: World): Phase {
   const s = w.flow.state
-  return s === 'play' ? ((w.vars.sl as Sl).phase ?? 'playing') : s
+  return s === 'play' ? ((w.vars.sl as Sl).phase ?? 'playing') : s as Phase
 }
 
 /** 游戏事件（w.emit / w.on / rule）的名字与载荷 */
@@ -144,7 +145,7 @@ export interface SlEvents {
 }
 
 /** 发游戏事件（带载荷类型检查）：导演、玩家积木用它，接收的规则在 director.tsx 的 Director 里 */
-export function slEmit<K extends keyof SlEvents>(w: any, name: K, payload: SlEvents[K]) {
+export function slEmit<K extends keyof SlEvents>(w: World, name: K, payload: SlEvents[K]) {
   w.emit(name, payload)
 }
 
@@ -156,7 +157,7 @@ export function slEmit<K extends keyof SlEvents>(w: any, name: K, payload: SlEve
 export type FlowEvent = 'slStart' | 'slResume' | 'slPause' | 'slTitle' | 'slRestart' | 'slRetry'
 
 /** 玩家实体（标签 player）；pid 是调用方记的缓存 id：港区有几百个碰撞盒实体，每帧全表查询太慢 */
-export function findPlayer(w: any, cache: { pid: number }): any {
+export function findPlayer(w: World, cache: { pid: number }): EntityData | undefined {
   const e = cache.pid < 0 ? undefined : w.get(cache.pid)
   if (e?.b.moveFps && e.tags.includes('player')) return e
   const found = w.query('player')[0]
