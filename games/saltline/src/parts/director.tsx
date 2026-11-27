@@ -215,7 +215,7 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number; bid: number }
       if (near < 0 || d < dist2d(me.relays[near].pos, p.pos)) near = i
     })
     sl.hint = near
-    if (near >= 0 && w.down('interact')) {
+    if (near >= 0 && w.cmd().down('interact')) {
       if (sl.interact !== near) { sl.progress = 0; if (sl.interact >= 0 && sl.relays[sl.interact] === 'cutting') sl.relays[sl.interact] = 'live' }
       sl.interact = near
       sl.relays[near] = 'cutting'
