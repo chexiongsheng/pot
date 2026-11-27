@@ -2,6 +2,13 @@
  * 菜单（界面树，004 第 19.5 节第 9 步）：标题、暂停、阵亡、结算简报，以及设置、操作说明、项目介绍面板。
  * 鼠标锁定、Esc 暂停与继续、失焦暂停也在这里（ui.input 判断，ui.emit 发流程事件）；改设置走 ui.emit('slSet')。
  * 打开的面板记在 ui.local.panel。
+ *
+ * 四个画面：
+ * - 标题：大字 SALTLINE 和一句任务简介，开始行动、设置、项目介绍；背后是导演的巡游镜头
+ * - 暂停：“已暂停”，继续游戏、设置、操作说明、重新开始任务
+ * - 阵亡：“信号中断”，生存时间与已切断中继数，重试（也可以按回车）
+ * - 结算：“Saltline 港区已解除封锁”，行动评级（险象环生到完美突击）与用时、命中率、击毁、弱点命中、重新部署次数，
+ *   再次出击或返回标题
  */
 import type { GameUI, UIService } from '@pot/core'
 import { formatTime } from '@pot/kit/realistic/math'
@@ -9,6 +16,7 @@ import { sfx } from '@pot/kit/realistic/sfx'
 import { C } from './palette'
 import { phaseOf, type FlowEvent, type Settings, type Sl } from './state'
 
+/** 操作说明面板的键位表 */
 const CONTROLS: [string, string][] = [
   ['W A S D', '移动'], ['鼠标', '视角'], ['鼠标左键', '射击'], ['鼠标右键', '瞄准'], ['R', '换弹'],
   ['空格', '跳跃'], ['左 Shift', '冲刺'], ['C / 左 Ctrl', '蹲伏'], ['E（按住）', '切断中继'], ['Esc', '暂停'],
@@ -20,6 +28,7 @@ const LEGEND: [string, string][][] = [
   [['E', '切断中继'], ['Space', '跳跃'], ['Shift', '冲刺'], ['C', '蹲伏'], ['Esc', '暂停']],
 ]
 
+/** 项目介绍面板的三段文字 */
 const ABOUT = [
   '《Saltline》是一部单关卡第一人称射击短篇，原作由 Felix Rieseberg 使用 Claude Fable 5.2 制作。',
   '你将潜入暴雨中的港区，切断堆场、仓库与码头的三处中继，在机械飞鸥与机械猎犬的围攻中撤离。',
@@ -32,13 +41,17 @@ const BONE_DIM = '#e8e4daa3'
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v)
 
-/** 评级：用时、命中率、是否无重试 */
+/**
+ * 评级：用时、命中率、是否无重试。用时 4 分半内 2 分、6 分 40 秒内 1 分；命中率 50% 以上 2 分、30% 以上 1 分；
+ * 没重试过 1 分。共 0 到 5 分，对应 flow.json 的六个评级名（险象环生、火力全开、稳扎稳打、干净利落、精准果断、完美突击）
+ */
 function rating(g: Sl, ratings: string[]) {
   const acc = g.stats.shots ? g.stats.hits / g.stats.shots : 0
   const score = (g.time < 270 ? 2 : g.time < 400 ? 1 : 0) + (acc >= 0.5 ? 2 : acc >= 0.3 ? 1 : 0) + (g.retries === 0 ? 1 : 0)
   return { acc, score, label: ratings[Math.min(ratings.length - 1, score)] }
 }
 
+/** flow.json（评级名）与画质档位名只读一次（界面每帧求值） */
 let cached: { flow: any; qualityNames: string[] } | undefined
 function data(ui: GameUI) {
   return (cached ??= { flow: ui.data.load('flow.json'), qualityNames: ui.data.load('tuning.json').quality.names })
@@ -47,7 +60,7 @@ function data(ui: GameUI) {
 type Box = { x: number; y: number; w: number; h: number; alpha: number }
 type Act = { id: string; label: string; primary?: boolean; run: () => void }
 
-/** 界面上下文：发流程事件、开面板、按钮音效 */
+/** 界面上下文：发流程事件（同时关掉面板、响一声按钮音）、开面板、鼠标移到按钮上的轻响、改设置 */
 function menuApi(ui: GameUI) {
   const L = ui.local
   return {
@@ -70,7 +83,7 @@ export function Menu({ w, ui }: { w: any; ui: GameUI }) {
   const sl: Sl = w.vars.sl
   if (!sl) return null
   const ph = phaseOf(w), L = ui.local, input = ui.input, api = menuApi(ui)
-  // 鼠标锁定（只在 intro、playing）
+  // 鼠标锁定（只在 intro、playing）：任务中鼠标藏起来用来转视角，菜单里放出来点按钮
   const wantLock = ph === 'playing' || ph === 'intro'
   if (input.cursor() !== wantLock && (wantLock ? input.focused() : true)) input.cursor(wantLock)
   // 暂停：Esc 或失焦；暂停中 Esc 先关面板，没有面板才继续
@@ -87,17 +100,20 @@ export function Menu({ w, ui }: { w: any; ui: GameUI }) {
     ui.emit('slResume')
     return null
   }
+  // 任务中不画菜单
   if (wantLock) return null
   const W = ui.width, H = ui.height
   if (L.panel) return <Panel w={w} ui={ui} api={api} W={W} H={H} />
   const { flow } = data(ui)
 
+  // 标题画面
   if (ph === 'title') {
     const items: Act[] = [
       { id: 'start', label: '开始行动', primary: true, run: () => api.send('slStart') },
       { id: 'settings', label: '设置', run: () => api.open('settings') },
       { id: 'about', label: '项目介绍', run: () => api.open('about') },
     ]
+    // 窄屏放不下右下角的操作速览，改成一个“操作说明”按钮
     if (W < 1180) items.push({ id: 'controls', label: '操作说明', run: () => api.open('controls') })
     const ps = Math.round(clamp(W * 0.0155, 17, 22))
     return <Page W={W} H={H} t={sl.t} a={1} legend={W >= 1180}
@@ -114,6 +130,7 @@ export function Menu({ w, ui }: { w: any; ui: GameUI }) {
     </Page>
   }
 
+  // 暂停画面（世界冻结在背后）
   if (ph === 'paused') {
     return <Page W={W} H={H} t={1} a={1} foot={`任务用时 ${formatTime(sl.time)}`}>
       <Heading eyebrow="行动暂时中止" title="已暂停" size={Math.round(clamp(W * 0.08, 44, 120))} />
@@ -126,6 +143,7 @@ export function Menu({ w, ui }: { w: any; ui: GameUI }) {
     </Page>
   }
 
+  // 阵亡画面：倒下 1 秒后浮现，再过 1 秒出现“重试”，此时回车也能重试
   if (ph === 'dead') {
     if (sl.t < 1) return null
     const a = clamp(sl.t - 1, 0, 1)
@@ -138,6 +156,7 @@ export function Menu({ w, ui }: { w: any; ui: GameUI }) {
     </Page>
   }
 
+  // 结算简报：登艇 1.2 秒后浮现，评级用 5 格进度条表示得了几分
   if (ph === 'complete') {
     if (sl.t < 1.2) return null
     const a = clamp((sl.t - 1.2) * 2, 0, 1)
@@ -229,7 +248,7 @@ function Stats({ items }: { items: [string, string][] }) {
   </row>
 }
 
-/** 设置、操作说明、项目介绍面板 */
+/** 设置（鼠标灵敏度、视野、音量、反转垂直视角、四档画质）、操作说明、项目介绍面板；点“返回”或按 Esc 关闭 */
 function Panel({ w, ui, api, W, H }: { w: any; ui: GameUI; api: Api; W: number; H: number }) {
   const L = ui.local
   const pw = Math.min(560, W - 80), cw = pw - 56

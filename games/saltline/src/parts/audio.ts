@@ -1,11 +1,14 @@
 /**
  * 声音（只有表现）：雨声、低鸣、交战紧张感三条循环音，按阶段与是否交战调音量；设置里的总音量变化时调 ctx.audio.volume；
  * 无线电、命中、击杀的提示音（按 w.vars.slHud 里的序号变化放）。
+ *
+ * 听到的：雨声一直在（暂停时压得很低）；低沉的嗡鸣在标题画面更响；被敌人发现后，战斗中慢慢升起紧张的配乐。
  */
 import { defineBlock, type LoopHandle } from '@pot/core'
 import { registerSfx, sfx } from '@pot/kit/realistic'
 import { phaseOf, type Settings, type Sl, type SlHud } from './state'
 
+/** 一个声音实体的混音状态：三条循环音、紧张感当前音量、已设的总音量、帧间隔、已响过的无线电与命中序号 */
 interface Mix { rain: LoopHandle; drone: LoopHandle; tension: LoopHandle; tensionVol: number; volume: number; time: number; frame: number; dt: number; radio: number; marker: number }
 const mixes = new WeakMap<object, Map<number, Mix>>()
 const of = (w: object) => {
@@ -14,6 +17,7 @@ const of = (w: object) => {
   return m
 }
 
+/** 停掉三条循环音（实体销毁、热重载重建时） */
 function stop(m: Mix) {
   for (const l of [m.rain, m.drone, m.tension]) {
     try {
@@ -52,17 +56,20 @@ export const slAudio = defineBlock({
       }
       const sl: Sl = w.vars.sl, s: Settings = w.vars.slSettings, ph = phaseOf(w)
       const paused = ph === 'paused'
+      // 交战紧张感：被发现后战斗中升到 0.4，否则慢慢落下（一两秒的过渡）；暂停时静音
       const combat = sl?.alerted && ph === 'playing' ? 1 : 0
       m.tensionVol += (combat * 0.4 - m.tensionVol) * Math.min(1, m.dt * 0.8)
       m.tension.set({ volume: paused ? 0 : m.tensionVol })
+      // 雨声暂停时压到很小；低鸣在标题画面最响，暂停时静音
       m.rain.set({ volume: paused ? 0.08 : 0.35 })
       m.drone.set({ volume: paused ? 0 : ph === 'title' ? 0.35 : 0.2 })
+      // 设置面板的总音量
       const vol = s?.volume ?? 0.8
       if (vol !== m.volume) {
         m.volume = vol
         ctx.audio.volume(vol)
       }
-      // 提示音
+      // 提示音：指挥中心每说一句话响一声无线电；命中和击杀各有一种提示音，弱点命中音调更高
       const hud: SlHud | undefined = w.vars.slHud
       if (hud && hud.radio.n !== m.radio) {
         m.radio = hud.radio.n
