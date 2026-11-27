@@ -2034,6 +2034,8 @@ games/saltline/
 
 套件里的代码不得依赖某个游戏的阶段、事件名或全局状态：敌人“何时追击、打到谁”由属性和事件给出；`decals` 的 `surfaceAt` 依赖 `origlevel`，改为由调用方传入表面查询。小文件（`physics`、`rating` 等）按用途归入，纯属本游戏的留在 `src/parts`。
 
+套件按玩家能认出来的东西提供（第 11 步加）：一个地方（港口）、一种敌人（机械猎犬、机械飞鸥）、一把枪，不按引擎的分层（碰撞、模型、着色器）切。一个地方由套件导出的场景组件给出，碰撞、外观、天气都在里面：harbor 导出 `<Harbor>`，游戏的 `scene` 写一行 `<Harbor />`，不再自己拼碰撞盒与布景。套件可以导出函数组件（`.tsx`），组件里只用本套件与所依赖套件的积木，和游戏的组件一样写。这条也为积木预览（19.6）留出入口：预览一个地方就是只放它的场景组件，预览一种敌人就是生成它的预制件，所以场景组件要能脱离具体游戏单独放。
+
 ### 19.3 架构调整
 
 A. 套件资源。套件除代码外还能带数据文件（着色器、JSON）。`ctx.data` 与 `ctx.gfx` 的路径可以写成 `@pot/kit/<名字>/<路径>`，读取次序：游戏的 `data/kits/<名字>/<路径>`（发布时复制的副本，或弹出后的副本），再回退到宿主的套件目录（`host.readKit`）。着色器里 `#include` 的相对路径按包含它的文件解析，可以跨进套件。读者登记与热重载规则同普通数据文件（DataService 按完整路径登记读者，dev agent 收到套件资源的变化时同样强制重载）。`kits.json` 收录 `.vert`、`.frag`、`.glsl`。`pot build` 把游戏用到的套件（按打包时实际引入的模块统计）的资源复制到发布包的 `data/kits/<名字>/`，游戏自己的副本优先；`pot eject` 把资源复制到 `data/kits/<名字>/`（代码与 JSON 仍复制到 `src/kits/<名字>/`），代码里带资源扩展名的 `'@pot/kit/<名字>/…'` 字符串不改写，运行时自然读到游戏的副本。资源指扩展名不是 `.ts`、`.tsx`、`.js` 的文件。
@@ -2060,6 +2062,8 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 8. 场景渲染积木化：`world.ts` 拆为 `realistic` 与 `harbor` 的表现积木与预制件，在 `game.tsx` 的 `scene` 里组装。
 9. 界面改为 `ui` 树（19.3 D）。
 10. 收尾：删除 `lib/types`、`lib/bus` 等残余，同步 Skill 与文档，统计手写源码字节数（游戏与套件分开计），实机验证。实施中加入：加载进度的修正（17.13 的“M3.5 第 10 步改”）。
+11. 港口作为一个地方（19.2 末段）：harbor 导出 `<Harbor>`（关卡碰撞盒、天气、港区模型），saltline 删除 `parts/level.tsx`、`parts/stage.tsx`；撤离点信标归导演组件（它是任务目标，导演点亮它），环境声直接写在 `game.tsx` 的 `scene` 里。`game.tsx` 的场景读起来是“港口、突击队员、任务、环境声”。
+12. 港区布局进套件：`level.json` 里描述港口本身的部分（集装箱、杂物、桅杆、系缆桩、起重机、仓库、码头、围栏、楼梯、栈桥、配色）作为 harbor 的缺省布局，`<Harbor>` 不给数据也能放出来（预览要用）；saltline 的 `level.json` 只留玩法点位（中继、出生点、开局位置、撤离点、标题镜头路线）。
 
 ### 19.5 实施记录
 
@@ -2264,3 +2268,23 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
   - 遗留：
     - Runner 包里的 `kits.json`（约 1MB）带全部套件；发布包只带用到的套件需要 `pot build` 按游戏的 `kits.json` 生成，留作后续。
     - `viewGun`、`harborLevel` 的 `cost` 是 Windows 上的实测，手机上比例可能不同。
+
+第 11 步（港口作为一个地方）：
+
+- 起因：第 4 步把碰撞单元搬成 `parts/level.tsx`（`LevelColliders`），第 8 步又另起 `parts/stage.tsx`（`Stage`，天气、港区模型、撤离点、环境声）。两个名字没有统一（`Stage` 还和系统的 `<stage>` 标签撞名），而且按引擎的分层（碰撞、画面）把同一座港口切在两处，游戏要自己知道“先放碰撞盒、再放玩家、最后放布景”。对玩家来说港口就是一个地方。
+- 约定（19.2 末段）：套件按玩家认得出来的东西提供；一个地方是套件导出的场景组件。
+- harbor：新增 `place.tsx`，导出 `<Harbor data level? tex? weather? exposure? quality? lightning? chunks?>` 与 `<HarborColliders data level?>`。`<Harbor>` 依次放碰撞盒（即 `<HarborColliders>`）、天气（realistic 的 `atmosphere`，缺省黄昏暴雨，`shaderRain`，闪电带雷声）、`harborLevel`、`chunks` 份 `harborStatics`，全部标 `keep`。`<HarborColliders>` 单独导出给无画面的回归测试用（测试只引入 fps、realistic、mech，没有 harbor 的场景积木）。这是第一个由套件导出的组件；套件里的 `.tsx` 由 devtools 的加载器转译，Runner 与无画面宿主相同，构建器与 `kits.json` 原本就收 `.tsx`，不用改。
+- saltline：删除 `parts/level.tsx`、`parts/stage.tsx`。撤离点信标移进 `<Director>`（它是任务目标，导演点亮它）；环境声 `<entity key="audio" keep slAudio />` 直接写在 `game.tsx` 的 `scene` 里。场景读起来是港口、突击队员、任务、环境声：
+  `<Harbor data weather={tuning.look.weather} quality={tuning.quality.levels} tex />`、`<Player>`、`<Director>`、环境声。
+- 顺序：碰撞盒仍在玩家之前（`w.move` 按 id 升序处理候选）。天气、模型、撤离点、环境声没有碰撞体，位置不影响模拟：把它们放到玩家前面、开局后推进 1500 步（8 只敌人出场巡逻），去掉实体 id 与路径后 581 个实体与 World 数据完全相同。
+- 验证：`npm test` 303/304（仅 pot_gfx 一致性），玩家 840 步金标准、敌人回归、harbor 套件测试不变；`tsc`、`pot check` 通过；冒烟 hash 由 6d0d2fee 变为 9d8db754（实体的 key 路径由 `LevelColliders#0/…` 变为 `Harbor#0/HarborColliders#0/…`，布景实体的 id 排到玩家之前）。与 HEAD 对比开局后 1500 步：去掉 id 与路径后实体状态、随机种子、vars 全同，只有挂载记录里的 key 路径不同。实体的积木属性与迁移前相同（`harborLevel` 多写了缺省的 `level: 'level.json'`），没有做 Runner 实机验证。
+- 字节数：saltline 的 `src` 由 86812 降到 83405 字节（第 10 步之后补过注释，所以比第 10 步的 60955 多）；harbor 的 `place.tsx` 4102 字节。
+
+### 19.6 后续：积木预览
+
+需求：单独看一个套件提供的东西，不进具体游戏，例如预览港口、机械猎犬、机械飞鸥。设计待定，先记约束：
+
+- 预览的单位是玩家能认出来的东西（19.2 末段）：地方是套件的场景组件（`<Harbor>`），角色与敌人是预制件（`hound`、`gull`）。
+- 场景组件不给属性也能放出来，用套件自带的缺省数据（第 12 步把港区布局移进 harbor 就是为此）。
+- 敌人预览要能不依赖玩家：没有目标时站着待机或按巡逻走，`mechFrozen` 可以冻结行为只看模型与动画。
+- 入口可能是 `pot preview <套件> <组件或预制件>`，在 Runner 里起一个只挂这一项、带自由相机的临时游戏；也可能放进 devtools。实施前再定。

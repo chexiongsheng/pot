@@ -303,7 +303,7 @@ export const slDirector = defineBlock<typeof PROPS, { pid: number; bid: number }
   },
 })
 
-/** 撤离点信标（标签 extraction 的实体的 beacon，parts/stage.tsx 放的地面光圈与光柱）；bid 是缓存的实体 id */
+/** 撤离点信标（标签 extraction 的实体的 beacon，Director 组件里放的地面光圈与光柱）；bid 是缓存的实体 id */
 function findBeacon(w: any, me: { bid: number }): any {
   const e = me.bid < 0 ? undefined : w.get(me.bid)
   if (e?.b.beacon) return e.b.beacon
@@ -391,6 +391,9 @@ export function Director({ data }: { data: SceneArgs['data'] }) {
     <entity key="director" tags={['director']} slDirector={{
       flow, relays: relays.map((r) => ({ pos: r.pos, label: r.label })), spawns, extraction, foes: foeSpawns(data.load('tuning.json'), level),
     }} />
+    {/* 撤离点信标：码头南端舷梯旁的地面光圈、光柱和点光（realistic 的 beacon），三处中继都断开后导演把它点亮；
+        标 keep，重试时不重建 */}
+    <entity key="extraction" keep tags={['extraction']} at={extraction.pos} beacon={{ radius: extraction.radius }} />
     {/* 发现敌情、开枪、命中、击杀 → 战绩与提示 */}
     <rule on="mechAlert" do={alert} />
     <rule on="gunFired" do={fired} />

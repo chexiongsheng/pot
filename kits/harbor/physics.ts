@@ -1,4 +1,4 @@
-/** 关卡碰撞盒：collision 单元据此生成带 body 的实体，玩家、猎犬的 w.move 与敌人的 w.raycast 都查它们 */
+/** 关卡碰撞盒：<HarborColliders>（place.tsx）据此生成带 body 的实体，玩家、猎犬的 w.move 与敌人的 w.raycast 都查它们 */
 import { buildLevel, buildSolids, type Box, type LevelData } from './level'
 import { origLevel } from './origlevel'
 

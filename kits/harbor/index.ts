@@ -1,16 +1,14 @@
 /**
- * harbor 套件（004 第 19.2 节）：港口场景。原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、
- * 关卡数据与玩法点（level）、关卡碰撞盒（physics），地面积水（apron）、海面（sea）、雨幕（rain）与着色器。
- * 场景积木：harborLevel（整张图的地面、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、
- * harborStatics（原版静态网格，chunk / of 分份）。
+ * harbor 套件（004 第 19.2 节）：港口这个地方。游戏的场景里放一个 <Harbor>（place.tsx）就有整座港区：
+ * 关卡碰撞盒、黄昏暴雨的天气、地面积水、海面、雨幕、集装箱堆场、起重机、仓库、货轮与码头。
  *
- *   <entity key="harbor" keep harborLevel />
- *   {[0, 1, 2, 3].map((i) => <entity key={`statics${i}`} keep harborStatics={{ chunk: i, of: 4 }} />)}
- *
- *   import { origLevel } from '@pot/kit/harbor/origlevel'
- *   import { levelBoxes } from '@pot/kit/harbor/physics'
- *   import { harborGunEnv } from '@pot/kit/harbor'
+ *   import harbor, { Harbor, harborGunEnv } from '@pot/kit/harbor'
+ *   scene: ({ data }) => <><Harbor data={data} /><Player data={data} /></>   // 角色放在港口后面
  *   setGunEnv(ctx.world, harborGunEnv())   // realistic 的 viewGun：港口的表面种类与室内盒
+ *
+ * 组成：原版关卡构建（origlevel，运行 realistic/orig/port 的关卡代码）、关卡数据与玩法点（level）、关卡碰撞盒（physics），
+ * 地面积水（apron）、海面（sea）、雨幕（rain）与着色器；场景积木 harborLevel（整张图的地面、海面、雨幕、关卡几何、
+ * 原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，chunk / of 分份），由 <Harbor> 摆好。
  */
 import { defineKit } from '@pot/core'
 import type { Over, Vec3 } from '@pot/core'
@@ -21,6 +19,7 @@ import { origLevel } from './origlevel'
 import { harborLevel, harborStatics, type HarborLevelProps, type HarborStaticsProps } from './scene'
 
 export { harborLevel, harborStatics }
+export { Harbor, HarborColliders, type HarborProps } from './place'
 
 /**
  * viewGun 的场景查询（原版 impact 与 setWetness）：表面取碰撞盒材质，朝上、贴地且落在积水遮罩里的命中按水面处理；
@@ -53,7 +52,7 @@ declare module '@pot/core' {
 
 export default defineKit({
   name: 'harbor',
-  about: '港口场景：harborLevel（地面积水、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，分份）；关卡碰撞盒（physics）；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
+  about: '港口这个地方：场景组件 <Harbor>（关卡碰撞盒、黄昏暴雨的天气、港区模型，角色放在它后面）；积木 harborLevel（地面积水、海面、雨幕、关卡几何、原版动画与灯光，中继状态读 w.vars.harborRelays）、harborStatics（原版静态网格，分份）；harborGunEnv 给 realistic 的 viewGun 提供表面种类与室内盒',
   vars: { harborRelays: [] as string[] },
   blocks: [harborLevel, harborStatics],
   requires: [realistic],

@@ -15,7 +15,7 @@ const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 const FIXTURE = path.join(__dirname, 'fixtures/saltline-player.json')
 const STEPS = 840
 
-/** 测试入口单元：没有 flow（w.flow.state 为 play），vars.sl 的子阶段固定为 playing，用 src/parts 组装关卡碰撞与玩家 */
+/** 测试入口单元：没有 flow（w.flow.state 为 play），vars.sl 的子阶段固定为 playing，用 harbor 的港口碰撞（HarborColliders）与 src/parts 的玩家组装 */
 function goldenFiles() {
   const files = readGameFiles(GAME_DIR)
   files.set('manifest.json', JSON.stringify({ id: 'saltline.golden', plugins: ['golden'] }))
@@ -23,7 +23,7 @@ function goldenFiles() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import realistic from '@pot/kit/realistic'
-import { LevelColliders } from '../parts/level'
+import { HarborColliders } from '@pot/kit/harbor/place'
 import { Player, playerBlocks } from '../parts/player'
 export default defineGame({
   kits: [fps, realistic],
@@ -32,7 +32,7 @@ export default defineGame({
   load: (ctx) => {
     ;(globalThis as any).slPlayer = () => (ctx.world as any).query('player')[0]
   },
-  scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
+  scene: ({ data }) => <><HarborColliders data={data} /><Player data={data} /></>,
 })`)
   return files
 }

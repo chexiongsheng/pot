@@ -1,6 +1,6 @@
 /**
- * saltline 入口：唯一的 defineGame，也是唯一的单元。敌人的积木、预制件与表现来自 mech 套件，玩家、关卡碰撞、导演、
- * 布景（环境、港口、撤离点、声音）、界面（HUD、菜单）的定义来自 src/parts；
+ * saltline 入口：唯一的 defineGame，也是唯一的单元。港口这个地方（碰撞、天气、模型）来自 harbor 套件的 <Harbor>，
+ * 敌人的积木、预制件与表现来自 mech 套件；玩家、导演（含撤离点）、环境声、界面（HUD、菜单）的定义来自 src/parts；
  * 阶段走 flow（title、play、paused 叠加），一局的进度在 w.vars（parts/state.ts）。
  *
  * 游戏内容：黄昏暴雨中的 Saltline 港区，玩家扮演突击队员，要切断三处中继（甲号·堆场、乙号·仓库、丙号·码头），
@@ -10,11 +10,9 @@
  *
  * 文件分工：
  * - parts/state.ts：一局的进度（阶段、三处中继的状态、敌人出场队列、战绩）、设置、HUD 提示、事件名
- * - parts/level.tsx：港区的碰撞盒（集装箱、杂物、仓库墙、围栏与码头边的空气墙、楼梯与栈桥），玩家走路、猎犬移动、子弹都撞它
  * - parts/player.tsx：突击队员（走跑蹲跳、相机、生命、KR-7 步枪）与脚步声、受伤红屏、落水救援
- * - parts/director.tsx：关卡导演，管开场、切断中继、刷巡逻队与增援、追兵、撤离、阵亡，以及标题画面的巡游镜头
+ * - parts/director.tsx：关卡导演，管开场、切断中继、刷巡逻队与增援、追兵、撤离（含撤离点信标）、阵亡，以及标题画面的巡游镜头
  * - parts/enemies.ts：把 tuning.json 里飞鸥、猎犬的数值换成 mech 套件的生成参数
- * - parts/stage.tsx：看得见、听得见的布景（天空、雨雾与闪电，整座港口的模型，撤离点信标，环境声）
  * - parts/audio.ts：雨声、低鸣、交战紧张感三条循环音，以及无线电、命中、击杀的提示音
  * - parts/hud.tsx：战斗界面（罗盘、任务目标、生命、弹药、准星、击杀信息、指挥中心字幕、敌情警告、切断进度环）
  * - parts/menu.tsx：标题、暂停、阵亡、结算简报四个画面，以及设置、操作说明、项目介绍面板
@@ -25,12 +23,10 @@
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import realistic, { registerSfx, setGunEnv } from '@pot/kit/realistic'
-import harbor, { harborGunEnv } from '@pot/kit/harbor'
+import harbor, { Harbor, harborGunEnv } from '@pot/kit/harbor'
 import mech from '@pot/kit/mech'
-import { LevelColliders } from '../parts/level'
 import { Player, playerBlocks } from '../parts/player'
 import { Director, slDirector } from '../parts/director'
-import { Stage } from '../parts/stage'
 import { slAudio } from '../parts/audio'
 import { Hud } from '../parts/hud'
 import { Menu } from '../parts/menu'
@@ -40,7 +36,7 @@ export default defineGame({
   // 用到的四个套件：
   // fps：第一人称走跑蹲跳、相机、生命与回血、步枪的射击规则（弹匣、射速、散布、后坐、开镜、换弹）
   // realistic：写实画面（黄昏天空、雨、雾、闪电、原版后处理链、画质档位）、第一人称枪模与弹孔火花、合成音效库
-  // harbor：港区本身（集装箱、起重机、货轮、仓库、海面、积水地坪的模型，以及关卡碰撞盒）
+  // harbor：港口这个地方（集装箱、起重机、货轮、仓库、海面、积水地坪，关卡碰撞盒，黄昏暴雨的天气）
   // mech：机械飞鸥与机械猎犬（感知、巡逻与交战、攻击令牌、弹道、爆炸、模型与动画）
   kits: [fps, realistic, harbor, mech],
   // 一局的进度 sl、玩家设置 slSettings、HUD 提示 slHud（见 parts/state.ts）
@@ -65,21 +61,28 @@ export default defineGame({
   blocks: [...playerBlocks, slDirector, slAudio],
   // 挂载场景前的准备（启动和热重载都会执行；只做同步的小事，加载进度条留给场景预热）
   load: (ctx) => {
-    // 界面的按钮音效不等布景进场：先把合成音效（枪声、脚步、雨、雷、无线电、切断滴答、按钮声）登记好
+    // 界面的按钮音效不等港口进场：先把合成音效（枪声、脚步、雨、雷、无线电、切断滴答、按钮声）登记好
     registerSfx(ctx)
     // viewGun 的表面种类与室内盒（港口）：子弹打进海里溅水花，打在别处按表面（金属集装箱、混凝土地面等）
     // 出烟尘、火花和不同的弹孔；仓库棚下算室内，枪身不淋雨
     setGunEnv(ctx.world, harborGunEnv())
   },
-  // 关卡盒在玩家之前（实体 id 顺序影响 w.move）；关卡盒与布景标 keep，切流程状态时不重建
-  // 场景从上到下：港区的几百个碰撞盒、突击队员、关卡导演（带它的规则）、布景（天气、港口模型、撤离点、环境声）。
-  // 敌人不在树里：导演在运行中按波次 w.spawn 飞鸥和猎犬
-  scene: ({ data }) => <>
-    <LevelColliders data={data} />
-    <Player data={data} />
-    <Director data={data} />
-    <Stage data={data} />
-  </>,
+  // 场景从上到下：
+  // 港口：黄昏暴雨里的 Saltline 港区，几百个碰撞盒、天气、整座港区的模型（tuning.json 给天气、画质档位、贴图档）；
+  //   突击队员和之后刷出来的猎犬都要在港口后面（w.move 按实体 id 升序处理碰撞候选，碰撞盒的 id 要在前）
+  // 突击队员：玩家
+  // 任务：关卡导演（带它的规则）与码头南端的撤离点
+  // 环境声：雨声、低鸣、交战紧张感（parts/audio.ts）
+  // 港口、撤离点、环境声标 keep，切流程状态时不重建；敌人不在树里，导演在运行中按波次 w.spawn 飞鸥和猎犬
+  scene: ({ data }) => {
+    const tuning = data.load('tuning.json')
+    return <>
+      <Harbor data={data} weather={tuning.look.weather} quality={tuning.quality.levels} tex={tuning.quality.tex ?? 0} />
+      <Player data={data} />
+      <Director data={data} />
+      <entity key="audio" keep slAudio />
+    </>
+  },
   // 界面每帧求值：先画战斗 HUD，菜单（标题、暂停、阵亡、结算）盖在上面
   ui: (w, ui) => <>
     <Hud w={w} ui={ui} />

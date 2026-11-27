@@ -10,7 +10,7 @@ const { startGame, readGameFiles } = require('./helpers')
 
 const GAME_DIR = path.resolve(__dirname, '../../games/saltline')
 
-/** 测试入口：flow 只有 play 与叠加的 paused，vars.sl 子阶段为 playing；引入 fps、mech 套件，用 src/parts 组装关卡碰撞与玩家，导出几个探针 */
+/** 测试入口：flow 只有 play 与叠加的 paused，vars.sl 子阶段为 playing；引入 fps、mech 套件，用 harbor 的港口碰撞（HarborColliders）与 src/parts 的玩家组装，导出几个探针 */
 function files() {
   const f = readGameFiles(GAME_DIR)
   f.set('manifest.json', JSON.stringify({ id: 'saltline.enemies', plugins: ['probe'] }))
@@ -18,7 +18,7 @@ function files() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import mech, { mechClear } from '@pot/kit/mech'
-import { LevelColliders } from '../parts/level'
+import { HarborColliders } from '@pot/kit/harbor/place'
 import { Player, playerBlocks } from '../parts/player'
 import { foeSpawns, spawnFoe } from '../parts/enemies'
 export default defineGame({
@@ -35,7 +35,7 @@ export default defineGame({
       clear: () => mechClear(w),
     }
   },
-  scene: ({ data }) => <><LevelColliders data={data} /><Player data={data} /></>,
+  scene: ({ data }) => <><HarborColliders data={data} /><Player data={data} /></>,
 })`)
   return f
 }
