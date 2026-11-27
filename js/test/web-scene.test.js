@@ -1,0 +1,154 @@
+/**
+ * Web 宿主场景数据（004 第 20.3、20.10 节）：变换、层级、灯光、环境默认值与 Unity 约定一致
+ */
+const test = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('fs')
+const path = require('path')
+const vm = require('vm')
+const { loadPot } = require('./helpers')
+
+function loadWeb() {
+  const pot = loadPot()
+  if (!pot.web) vm.runInThisContext(fs.readFileSync(path.resolve(__dirname, '../dist/web.js'), 'utf8'), { filename: 'pot/web.js' })
+  return pot.web
+}
+
+const near = (a, b, eps = 1e-4) => {
+  assert.equal(a.length, b.length)
+  for (let i = 0; i < a.length; i++) assert.ok(Math.abs(a[i] - b[i]) < eps, `${JSON.stringify(a)} ≈ ${JSON.stringify(b)}`)
+}
+
+test('web-scene：相机与环境默认值、id 分配、count', () => {
+  const { WebScene } = loadWeb()
+  const s = new WebScene()
+  near(s.getVec(1, 'position'), [0, 1, -10])
+  near(s.getVec(1, 'rotation'), [0, 0, 0])
+  assert.deepEqual(s.env.background, [0.1, 0.1, 0.12])
+  assert.equal(s.env.fov, 60)
+  assert.equal(s.env.near, 0.3)
+  assert.equal(s.env.far, 1000)
+  assert.equal(s.count(), 0)
+  const a = s.spawn('cube', '', 0)
+  assert.equal(a, 2)
+  assert.equal(s.get(a).name, 'cube#2')
+  assert.equal(s.count(), 1)
+  s.destroy(1)
+  assert.ok(s.exists(1), '相机不能删')
+})
+
+test('web-scene：欧拉角往返与 Unity eulerAngles 取值范围', () => {
+  const { WebScene, eulerToQuaternion, quatToEuler } = loadWeb()
+  for (const e of [[30, 45, 60], [10, 200, 350], [0, 90, 0], [80, 10, 20], [-30, -45, 0]]) {
+    const q = eulerToQuaternion(...e)
+    const back = quatToEuler(q)
+    const q2 = eulerToQuaternion(...back)
+    const dot = Math.abs(q[0] * q2[0] + q[1] * q2[1] + q[2] * q2[2] + q[3] * q2[3])
+    assert.ok(dot > 0.99999, `${e} → ${back}`)
+    for (const v of back) assert.ok(v >= 0 && v < 360)
+  }
+  const s = new WebScene()
+  const a = s.spawn('cube', 'a', 0)
+  s.setVec(a, 'rotation', -30, -45, 0)
+  near(s.getVec(a, 'rotation'), [330, 315, 0])
+})
+
+test('web-scene：层级下世界与局部变换', () => {
+  const { WebScene } = loadWeb()
+  const s = new WebScene()
+  const p = s.spawn('empty', 'p', 0)
+  const c = s.spawn('cube', 'c', p)
+  s.setVec(p, 'position', 10, 0, 0)
+  s.setVec(p, 'rotation', 0, 90, 0)
+  s.setVec(p, 'scale', 2, 2, 2)
+  s.setVec(c, 'localPosition', 0, 0, 1)
+  // 父节点绕 y 转 90 度：局部 +Z 指向世界 +X，再乘缩放 2
+  near(s.getVec(c, 'position'), [12, 0, 0])
+  near(s.getVec(c, 'rotation'), [0, 90, 0])
+  s.setVec(c, 'position', 10, 4, 0)
+  near(s.getVec(c, 'localPosition'), [0, 2, 0])
+  s.setVec(c, 'rotation', 0, 0, 0)
+  near(s.getVec(c, 'localRotation'), [0, 270, 0])
+  // 删除父节点连带子节点
+  s.destroy(p)
+  assert.equal(s.exists(c), false)
+  assert.equal(s.count(), 0)
+})
+
+test('web-scene：lookAt 与相机朝向', () => {
+  const { WebScene } = loadWeb()
+  const s = new WebScene()
+  s.setVec(1, 'position', 0, 10, 0)
+  s.lookAt(1, 0, 0, 10)
+  // 俯视 45 度看向 +Z
+  near(s.getVec(1, 'rotation'), [45, 0, 0])
+  s.setVec(1, 'position', 0, 0, 0)
+  s.lookAt(1, 5, 0, 0)
+  near(s.getVec(1, 'rotation'), [0, 90, 0])
+})
+
+test('web-scene：setTransforms 四种 flags', () => {
+  const { WebScene, eulerToQuaternion } = loadWeb()
+  const s = new WebScene()
+  const p = s.spawn('empty', 'p', 0)
+  const c = s.spawn('cube', 'c', p)
+  const ids = new Int32Array([p, c, 999])
+  const data = new Float32Array(30)
+  const q = eulerToQuaternion(0, 90, 0)
+  data.set([1, 2, 3, ...q, 1, 1, 1], 0)
+  data.set([1, 2, 4, 0, 0, 0, 1, 3, 3, 3], 10)
+  assert.equal(s.setTransforms(ids.buffer, data.buffer, 3, 7), 2)
+  near(s.getVec(c, 'localPosition'), [-1, 0, 0])
+  near(s.getVec(c, 'rotation'), [0, 0, 0])
+  near(s.getVec(c, 'scale'), [3, 3, 3])
+  // 局部空间（bit3）只写位置
+  data.set([0, 0, 2], 10)
+  assert.equal(s.setTransforms(new Int32Array([c]), data.subarray(10), 1, 1 | 8), 1)
+  near(s.getVec(c, 'position'), [3, 2, 3])
+})
+
+test('web-scene：灯光、主光、颜色与 clear', () => {
+  const { WebScene } = loadWeb()
+  const s = new WebScene()
+  const sun = s.spawn('empty', 'sun', 0)
+  s.light(sun, 'directional', 1.2, 1, 0.9, 0.8, 0)
+  const sun2 = s.spawn('empty', 'sun2', 0)
+  s.light(sun2, 'directional', 5, 1, 1, 1, 0)
+  assert.equal(s.mainLight().id, sun, '第一个平行光成为 sun')
+  const lamp = s.spawn('sphere', 'lamp', 0)
+  s.light(lamp, 'point', 2, 1, 0, 0, 0)
+  assert.equal(s.get(lamp).light.range, 10)
+  s.setColor(lamp, 0, 1, 0, 1)
+  assert.deepEqual(s.get(lamp).light.color, [0, 1, 0])
+  s.lightOptions(lamp, 45, 1)
+  s.lightIntensity(lamp, 3)
+  assert.equal(s.get(lamp).light.intensity, 3)
+  assert.equal(s.lights().length, 3)
+  s.setActive(sun, false)
+  assert.equal(s.mainLight().id, sun2)
+  s.destroy(sun)
+  assert.equal(s.env.sun, 0)
+  s.setBackground(1, 0, 0)
+  s.view(70, 0, 500)
+  s.fog(0.5, 0.5, 0.5, 0.02)
+  s.clear()
+  assert.equal(s.count(), 0)
+  assert.deepEqual(s.env.background, [0.1, 0.1, 0.12])
+  assert.equal(s.env.fov, 60)
+  assert.equal(s.env.fog.density, 0)
+  near(s.getVec(1, 'position'), [0, 1, -10])
+})
+
+test('web-scene：渲染列表只含在层级中启用且可见的对象', () => {
+  const { WebScene } = loadWeb()
+  const s = new WebScene()
+  const p = s.spawn('cube', 'p', 0)
+  const c = s.spawn('cube', 'c', p)
+  const e = s.spawn('empty', 'e', 0)
+  const h = s.spawn('sphere', 'h', 0)
+  s.visible(h, false)
+  assert.deepEqual(s.renderables().map((o) => o.id).sort(), [p, c])
+  s.setActive(p, false)
+  assert.deepEqual(s.renderables().map((o) => o.id), [])
+  assert.ok(e)
+})
