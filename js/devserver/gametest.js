@@ -36,11 +36,12 @@ function subset(expected, actual, at, out) {
   if (JSON.stringify(expected) !== JSON.stringify(actual)) out.push(`${at}：期望 ${JSON.stringify(expected)}，实际 ${JSON.stringify(actual)}`)
 }
 
-async function runScript(dir, script) {
+/** load 缺省为无画面宿主的 loadGame；Web 宿主测试传自己的（返回 { pot, host, runtime }，host.logs 为日志数组） */
+async function runScript(dir, script, load = loadGame) {
   const failures = []
   if (script.invalid) return { failures: [script.invalid] }
   if (!Number.isInteger(script.steps) || script.steps <= 0) return { failures: ['steps 必须是正整数'] }
-  const { pot, host, runtime } = await loadGame(dir)
+  const { pot, host, runtime } = await load(dir)
   try {
     for (const f of runtime.failures) failures.push(`单元 ${f.name} 启动失败：${String(f.error).split('\n')[0]}`)
     if (failures.length) return { failures }
