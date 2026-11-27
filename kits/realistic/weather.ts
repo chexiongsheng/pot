@@ -5,7 +5,8 @@
  *   <entity key="sky" atmosphere={{ preset: 'dusk' }} />
  *   <entity key="storm" weather={{ rain: 0.6, lightning: {} }} />
  *
- * 地图自己画的雨幕、积水用 currentWeather(w) 读雨量与湿度（harbor）；闪电提亮画面由 atmosphere 读这里的闪电状态。
+ * 地图自己画的雨幕、积水用 currentWeather(w) 读雨量与湿度（harbor）；地图自己画了雨就调 paintRain(w, owner, true)，这里就不撒内置雨滴。
+ * 闪电提亮画面由 atmosphere 读这里的闪电状态。
  */
 import { defineBlock, type Color, type LoopHandle, type Over } from '@pot/core'
 import { registerSfx, sfx } from './sfx'
@@ -33,8 +34,6 @@ const WEATHER_PROPS = {
   sound: 0.78,
   /** null 不打雷 */
   lightning: null as Partial<LightningProps> | null,
-  /** 雨由别的积木用着色器画（着色器可用时内置雨滴数为 0） */
-  shaderRain: false,
 }
 const WEATHER_STATE = { active: true, next: -1, t: 99, power: 0, strikes: 0, delay: 0 }
 
@@ -58,11 +57,12 @@ export function resolveWeather(me: Partial<WeatherProps>): WeatherNow {
   return { rain, wetness: clamp01(me.wetness ?? Math.min(1, rain * 2)), puddles: clamp01(me.puddles ?? rain) }
 }
 
-/** 按 w.registry 登记的东西：当前的 weather 实体（读它的属性与闪电状态），atmosphere 当前画质档的内置雨滴数 */
+/** 按 w.registry 登记的东西：当前的 weather 实体（读它的属性与闪电状态），atmosphere 当前画质档的内置雨滴数，自己画雨的地图 */
 interface Pub {
   entity?: { id: number; b?: Record<string, any> }
   me?: WeatherProps & typeof WEATHER_STATE
   drops?: number
+  painters?: Set<unknown>
 }
 const pubs = new WeakMap<object, Pub>()
 const pub = (w: { registry: object }) => {
@@ -94,9 +94,22 @@ export function setWeatherDrops(w: { registry: object }, drops: number | undefin
   pub(w).drops = drops
 }
 
+/**
+ * 地图用：声明雨由自己画（例如 harbor 的雨幕着色器），on 为 false 时撤销。只要还有一个声明，weather 就不撒内置雨滴。
+ * owner 是声明者自己的标识（实体 id 等），同一个 owner 重复声明只算一次。只在真的画了雨时声明（着色器不可用时不要调）
+ */
+export function paintRain(w: { registry: object }, owner: unknown, on: boolean) {
+  const p = pub(w)
+  if (on) (p.painters ??= new Set()).add(owner)
+  else p.painters?.delete(owner)
+}
+
+const painted = (w: { registry: object }) => (pubs.get(w.registry)?.painters?.size ?? 0) > 0
+
 /** 每个 weather 实体在表现层持有的东西 */
 interface Held {
   drops: number | undefined
+  painted: boolean
   rain?: LoopHandle
   volume: number
   strikes: number
@@ -118,13 +131,13 @@ function stopRain(h: Held) {
   h.rain = undefined
 }
 
-function applyScene(ctx: any, me: WeatherProps, drops: number | undefined) {
+function applyScene(ctx: any, me: WeatherProps, drops: number | undefined, painted: boolean) {
   const now = resolveWeather(me)
   ctx.scene.weather({
     ...now,
     ...(me.rainColor != null ? { rainColor: me.rainColor } : {}),
     ...(me.wind ? { wind: me.wind } : {}),
-    drops: me.shaderRain && ctx.gfx.supported ? 0 : drops,
+    drops: painted ? 0 : drops,
   })
 }
 
@@ -133,7 +146,7 @@ const range = (w: any, r: [number, number]) => w.rand(Math.min(r[0], r[1]), Math
 
 export const weather = defineBlock({
   name: 'weather',
-  about: '天气：rain 雨量（0..1），wetness、puddles 缺省跟雨量走，rainColor、wind；sound 为雨量 1 时的雨声音量（暂停时压低）；lightning 打雷（发 lightning 事件，payload { entity, power, delay }；sound 缺省 true，按 delay 放雷声）；shaderRain 表示雨由着色器画。一个场景只放一个；active 为 false 时不打雷。地图的雨幕用 currentWeather(w) 读',
+  about: '天气：rain 雨量（0..1），wetness、puddles 缺省跟雨量走，rainColor、wind；sound 为雨量 1 时的雨声音量（暂停时压低）；lightning 打雷（发 lightning 事件，payload { entity, power, delay }；sound 缺省 true，按 delay 放雷声）。一个场景只放一个；active 为 false 时不打雷。地图的雨幕用 currentWeather(w) 读，地图自己画雨时调 paintRain(w, owner, true)，这里就不撒内置雨滴',
   props: WEATHER_PROPS,
   state: WEATHER_STATE,
   step(me, e, w) {
@@ -160,9 +173,9 @@ export const weather = defineBlock({
       const p = pub(w)
       p.entity = e as any
       p.me = me
-      const h: Held = { drops: p.drops, volume: -1, strikes: me.strikes, thunder: [] }
+      const h: Held = { drops: p.drops, painted: painted(w), volume: -1, strikes: me.strikes, thunder: [] }
       all.set(e.id, h)
-      applyScene(ctx, me, p.drops)
+      applyScene(ctx, me, h.drops, h.painted)
       const thunder = !!me.lightning && (me.lightning.sound ?? LIGHTNING.sound)
       const rainy = me.sound > 0 && resolveWeather(me).rain > 0
       if (thunder || rainy) registerSfx(ctx as any)
@@ -177,10 +190,12 @@ export const weather = defineBlock({
       const p = pub(w)
       p.entity = e as any
       p.me = me
-      // 画质档变了：重下内置雨滴数
-      if (p.drops !== h.drops) {
+      // 画质档变了，或地图开始、停止自己画雨：重下内置雨滴数
+      const paint = painted(w)
+      if (p.drops !== h.drops || paint !== h.painted) {
         h.drops = p.drops
-        applyScene(ctx, me, h.drops)
+        h.painted = paint
+        applyScene(ctx, me, h.drops, h.painted)
       }
       // 雨声：暂停（叠加状态）时压低
       if (h.rain) {

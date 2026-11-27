@@ -142,7 +142,7 @@ const SET_Q = `<rule on="every" seconds={0.05} do={(w) => { if (w.vars.q !== und
 
 async function startQuality(weatherProps) {
   const src = gameSource(`{ chain: {}, quality: ${QUALITY} }`, SET_Q + weatherEntity(weatherProps))
-    .replace("import realistic from '@pot/kit/realistic'", "import realistic, { setPostValues } from '@pot/kit/realistic'\n;(globalThis as any).__setPost = setPostValues")
+    .replace("import realistic from '@pot/kit/realistic'", "import realistic, { setPostValues, paintRain } from '@pot/kit/realistic'\n;(globalThis as any).__setPost = setPostValues\n;(globalThis as any).__paintRain = paintRain")
   globalThis.__hits = []
   const g = await startGame(new Map([['manifest.json', JSON.stringify({ id: 'realistic.test', plugins: ['game'] })], [GAME, src]]))
   assert.deepEqual(g.runtime.failures, [])
@@ -151,16 +151,19 @@ async function startQuality(weatherProps) {
   return g
 }
 
-test('atmosphere：后处理链（chain）、画质档位（quality 按 w.vars.renderQuality）、setPostValues；weather 的 shaderRain', async () => {
-  const g = await startQuality(`{ rain: 0.5, shaderRain: true }`)
+test('atmosphere：后处理链（chain）、画质档位（quality 按 w.vars.renderQuality）、setPostValues；地图 paintRain', async () => {
+  const g = await startQuality(`{ rain: 0.5 }`)
   const e = g.engine
+  // 地图声明自己画雨（harbor 的雨幕）：weather 不撒内置雨滴
+  globalThis.__paintRain(g.runtime.root.world, 'map', true)
+  frames(g.runtime, 1)
   assert.ok(e.post && e.post.passes.length > 5, '建了后处理链')
   assert.equal(e.renderState.post?.tonemap, undefined, '有链时不设 URP 后处理的色调映射')
   // renderQuality 缺省 2，超出档位表取最后一档
   near(e.renderState.quality.renderScale, 1)
   assert.equal(e.renderState.quality.msaa, 4)
   assert.ok(e.renderState.reflection.enabled)
-  assert.equal(e.renderState.weather.drops, 0, 'shaderRain：着色器可用时内置雨滴为 0')
+  assert.equal(e.renderState.weather.drops, 0, 'paintRain：地图自己画雨时内置雨滴为 0')
   near(e.renderState.weather.rain, 0.5)
   const w = g.runtime.root.world
   w.vars.q = 0
@@ -169,12 +172,16 @@ test('atmosphere：后处理链（chain）、画质档位（quality 按 w.vars.r
   assert.ok(!e.renderState.reflection.enabled)
   assert.ok(e.postDisabled.size > 0, '关 bloom 的 pass')
   assert.equal(e.renderState.weather.drops, 0)
+  // 地图撤销声明（例如退出）：内置雨滴回到画质档
+  globalThis.__paintRain(w, 'map', false)
+  frames(g.runtime, 1)
+  assert.equal(e.renderState.weather.drops, 100)
   globalThis.__setPost(w, { uDamage: 0.7 })
   frames(g.runtime, 1)
   assert.ok(JSON.stringify(e.post).length > 0)
 })
 
-test('weather：不用 shaderRain 时内置雨滴数跟 atmosphere 的画质档', async () => {
+test('weather：地图不画雨时内置雨滴数跟 atmosphere 的画质档', async () => {
   const g = await startQuality(`{ rain: 0.5 }`)
   assert.equal(g.engine.renderState.weather.drops, 900)
   g.runtime.root.world.vars.q = 0

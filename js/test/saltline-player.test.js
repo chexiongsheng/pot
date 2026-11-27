@@ -23,7 +23,7 @@ function goldenFiles() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import realistic from '@pot/kit/realistic'
-import { HarborColliders } from '@pot/kit/harbor/place'
+import { HarborColliders } from '@pot/kit/harbor/map'
 import { Player, playerBlocks } from '../parts/player'
 export default defineGame({
   kits: [fps, realistic],

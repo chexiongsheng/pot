@@ -20,7 +20,7 @@ var pot = (() => {
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // runtime/src/index.ts
+  // js/runtime/src/index.ts
   var index_exports = {};
   __export(index_exports, {
     ANCHORS: () => ANCHORS,
@@ -173,7 +173,7 @@ var pot = (() => {
     worldHash: () => worldHash
   });
 
-  // node_modules/cosmokit/lib/index.mjs
+  // js/node_modules/cosmokit/lib/index.mjs
   function isNullable(value) {
     return value === null || value === void 0;
   }
@@ -357,7 +357,7 @@ var pot = (() => {
     Time2.template = template;
   })(Time || (Time = {}));
 
-  // node_modules/cordis/lib/index.js
+  // js/node_modules/cordis/lib/index.js
   var __defProp2 = Object.defineProperty;
   var __name = (target, value) => __defProp2(target, "name", { value, configurable: true });
   var _a;
@@ -1816,7 +1816,7 @@ var pot = (() => {
     }
   }, __name(_a11, "Service"), __publicField(_a11, "init", symbols.init), __publicField(_a11, "check", symbols.check), __publicField(_a11, "config", symbols.config), __publicField(_a11, "invoke", symbols.invoke), __publicField(_a11, "extend", symbols.extend), __publicField(_a11, "tracker", symbols.tracker), __publicField(_a11, "resolveConfig", symbols.resolveConfig), _a11);
 
-  // runtime/src/serialize.ts
+  // js/runtime/src/serialize.ts
   var TYPED_ARRAYS = {
     Int8Array,
     Uint8Array,
@@ -1957,7 +1957,7 @@ var pot = (() => {
     return (h >>> 0).toString(16).padStart(8, "0");
   }
 
-  // runtime/src/units.ts
+  // js/runtime/src/units.ts
   var marks = /* @__PURE__ */ new WeakMap();
   function markFiber(fiber, unit) {
     marks.set(fiber, unit);
@@ -1986,7 +1986,7 @@ var pot = (() => {
     return result;
   }
 
-  // runtime/src/clock.ts
+  // js/runtime/src/clock.ts
   var ClockService = class extends Service {
     constructor(ctx) {
       super(ctx, "clock");
@@ -2140,7 +2140,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/timer.ts
+  // js/runtime/src/timer.ts
   var TimerService = class extends Service {
     constructor(ctx) {
       super(ctx, "timer");
@@ -2245,7 +2245,7 @@ var pot = (() => {
   };
   __publicField(TimerService, "inject", ["clock"]);
 
-  // runtime/src/state.ts
+  // js/runtime/src/state.ts
   function assertContainer(key, value) {
     if (value === null || typeof value !== "object") {
       throw new TypeError(`state.define("${key}") 的 init 必须返回对象或数组，以便返回同一个引用；标量请包一层，如 { value: 0 }`);
@@ -2409,7 +2409,7 @@ var pot = (() => {
     Object.assign(target, source);
   }
 
-  // runtime/src/cache.ts
+  // js/runtime/src/cache.ts
   var CacheService = class extends Service {
     constructor(ctx) {
       super(ctx, "cache");
@@ -2478,7 +2478,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/data.ts
+  // js/runtime/src/data.ts
   var KIT_PREFIX = "@pot/kit/";
   var KIT_PATH = /^([a-z][a-z0-9-]*)\/(.+)$/;
   var DataService = class extends Service {
@@ -2547,7 +2547,7 @@ var pot = (() => {
     return path.startsWith(KIT_PREFIX) ? path : `data/${path}`;
   }
 
-  // runtime/src/input.ts
+  // js/runtime/src/input.ts
   var InputService = class extends Service {
     constructor(ctx, _host) {
       super(ctx, "input");
@@ -2599,7 +2599,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/color.ts
+  // js/runtime/src/color.ts
   var NAMED = {
     transparent: "#00000000",
     black: "#000000",
@@ -2677,7 +2677,7 @@ var pot = (() => {
     throw new TypeError(`无法解析颜色 "${source}"：支持 #rgb/#rgba/#rrggbb/#rrggbbaa、rgb()/rgba()、hsl()/hsla() 和常用颜色名`);
   }
 
-  // runtime/src/canvas.ts
+  // js/runtime/src/canvas.ts
   var TAU = Math.PI * 2;
   function parseCssColor(input) {
     try {
@@ -3853,7 +3853,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/scene.ts
+  // js/runtime/src/scene.ts
   var CULL = { none: 0, front: 1, back: 2, default: 3 };
   var Texture = class {
     constructor(id, width, height, _dispose) {
@@ -4563,7 +4563,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/ui.ts
+  // js/runtime/src/ui.ts
   var RS = "";
   var FS = "";
   function fontFlags(o) {
@@ -4876,7 +4876,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/audio.ts
+  // js/runtime/src/audio.ts
   var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   function encodePcm16(samples) {
     const bytes = new Uint8Array(samples.length * 2);
@@ -4954,7 +4954,7 @@ var pot = (() => {
     }
   };
 
-  // runtime/src/three-chunks.ts
+  // js/runtime/src/three-chunks.ts
   var THREE_CHUNKS = {
     "alphahash_fragment": "#ifdef USE_ALPHAHASH\n\n	if ( diffuseColor.a < getAlphaHashThreshold( vPosition ) ) discard;\n\n#endif\n",
     "alphahash_pars_fragment": "#ifdef USE_ALPHAHASH\n\n	/**\n	 * See: https://casual-effects.com/research/Wyman2017Hashed/index.html\n	 */\n\n	const float ALPHA_HASH_SCALE = 0.05; // Derived from trials only, and may be changed.\n\n	float hash2D( vec2 value ) {\n\n		return fract( 1.0e4 * sin( 17.0 * value.x + 0.1 * value.y ) * ( 0.1 + abs( sin( 13.0 * value.y + value.x ) ) ) );\n\n	}\n\n	float hash3D( vec3 value ) {\n\n		return hash2D( vec2( hash2D( value.xy ), value.z ) );\n\n	}\n\n	float getAlphaHashThreshold( vec3 position ) {\n\n		// Find the discretized derivatives of our coordinates\n		float maxDeriv = max(\n			length( dFdx( position.xyz ) ),\n			length( dFdy( position.xyz ) )\n		);\n		float pixScale = 1.0 / ( ALPHA_HASH_SCALE * maxDeriv );\n\n		// Find two nearest log-discretized noise scales\n		vec2 pixScales = vec2(\n			exp2( floor( log2( pixScale ) ) ),\n			exp2( ceil( log2( pixScale ) ) )\n		);\n\n		// Compute alpha thresholds at our two noise scales\n		vec2 alpha = vec2(\n			hash3D( floor( pixScales.x * position.xyz ) ),\n			hash3D( floor( pixScales.y * position.xyz ) )\n		);\n\n		// Factor to interpolate lerp with\n		float lerpFactor = fract( log2( pixScale ) );\n\n		// Interpolate alpha threshold from noise at two scales\n		float x = ( 1.0 - lerpFactor ) * alpha.x + lerpFactor * alpha.y;\n\n		// Pass into CDF to compute uniformly distrib threshold\n		float a = min( lerpFactor, 1.0 - lerpFactor );\n		vec3 cases = vec3(\n			x * x / ( 2.0 * a * ( 1.0 - a ) ),\n			( x - 0.5 * a ) / ( 1.0 - a ),\n			1.0 - ( ( 1.0 - x ) * ( 1.0 - x ) / ( 2.0 * a * ( 1.0 - a ) ) )\n		);\n\n		// Find our final, uniformly distributed alpha threshold (ατ)\n		float threshold = ( x < ( 1.0 - a ) )\n			? ( ( x < a ) ? cases.x : cases.y )\n			: cases.z;\n\n		// Avoids ατ == 0. Could also do ατ =1-ατ\n		return clamp( threshold , 1.0e-6, 1.0 );\n\n	}\n\n#endif\n",
@@ -5631,7 +5631,7 @@ float computeSpecularOcclusion( const in float dotNV, const in float ambientOccl
     "fragment": "#define STANDARD\n\n#ifdef PHYSICAL\n	#define IOR\n	#define USE_SPECULAR\n#endif\n\nuniform vec3 diffuse;\nuniform vec3 emissive;\nuniform float roughness;\nuniform float metalness;\nuniform float opacity;\n\n#ifdef IOR\n	uniform float ior;\n#endif\n\n#ifdef USE_SPECULAR\n	uniform float specularIntensity;\n	uniform vec3 specularColor;\n\n	#ifdef USE_SPECULAR_COLORMAP\n		uniform sampler2D specularColorMap;\n	#endif\n\n	#ifdef USE_SPECULAR_INTENSITYMAP\n		uniform sampler2D specularIntensityMap;\n	#endif\n#endif\n\n#ifdef USE_CLEARCOAT\n	uniform float clearcoat;\n	uniform float clearcoatRoughness;\n#endif\n\n#ifdef USE_DISPERSION\n	uniform float dispersion;\n#endif\n\n#ifdef USE_IRIDESCENCE\n	uniform float iridescence;\n	uniform float iridescenceIOR;\n	uniform float iridescenceThicknessMinimum;\n	uniform float iridescenceThicknessMaximum;\n#endif\n\n#ifdef USE_SHEEN\n	uniform vec3 sheenColor;\n	uniform float sheenRoughness;\n\n	#ifdef USE_SHEEN_COLORMAP\n		uniform sampler2D sheenColorMap;\n	#endif\n\n	#ifdef USE_SHEEN_ROUGHNESSMAP\n		uniform sampler2D sheenRoughnessMap;\n	#endif\n#endif\n\n#ifdef USE_ANISOTROPY\n	uniform vec2 anisotropyVector;\n\n	#ifdef USE_ANISOTROPYMAP\n		uniform sampler2D anisotropyMap;\n	#endif\n#endif\n\nvarying vec3 vViewPosition;\n\n#include <common>\n#include <packing>\n#include <dithering_pars_fragment>\n#include <color_pars_fragment>\n#include <uv_pars_fragment>\n#include <map_pars_fragment>\n#include <alphamap_pars_fragment>\n#include <alphatest_pars_fragment>\n#include <alphahash_pars_fragment>\n#include <aomap_pars_fragment>\n#include <lightmap_pars_fragment>\n#include <emissivemap_pars_fragment>\n#include <iridescence_fragment>\n#include <cube_uv_reflection_fragment>\n#include <envmap_common_pars_fragment>\n#include <envmap_physical_pars_fragment>\n#include <fog_pars_fragment>\n#include <lights_pars_begin>\n#include <normal_pars_fragment>\n#include <lights_physical_pars_fragment>\n#include <transmission_pars_fragment>\n#include <shadowmap_pars_fragment>\n#include <bumpmap_pars_fragment>\n#include <normalmap_pars_fragment>\n#include <clearcoat_pars_fragment>\n#include <iridescence_pars_fragment>\n#include <roughnessmap_pars_fragment>\n#include <metalnessmap_pars_fragment>\n#include <logdepthbuf_pars_fragment>\n#include <clipping_planes_pars_fragment>\n\nvoid main() {\n\n	vec4 diffuseColor = vec4( diffuse, opacity );\n	#include <clipping_planes_fragment>\n\n	ReflectedLight reflectedLight = ReflectedLight( vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ), vec3( 0.0 ) );\n	vec3 totalEmissiveRadiance = emissive;\n\n	#include <logdepthbuf_fragment>\n	#include <map_fragment>\n	#include <color_fragment>\n	#include <alphamap_fragment>\n	#include <alphatest_fragment>\n	#include <alphahash_fragment>\n	#include <roughnessmap_fragment>\n	#include <metalnessmap_fragment>\n	#include <normal_fragment_begin>\n	#include <normal_fragment_maps>\n	#include <clearcoat_normal_fragment_begin>\n	#include <clearcoat_normal_fragment_maps>\n	#include <emissivemap_fragment>\n\n	// accumulation\n	#include <lights_physical_fragment>\n	#include <lights_fragment_begin>\n	#include <lights_fragment_maps>\n	#include <lights_fragment_end>\n\n	// modulation\n	#include <aomap_fragment>\n\n	vec3 totalDiffuse = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;\n	vec3 totalSpecular = reflectedLight.directSpecular + reflectedLight.indirectSpecular;\n\n	#include <transmission_fragment>\n\n	vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;\n\n	#ifdef USE_SHEEN\n\n		// Sheen energy compensation approximation calculation can be found at the end of\n		// https://drive.google.com/file/d/1T0D1VSyR4AllqIJTQAraEIzjlb5h4FKH/view?usp=sharing\n		float sheenEnergyComp = 1.0 - 0.157 * max3( material.sheenColor );\n\n		outgoingLight = outgoingLight * sheenEnergyComp + sheenSpecularDirect + sheenSpecularIndirect;\n\n	#endif\n\n	#ifdef USE_CLEARCOAT\n\n		float dotNVcc = saturate( dot( geometryClearcoatNormal, geometryViewDir ) );\n\n		vec3 Fcc = F_Schlick( material.clearcoatF0, material.clearcoatF90, dotNVcc );\n\n		outgoingLight = outgoingLight * ( 1.0 - material.clearcoat * Fcc ) + ( clearcoatSpecularDirect + clearcoatSpecularIndirect ) * material.clearcoat;\n\n	#endif\n\n	#include <opaque_fragment>\n	#include <tonemapping_fragment>\n	#include <colorspace_fragment>\n	#include <fog_fragment>\n	#include <premultiplied_alpha_fragment>\n	#include <dithering_fragment>\n\n}\n"
   };
 
-  // runtime/src/three.ts
+  // js/runtime/src/three.ts
   var threeChunks = THREE_CHUNKS;
   var LIGHT_NUMS = [
     "NUM_DIR_LIGHTS",
@@ -5880,7 +5880,7 @@ IncidentLight directLight;
     return Array.isArray(v) || ArrayBuffer.isView(v);
   }
 
-  // runtime/src/gfx.ts
+  // js/runtime/src/gfx.ts
   var MAX_VERTEX_INPUTS = 11;
   function vertexInputs(attributes, instanced) {
     const lines = [];
@@ -6702,7 +6702,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return (h >>> 0).toString(36);
   }
 
-  // runtime/src/loading.ts
+  // js/runtime/src/loading.ts
   var LoadingService = class extends Service {
     constructor(ctx, _host) {
       super(ctx, "loading");
@@ -6782,7 +6782,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
-  // runtime/src/plugins.ts
+  // js/runtime/src/plugins.ts
   var CORE_SERVICES = ["clock", "timer", "state", "cache", "data", "scene", "input", "ui", "audio", "gfx", "loading", "world", "plugins"];
   function compileModule(code, filename) {
     const indirectEval = eval;
@@ -6916,7 +6916,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
-  // runtime/src/world/node.ts
+  // js/runtime/src/world/node.ts
   var Fragment = /* @__PURE__ */ Symbol.for("pot.fragment");
   var PREFAB = /* @__PURE__ */ Symbol.for("pot.prefab");
   var Node = class {
@@ -6961,7 +6961,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return source ? `${formatSource(source)} ` : "";
   }
 
-  // runtime/src/world/registry.ts
+  // js/runtime/src/world/registry.ts
   var RESERVED = /* @__PURE__ */ new Set(["key", "at", "rot", "scale", "name", "tags", "keep", "children"]);
   var PREFAB_RESERVED = /* @__PURE__ */ new Set(["is", "tags", "about"]);
   var IDENT = /^[a-z][A-Za-z0-9]*$/;
@@ -7082,7 +7082,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return clone(over);
   }
 
-  // runtime/src/world/ui-layout.ts
+  // js/runtime/src/world/ui-layout.ts
   var UI_MARGIN = 16;
   var ANCHORS = {
     "top-left": [0, 0],
@@ -7263,7 +7263,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     layout(el, x, y2, w, h, { x: 0, y: 0, w: screenW, h: screenH }, env);
   }
 
-  // runtime/src/world/ui-tags.ts
+  // js/runtime/src/world/ui-tags.ts
   var LEAF_SIZE = 16;
   function fontOf(el) {
     const p = el.props;
@@ -7476,7 +7476,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     opacity: "不透明度 0 到 1，乘到自身与全部子孙上"
   };
 
-  // runtime/src/world/kit.ts
+  // js/runtime/src/world/kit.ts
   var KIT_NAME = /^[a-z][a-z0-9-]*$/;
   var KIT = /* @__PURE__ */ Symbol.for("pot.kit");
   var catalog = /* @__PURE__ */ new Map();
@@ -7604,7 +7604,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return [...catalog.values()];
   }
 
-  // runtime/src/world/tree.ts
+  // js/runtime/src/world/tree.ts
   var BUILTIN_TAGS = ["rule", "stage"];
   var EVENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
   var BUILTIN_EVENTS = ["touch", "death", "every"];
@@ -7885,7 +7885,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return result;
   }
 
-  // runtime/src/world/inspect.ts
+  // js/runtime/src/world/inspect.ts
   var where = (s) => s ? `${s.file}:${s.line}` : void 0;
   function plain(value, depth = 0) {
     if (typeof value === "function") return "[function]";
@@ -8032,7 +8032,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return h.toString(16).padStart(8, "0");
   }
 
-  // runtime/src/world/collide.ts
+  // js/runtime/src/world/collide.ts
   var GRID_THRESHOLD = 256;
   var GRID_CELL = 4;
   function overlap(a, b) {
@@ -8480,7 +8480,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     return best;
   }
 
-  // runtime/src/world/view.ts
+  // js/runtime/src/world/view.ts
   var json = (v) => v === void 0 ? void 0 : JSON.stringify(v);
   function normalizeSun(sun) {
     if (sun === void 0 || sun === null || sun === false) return null;
@@ -8733,7 +8733,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   };
 
-  // runtime/src/world/blocks/body.ts
+  // js/runtime/src/world/blocks/body.ts
   var body = defineBlock({
     name: "body",
     about: "碰撞体（轴对齐，旋转不计）：shape 为 box（size 全长）、sphere（radius）或竖直 capsule（radius，height 为总高）；center 为相对实体的偏移；尺寸乘实体缩放；layer 层名；solid 为 false 时不挡 w.move，只参加射线、重叠与触发",
@@ -8748,7 +8748,7 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
     }
   });
 
-  // runtime/src/world/blocks/index.ts
+  // js/runtime/src/world/blocks/index.ts
   var shape = defineBlock({
     name: "shape",
     about: "外形：kind 为 scene.spawn 支持的形状（cube、sphere、plane、cylinder、capsule、quad 或 mesh:名字），color 颜色，scale 相对实体的缩放",
@@ -8808,11 +8808,11 @@ vec4 pot_Lit(PotSurface s, vec3 worldPos) {
   });
   var BUILTIN_BLOCKS = [shape, spin, trigger, lifetime, projectile, light, body];
 
-  // runtime/src/world/prefabs.ts
+  // js/runtime/src/world/prefabs.ts
   var entity = definePrefab("entity", {});
   var BUILTIN_PREFABS = [entity];
 
-  // runtime/src/world/layout.ts
+  // js/runtime/src/world/layout.ts
   var ENTITY_HEAD = 7;
   var BUFFER_HEAD = 4;
   var SIMPLE = { f: 1, b: 1, "f?": 2, layers: 1, axis: 2, action: 2 };
@@ -9150,7 +9150,7 @@ ${lines.join("\n")}
 }`)();
   }
 
-  // runtime/src/world/native.ts
+  // js/runtime/src/world/native.ts
   var NativeBlocks = class {
     constructor(_env, _host) {
       __publicField(this, "_env", _env);
@@ -9282,7 +9282,7 @@ TS：${r.layout.text}
     }
   };
 
-  // runtime/src/world/script.ts
+  // js/runtime/src/world/script.ts
   function expandScript(script) {
     const input = [...script.input ?? []].sort((a, b) => a.at - b.at);
     for (const item of input) {
@@ -9332,7 +9332,7 @@ TS：${r.layout.text}
     return out;
   }
 
-  // runtime/src/world/verify.ts
+  // js/runtime/src/world/verify.ts
   var FIELD_BUDGET = 2e6;
   function flatten(prefix, v, out) {
     if (Array.isArray(v)) v.forEach((x, i) => flatten(`${prefix}.${i}`, x, out));
@@ -9468,7 +9468,7 @@ TS：${r.layout.text}
   }
   var round = (v) => Math.round(v * 1e3) / 1e3;
 
-  // runtime/src/world/flow.ts
+  // js/runtime/src/world/flow.ts
   var NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
   function checkFlow(flow) {
     const fail = (message) => {
@@ -9497,7 +9497,7 @@ TS：${r.layout.text}
     return { state, params: {}, base: state, baseParams: {} };
   }
 
-  // runtime/src/world/world.ts
+  // js/runtime/src/world/world.ts
   var DEFAULT_CONTROLS = {
     axes: { move: "move", look: "look" },
     actions: { jump: ["space"], fire: ["mouse0"] }
@@ -10471,7 +10471,7 @@ TS：${r.layout.text}
   /** audio、gfx、data 给积木的 view 用（表现层要放音效、建材质、读资源）；它们都在 world 之前装好 */
   __publicField(WorldService, "inject", ["clock", "state", "input", "scene", "ui", "audio", "gfx", "data"]);
 
-  // runtime/src/jsx-runtime.ts
+  // js/runtime/src/jsx-runtime.ts
   var jsx_runtime_exports = {};
   __export(jsx_runtime_exports, {
     Fragment: () => Fragment,
@@ -10497,7 +10497,7 @@ TS：${r.layout.text}
     return makeNode(type, props, key, void 0, children.length > 1);
   }
 
-  // runtime/src/jsx-dev-runtime.ts
+  // js/runtime/src/jsx-dev-runtime.ts
   var jsx_dev_runtime_exports = {};
   __export(jsx_dev_runtime_exports, {
     Fragment: () => Fragment,
@@ -10508,7 +10508,7 @@ TS：${r.layout.text}
     return makeNode(type, props, key, pos, isStatic);
   }
 
-  // runtime/src/runtime.ts
+  // js/runtime/src/runtime.ts
   var API_VERSION = "0.1";
   var VERSION = "0.1.0";
   var current;
@@ -10682,7 +10682,7 @@ TS：${r.layout.text}
     return runtime;
   }
 
-  // runtime/src/unity.ts
+  // js/runtime/src/unity.ts
   function createUnityHost() {
     let bundledKits;
     const Pot = CS.Pot;
@@ -10888,7 +10888,7 @@ TS：${r.layout.text}
   }
   bindUnity();
 
-  // runtime/src/world/dmath.ts
+  // js/runtime/src/world/dmath.ts
   var f64 = new Float64Array(1);
   var u32 = new Uint32Array(f64.buffer);
   var high = (x) => {
@@ -11085,7 +11085,7 @@ TS：${r.layout.text}
   }
   var dmath = Object.freeze({ sin, cos });
 
-  // runtime/src/world/ui-eval.ts
+  // js/runtime/src/world/ui-eval.ts
   var WORLD_TAGS = /* @__PURE__ */ new Set(["entity", "rule", "stage"]);
   var MAX_DEPTH = 64;
   var SCROLL_STEP = 40;
@@ -11412,7 +11412,7 @@ TS：${r.layout.text}
     };
   }
 
-  // runtime/src/world/game.ts
+  // js/runtime/src/world/game.ts
   function readOverrides(ctx, mount) {
     if (!ctx.data.exists("overrides.json")) return void 0;
     let all;
@@ -11581,7 +11581,7 @@ TS：${r.layout.text}
     };
   }
 
-  // runtime/src/index.ts
+  // js/runtime/src/index.ts
   function definePlugin(plugin) {
     return plugin;
   }

@@ -56,7 +56,7 @@ const freeze = <T>(v: T): T => {
   return v
 }
 
-/** 三个环境预设（只读）。dusk 取自 saltline 的 tuning.json 的 look；天气不在预设里（weather 积木） */
+/** 三个环境预设（只读）。dusk 取自 saltline 原来 tuning.json 的 look（已删，现在就以这里为准）；天气不在预设里（weather 积木） */
 export const presets: Readonly<Record<'dusk' | 'overcast' | 'night', Preset>> = freeze({
   dusk: {
     sun: { rotation: [13, -70, 0], intensity: 3.8, color: '#ffd2a0' },
@@ -153,7 +153,7 @@ export interface QualityLevel {
   shadowCascades: number
   /** 平面反射分辨率比例，0 为关 */
   reflection: number
-  /** 内置雨滴粒子数（交给 weather；它的 shaderRain 且着色器可用时不用） */
+  /** 内置雨滴粒子数（交给 weather；地图自己画雨时不用，见 paintRain） */
   drops: number
   ao: number
   antialias: 'none' | 'fxaa' | 'smaa'
@@ -425,7 +425,7 @@ declare module '@pot/core' {
 
 export { viewGun, setGunEnv, type GunEnv } from './viewgun'
 export { registerSfx, sfx } from './sfx'
-export { weather, currentWeather, resolveWeather, type WeatherProps, type WeatherNow } from './weather'
+export { weather, currentWeather, resolveWeather, paintRain, type WeatherProps, type WeatherNow } from './weather'
 
 export default defineKit({
   name: 'realistic',

@@ -35,23 +35,6 @@
     "turnRate": 2.5, "rangeMin": 8, "rangeMax": 18, "spreadFar": 0.12, "spreadNear": 0.045,
     "lungeRange": 3, "lungeDamage": 15, "lungeCooldown": 3.5, "lungeSpeed": 9.5, "fireRange": 30
   },
-  "look": {
-    "sun": { "rotation": [13, -70, 0], "intensity": 3.8, "color": "#ffd2a0" },
-    "sky": {
-      "zenith": "#46597a", "horizon": "#f7b77c", "horizonAway": "#8a98aa", "ground": "#3a3a3c",
-      "sun": "#ffd29a", "sunIntensity": 22, "sunSize": 0.018, "sunGlow": 1.0,
-      "clouds": 0.6, "cloudColor": "#b8a08c", "cloudSpeed": 0.004, "horizonFog": 0.6, "exposure": 0.8
-    },
-    "ambient": { "sky": "#72829a", "equator": "#a8927c", "ground": "#45403a", "reflection": 0.8 },
-    "fog": { "color": "#b9a690", "density": 0.0062, "height": 0.05, "base": 0, "sun": 1.2 },
-    "weather": { "wetness": 0.85, "puddles": 0.6, "rain": 0.45, "rainColor": "#c9d2dc", "wind": [1.2, -0.5] },
-    "post": {
-      "tonemap": "aces", "exposure": 0.2, "contrast": 20, "saturation": 6, "temperature": 8, "tint": 2,
-      "bloom": 0.6, "bloomThreshold": 1.2, "bloomScatter": 0.72,
-      "vignette": 0.28, "vignetteSmooth": 0.45, "grain": 0.07, "chromatic": 0.03,
-      "shadows": [0.96, 1.0, 1.08, 0], "highlights": [1.06, 1.0, 0.92, 0]
-    }
-  },
   "quality": {
     "names": ["低", "中", "高", "极高"],
     "levels": [

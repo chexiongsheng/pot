@@ -44,9 +44,9 @@ var __potDevtools = (() => {
     }
   });
 
-  // node_modules/ts-interface-checker/dist/util.js
+  // js/node_modules/ts-interface-checker/dist/util.js
   var require_util = __commonJS({
-    "node_modules/ts-interface-checker/dist/util.js"(exports) {
+    "js/node_modules/ts-interface-checker/dist/util.js"(exports) {
       "use strict";
       var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
         var extendStatics = function(d, b) {
@@ -185,9 +185,9 @@ var __potDevtools = (() => {
     }
   });
 
-  // node_modules/ts-interface-checker/dist/types.js
+  // js/node_modules/ts-interface-checker/dist/types.js
   var require_types = __commonJS({
-    "node_modules/ts-interface-checker/dist/types.js"(exports) {
+    "js/node_modules/ts-interface-checker/dist/types.js"(exports) {
       "use strict";
       var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
         var extendStatics = function(d, b) {
@@ -824,9 +824,9 @@ var __potDevtools = (() => {
     }
   });
 
-  // node_modules/ts-interface-checker/dist/index.js
+  // js/node_modules/ts-interface-checker/dist/index.js
   var require_dist = __commonJS({
-    "node_modules/ts-interface-checker/dist/index.js"(exports) {
+    "js/node_modules/ts-interface-checker/dist/index.js"(exports) {
       "use strict";
       var __spreadArrays = exports && exports.__spreadArrays || function() {
         for (var s = 0, i = 0, il = arguments.length; i < il; i++) s += arguments[i].length;
@@ -1050,9 +1050,9 @@ var __potDevtools = (() => {
     }
   });
 
-  // node_modules/lines-and-columns/build/index.js
+  // js/node_modules/lines-and-columns/build/index.js
   var require_build = __commonJS({
-    "node_modules/lines-and-columns/build/index.js"(exports) {
+    "js/node_modules/lines-and-columns/build/index.js"(exports) {
       "use strict";
       exports.__esModule = true;
       exports.LinesAndColumns = void 0;
@@ -1119,7 +1119,7 @@ var __potDevtools = (() => {
     }
   });
 
-  // devtools/src/index.ts
+  // js/devtools/src/index.ts
   var index_exports = {};
   __export(index_exports, {
     SourceLoader: () => SourceLoader,
@@ -1139,10 +1139,10 @@ var __potDevtools = (() => {
     unitNameOf: () => unitNameOf
   });
 
-  // devtools/src/agent.ts
+  // js/devtools/src/agent.ts
   var import_core2 = __toESM(require_pot());
 
-  // devtools/src/hmr.ts
+  // js/devtools/src/hmr.ts
   var import_core = __toESM(require_pot());
   var ACTIVE = 2;
   var now = () => {
@@ -1296,7 +1296,7 @@ var __potDevtools = (() => {
     return sentinels.filter((s) => s.ref.deref() !== void 0).map((s) => s.label);
   }
 
-  // devtools/src/agent.ts
+  // js/devtools/src/agent.ts
   var attached;
   var lastReload;
   function attach(runtime2) {
@@ -1582,7 +1582,7 @@ ${code}
     handle(json).catch((error) => logError("处理开发命令出错", error));
   });
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/keywords.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/keywords.js
   var ContextualKeyword;
   (function(ContextualKeyword2) {
     const NONE = 0;
@@ -1669,7 +1669,7 @@ ${code}
     ContextualKeyword2[ContextualKeyword2["_using"] = _using] = "_using";
   })(ContextualKeyword || (ContextualKeyword = {}));
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/types.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/types.js
   var TokenType;
   (function(TokenType2) {
     const PRECEDENCE_MASK = 15;
@@ -2146,7 +2146,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/state.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/state.js
   var Scope = class {
     constructor(startTokenIndex, endTokenIndex, isFunctionScope) {
       this.startTokenIndex = startTokenIndex;
@@ -2276,7 +2276,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/parser/util/charcodes.js
+  // js/node_modules/sucrase/dist/esm/parser/util/charcodes.js
   var charCodes;
   (function(charCodes2) {
     const backSpace = 8;
@@ -2489,7 +2489,7 @@ ${code}
     charCodes2[charCodes2["paragraphSeparator"] = paragraphSeparator] = "paragraphSeparator";
   })(charCodes || (charCodes = {}));
 
-  // node_modules/sucrase/dist/esm/parser/traverser/base.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/base.js
   var isJSXEnabled;
   var isTypeScriptEnabled;
   var isFlowEnabled;
@@ -2535,7 +2535,7 @@ ${code}
     isFlowEnabled = isFlowEnabledArg;
   }
 
-  // node_modules/sucrase/dist/esm/parser/traverser/util.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/util.js
   function isContextual(contextualKeyword) {
     return state.contextualKeyword === contextualKeyword;
   }
@@ -2600,7 +2600,7 @@ ${code}
     finishToken(TokenType.eof);
   }
 
-  // node_modules/sucrase/dist/esm/parser/util/whitespace.js
+  // js/node_modules/sucrase/dist/esm/parser/util/whitespace.js
   var WHITESPACE_CHARS = [
     9,
     11,
@@ -2645,7 +2645,7 @@ ${code}
     IS_WHITESPACE[char] = 1;
   }
 
-  // node_modules/sucrase/dist/esm/parser/util/identifier.js
+  // js/node_modules/sucrase/dist/esm/parser/util/identifier.js
   function computeIsIdentifierChar(code) {
     if (code < 48) return code === 36;
     if (code < 58) return true;
@@ -2673,7 +2673,7 @@ ${code}
     IS_IDENTIFIER_START[numChar] = 0;
   }
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/readWordTree.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/readWordTree.js
   var READ_WORD_TREE = new Int32Array([
     // ""
     -1,
@@ -11973,7 +11973,7 @@ ${code}
     -1
   ]);
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/readWord.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/readWord.js
   function readWord() {
     let treePos = 0;
     let code = 0;
@@ -12023,7 +12023,7 @@ ${code}
     finishToken(TokenType.name);
   }
 
-  // node_modules/sucrase/dist/esm/parser/tokenizer/index.js
+  // js/node_modules/sucrase/dist/esm/parser/tokenizer/index.js
   var IdentifierRole;
   (function(IdentifierRole2) {
     const Access = 0;
@@ -12731,7 +12731,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/util/getImportExportSpecifierInfo.js
+  // js/node_modules/sucrase/dist/esm/util/getImportExportSpecifierInfo.js
   function getImportExportSpecifierInfo(tokens, index = tokens.currentIndex()) {
     let endIndex = index + 1;
     if (isSpecifierEnd(tokens, endIndex)) {
@@ -12777,7 +12777,7 @@ ${code}
     return token.type === TokenType.braceR || token.type === TokenType.comma;
   }
 
-  // node_modules/sucrase/dist/esm/parser/plugins/jsx/xhtml.js
+  // js/node_modules/sucrase/dist/esm/parser/plugins/jsx/xhtml.js
   var xhtml_default = /* @__PURE__ */ new Map([
     ["quot", '"'],
     ["amp", "&"],
@@ -13034,7 +13034,7 @@ ${code}
     ["diams", "♦"]
   ]);
 
-  // node_modules/sucrase/dist/esm/util/getJSXPragmaInfo.js
+  // js/node_modules/sucrase/dist/esm/util/getJSXPragmaInfo.js
   function getJSXPragmaInfo(options) {
     const [base, suffix] = splitPragma(options.jsxPragma || "React.createElement");
     const [fragmentBase, fragmentSuffix] = splitPragma(options.jsxFragmentPragma || "React.Fragment");
@@ -13048,7 +13048,7 @@ ${code}
     return [pragma.slice(0, dotIndex), pragma.slice(dotIndex)];
   }
 
-  // node_modules/sucrase/dist/esm/transformers/Transformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/Transformer.js
   var Transformer = class {
     // Return true if anything was processed, false otherwise.
     getPrefixCode() {
@@ -13062,7 +13062,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/JSXTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/JSXTransformer.js
   var JSXTransformer = class _JSXTransformer extends Transformer {
     // State for calculating the line number of each JSX tag in development.
     __init() {
@@ -13643,7 +13643,7 @@ ${code}
     return code >= charCodes.digit0 && code <= charCodes.digit9 || code >= charCodes.lowercaseA && code <= charCodes.lowercaseF || code >= charCodes.uppercaseA && code <= charCodes.uppercaseF;
   }
 
-  // node_modules/sucrase/dist/esm/util/getNonTypeIdentifiers.js
+  // js/node_modules/sucrase/dist/esm/util/getNonTypeIdentifiers.js
   function getNonTypeIdentifiers(tokens, options) {
     const jsxPragmaInfo = getJSXPragmaInfo(options);
     const nonTypeIdentifiers = /* @__PURE__ */ new Set();
@@ -13669,7 +13669,7 @@ ${code}
     return nonTypeIdentifiers;
   }
 
-  // node_modules/sucrase/dist/esm/CJSImportProcessor.js
+  // js/node_modules/sucrase/dist/esm/CJSImportProcessor.js
   var CJSImportProcessor = class _CJSImportProcessor {
     __init() {
       this.nonTypeIdentifiers = /* @__PURE__ */ new Set();
@@ -14021,7 +14021,7 @@ ${code}
     }
   };
 
-  // node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
+  // js/node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
   var comma = ",".charCodeAt(0);
   var semicolon2 = ";".charCodeAt(0);
   var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -14108,7 +14108,7 @@ ${code}
     return writer.flush();
   }
 
-  // node_modules/@jridgewell/gen-mapping/dist/gen-mapping.mjs
+  // js/node_modules/@jridgewell/gen-mapping/dist/gen-mapping.mjs
   var SetArray = class {
     constructor() {
       this._indexes = { __proto__: null };
@@ -14263,7 +14263,7 @@ ${code}
     return sourcesIndex === prev[SOURCES_INDEX] && sourceLine === prev[SOURCE_LINE] && sourceColumn === prev[SOURCE_COLUMN] && namesIndex === (prev.length === 5 ? prev[NAMES_INDEX] : NO_NAME);
   }
 
-  // node_modules/sucrase/dist/esm/computeSourceMap.js
+  // js/node_modules/sucrase/dist/esm/computeSourceMap.js
   function computeSourceMap({ code: generatedCode, mappings: rawMappings }, filePath, options, source, tokens) {
     const sourceColumns = computeSourceColumns(source, tokens);
     const map = new GenMapping({ file: options.compiledFilename });
@@ -14317,7 +14317,7 @@ ${code}
     return sourceColumns;
   }
 
-  // node_modules/sucrase/dist/esm/HelperManager.js
+  // js/node_modules/sucrase/dist/esm/HelperManager.js
   var HELPERS = {
     require: `
     import {createRequire as CREATE_REQUIRE_NAME} from "module";
@@ -14499,7 +14499,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/identifyShadowedGlobals.js
+  // js/node_modules/sucrase/dist/esm/identifyShadowedGlobals.js
   function identifyShadowedGlobals(tokens, scopes, globalNames) {
     if (!hasShadowedGlobals(tokens, globalNames)) {
       return;
@@ -14558,7 +14558,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/util/getIdentifierNames.js
+  // js/node_modules/sucrase/dist/esm/util/getIdentifierNames.js
   function getIdentifierNames(code, tokens) {
     const names = [];
     for (const token of tokens) {
@@ -14569,7 +14569,7 @@ ${code}
     return names;
   }
 
-  // node_modules/sucrase/dist/esm/NameManager.js
+  // js/node_modules/sucrase/dist/esm/NameManager.js
   var NameManager = class _NameManager {
     __init() {
       this.usedNames = /* @__PURE__ */ new Set();
@@ -14596,10 +14596,10 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/Options.js
+  // js/node_modules/sucrase/dist/esm/Options.js
   var import_ts_interface_checker = __toESM(require_dist());
 
-  // node_modules/sucrase/dist/esm/Options-gen-types.js
+  // js/node_modules/sucrase/dist/esm/Options-gen-types.js
   var t = __toESM(require_dist());
   var Transform = t.union(
     t.lit("jsx"),
@@ -14635,13 +14635,13 @@ ${code}
   };
   var Options_gen_types_default = exportedTypeSuite;
 
-  // node_modules/sucrase/dist/esm/Options.js
+  // js/node_modules/sucrase/dist/esm/Options.js
   var { Options: OptionsChecker } = (0, import_ts_interface_checker.createCheckers)(Options_gen_types_default);
   function validateOptions(options) {
     OptionsChecker.strictCheck(options);
   }
 
-  // node_modules/sucrase/dist/esm/parser/traverser/lval.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/lval.js
   function parseSpread() {
     next();
     parseMaybeAssign(false);
@@ -14766,7 +14766,7 @@ ${code}
     state.tokens[eqIndex].rhsEndIndex = state.tokens.length;
   }
 
-  // node_modules/sucrase/dist/esm/parser/plugins/typescript.js
+  // js/node_modules/sucrase/dist/esm/parser/plugins/typescript.js
   function tsIsIdentifier() {
     return match(TokenType.name);
   }
@@ -16027,7 +16027,7 @@ ${code}
     baseParseMaybeDecoratorArguments();
   }
 
-  // node_modules/sucrase/dist/esm/parser/plugins/jsx/index.js
+  // js/node_modules/sucrase/dist/esm/parser/plugins/jsx/index.js
   function jsxReadToken() {
     let sawNewline = false;
     let sawNonWhitespace = false;
@@ -16281,7 +16281,7 @@ ${code}
     jsxReadToken();
   }
 
-  // node_modules/sucrase/dist/esm/parser/plugins/types.js
+  // js/node_modules/sucrase/dist/esm/parser/plugins/types.js
   function typedParseConditional(noIn) {
     if (match(TokenType.question)) {
       const nextType = lookaheadType();
@@ -16302,7 +16302,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/parser/traverser/expression.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/expression.js
   var StopState = class {
     constructor(stop) {
       this.stop = stop;
@@ -16998,7 +16998,7 @@ ${code}
     parseBlockBody(TokenType.braceR);
   }
 
-  // node_modules/sucrase/dist/esm/parser/plugins/flow.js
+  // js/node_modules/sucrase/dist/esm/parser/plugins/flow.js
   function isMaybeDefaultImport(lookahead) {
     return (lookahead.type === TokenType.name || !!(lookahead.type & TokenType.IS_KEYWORD)) && lookahead.contextualKeyword !== ContextualKeyword._from;
   }
@@ -17843,7 +17843,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/parser/traverser/statement.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/statement.js
   function parseTopLevel() {
     parseBlockBody(TokenType.eof);
     state.scopes.push(new Scope(0, state.tokens.length, true));
@@ -18801,7 +18801,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/parser/traverser/index.js
+  // js/node_modules/sucrase/dist/esm/parser/traverser/index.js
   function parseFile() {
     if (state.pos === 0 && input.charCodeAt(0) === charCodes.numberSign && input.charCodeAt(1) === charCodes.exclamationMark) {
       skipLineComment(2);
@@ -18810,7 +18810,7 @@ ${code}
     return parseTopLevel();
   }
 
-  // node_modules/sucrase/dist/esm/parser/index.js
+  // js/node_modules/sucrase/dist/esm/parser/index.js
   var File = class {
     constructor(tokens, scopes) {
       this.tokens = tokens;
@@ -18829,7 +18829,7 @@ ${code}
     return result;
   }
 
-  // node_modules/sucrase/dist/esm/util/isAsyncOperation.js
+  // js/node_modules/sucrase/dist/esm/util/isAsyncOperation.js
   function isAsyncOperation(tokens) {
     let index = tokens.currentIndex();
     let depth = 0;
@@ -18852,7 +18852,7 @@ ${code}
     return false;
   }
 
-  // node_modules/sucrase/dist/esm/TokenProcessor.js
+  // js/node_modules/sucrase/dist/esm/TokenProcessor.js
   var TokenProcessor = class _TokenProcessor {
     __init() {
       this.resultCode = "";
@@ -19134,7 +19134,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/util/getClassInfo.js
+  // js/node_modules/sucrase/dist/esm/util/getClassInfo.js
   function getClassInfo(rootTransformer, tokens, nameManager, disableESTransforms) {
     const snapshot = tokens.snapshot();
     const headerInfo = processClassHeader(tokens);
@@ -19367,7 +19367,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/util/elideImportEquals.js
+  // js/node_modules/sucrase/dist/esm/util/elideImportEquals.js
   function elideImportEquals(tokens) {
     tokens.removeInitialToken();
     tokens.removeToken();
@@ -19385,7 +19385,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/util/getDeclarationInfo.js
+  // js/node_modules/sucrase/dist/esm/util/getDeclarationInfo.js
   var EMPTY_DECLARATION_INFO = {
     typeDeclarations: /* @__PURE__ */ new Set(),
     valueDeclarations: /* @__PURE__ */ new Set()
@@ -19406,7 +19406,7 @@ ${code}
     return { typeDeclarations, valueDeclarations };
   }
 
-  // node_modules/sucrase/dist/esm/util/isExportFrom.js
+  // js/node_modules/sucrase/dist/esm/util/isExportFrom.js
   function isExportFrom(tokens) {
     let closeBraceIndex = tokens.currentIndex();
     while (!tokens.matches1AtIndex(closeBraceIndex, TokenType.braceR)) {
@@ -19415,7 +19415,7 @@ ${code}
     return tokens.matchesContextualAtIndex(closeBraceIndex + 1, ContextualKeyword._from) && tokens.matches1AtIndex(closeBraceIndex + 2, TokenType.string);
   }
 
-  // node_modules/sucrase/dist/esm/util/removeMaybeImportAttributes.js
+  // js/node_modules/sucrase/dist/esm/util/removeMaybeImportAttributes.js
   function removeMaybeImportAttributes(tokens) {
     if (tokens.matches2(TokenType._with, TokenType.braceL) || tokens.matches2(TokenType.name, TokenType.braceL) && tokens.matchesContextual(ContextualKeyword._assert)) {
       tokens.removeToken();
@@ -19425,7 +19425,7 @@ ${code}
     }
   }
 
-  // node_modules/sucrase/dist/esm/util/shouldElideDefaultExport.js
+  // js/node_modules/sucrase/dist/esm/util/shouldElideDefaultExport.js
   function shouldElideDefaultExport(isTypeScriptTransformEnabled, keepUnusedImports, tokens, declarationInfo) {
     if (!isTypeScriptTransformEnabled || keepUnusedImports) {
       return false;
@@ -19446,7 +19446,7 @@ ${code}
     return declarationInfo.typeDeclarations.has(exportedName) && !declarationInfo.valueDeclarations.has(exportedName);
   }
 
-  // node_modules/sucrase/dist/esm/transformers/CJSImportTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/CJSImportTransformer.js
   var CJSImportTransformer = class _CJSImportTransformer extends Transformer {
     __init() {
       this.hadExport = false;
@@ -20174,7 +20174,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/ESMImportTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/ESMImportTransformer.js
   var ESMImportTransformer = class extends Transformer {
     constructor(tokens, nameManager, helperManager, reactHotLoaderTransformer, isTypeScriptTransformEnabled, isFlowTransformEnabled, keepUnusedImports, options) {
       super();
@@ -20451,7 +20451,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/FlowTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/FlowTransformer.js
   var FlowTransformer = class extends Transformer {
     constructor(rootTransformer, tokens, isImportsTransformEnabled) {
       super();
@@ -20605,7 +20605,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/JestHoistTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/JestHoistTransformer.js
   function _optionalChain(ops) {
     let lastAccessLHS = void 0;
     let value = ops[0];
@@ -20698,7 +20698,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/NumericSeparatorTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/NumericSeparatorTransformer.js
   var NumericSeparatorTransformer = class extends Transformer {
     constructor(tokens) {
       super();
@@ -20717,7 +20717,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/OptionalCatchBindingTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/OptionalCatchBindingTransformer.js
   var OptionalCatchBindingTransformer = class extends Transformer {
     constructor(tokens, nameManager) {
       super();
@@ -20735,7 +20735,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/OptionalChainingNullishTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/OptionalChainingNullishTransformer.js
   var OptionalChainingNullishTransformer = class extends Transformer {
     constructor(tokens, nameManager) {
       super();
@@ -20860,7 +20860,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/ReactDisplayNameTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/ReactDisplayNameTransformer.js
   var ReactDisplayNameTransformer = class extends Transformer {
     constructor(rootTransformer, tokens, importProcessor, options) {
       super();
@@ -20974,7 +20974,7 @@ ${code}
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/ReactHotLoaderTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/ReactHotLoaderTransformer.js
   var ReactHotLoaderTransformer = class _ReactHotLoaderTransformer extends Transformer {
     __init() {
       this.extractedDefaultExportName = null;
@@ -21033,7 +21033,7 @@ ${namesToRegister.map(
     }
   };
 
-  // node_modules/sucrase/dist/esm/util/isIdentifier.js
+  // js/node_modules/sucrase/dist/esm/util/isIdentifier.js
   var RESERVED_WORDS = /* @__PURE__ */ new Set([
     // Reserved keywords as of ECMAScript 2015
     "break",
@@ -21100,7 +21100,7 @@ ${namesToRegister.map(
     return !RESERVED_WORDS.has(name);
   }
 
-  // node_modules/sucrase/dist/esm/transformers/TypeScriptTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/TypeScriptTransformer.js
   var TypeScriptTransformer = class extends Transformer {
     constructor(rootTransformer, tokens, isImportsTransformEnabled) {
       super();
@@ -21326,7 +21326,7 @@ ${namesToRegister.map(
     }
   };
 
-  // node_modules/sucrase/dist/esm/transformers/RootTransformer.js
+  // js/node_modules/sucrase/dist/esm/transformers/RootTransformer.js
   var RootTransformer = class _RootTransformer {
     __init() {
       this.transformers = [];
@@ -21707,10 +21707,10 @@ ${namesToRegister.map(
     }
   };
 
-  // node_modules/sucrase/dist/esm/util/formatTokens.js
+  // js/node_modules/sucrase/dist/esm/util/formatTokens.js
   var import_lines_and_columns = __toESM(require_build());
 
-  // node_modules/sucrase/dist/esm/util/getTSImportedNames.js
+  // js/node_modules/sucrase/dist/esm/util/getTSImportedNames.js
   function getTSImportedNames(tokens) {
     const importedNames = /* @__PURE__ */ new Set();
     for (let i = 0; i < tokens.tokens.length; i++) {
@@ -21764,7 +21764,7 @@ ${namesToRegister.map(
     }
   }
 
-  // node_modules/sucrase/dist/esm/index.js
+  // js/node_modules/sucrase/dist/esm/index.js
   function transform(code, options) {
     validateOptions(options);
     try {
@@ -21840,7 +21840,7 @@ ${namesToRegister.map(
     return { tokenProcessor, scopes, nameManager, importProcessor, helperManager };
   }
 
-  // devtools/src/multi-export.ts
+  // js/devtools/src/multi-export.ts
   var ID = /[A-Za-z0-9_$\u00a0-\uffff]/;
   var REGEX_AFTER = "(,=:[!&|?{};+-*%<>~^";
   var CONT_BEFORE = ",=+-*/%&|^<>?:.!~([";
@@ -22090,7 +22090,7 @@ ${namesToRegister.map(
     return copied === 0 ? code : out + code.slice(copied);
   }
 
-  // devtools/src/loader.ts
+  // js/devtools/src/loader.ts
   var import_core3 = __toESM(require_pot());
   var UNIT_DIR = "src/plugins/";
   var UNIT_EXTS = [".ts", ".tsx", ".js"];

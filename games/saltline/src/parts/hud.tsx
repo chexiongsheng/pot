@@ -8,7 +8,7 @@
  */
 import type { GameUI, UIService, Vec3 } from '@pot/core'
 import { crosshairGap, drawCompass, drawCrosshair } from '@pot/kit/fps/hud'
-import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { levelPoints, type LevelData } from './level'
 import { formatTime } from '@pot/kit/realistic/math'
 import { C } from './palette'
 import { directorFade } from './director'

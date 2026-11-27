@@ -1,24 +1,12 @@
 /**
  * 港口的几何与坐标：原版坐标（three.js 右手系，北为 -z）到 Unity 的换算，码头（quay）的地面、码头墙、轨道、海面、
- * 码头边空气墙与车道标线的方块清单，以及一关在港口里的点位换算。
+ * 码头边空气墙与车道标线的方块清单。游戏的布置（点位）也用原版坐标，用这里的 P、R 换算。
  * 港区其余的样子（堆场、仓库、围栏、道具、起重机、远景）由原版关卡代码建（origlevel.ts），这里不再重复。
  * 纯函数、无副作用：harborLevel 用它生成场景，harborBoxes 用它生成碰撞盒，结果一致。
  * 原版坐标 (x, y, z) → Unity (x, y, -z)；绕 Y 的旋转（弧度）→ 取反后转为角度。
  */
 import type { MaterialOptions, Shape, Vec3 } from '@pot/core'
 import { DEG } from '@pot/kit/realistic/math'
-
-/**
- * 一关在港口里的点位（原版坐标），由游戏的数据文件给出（saltline 的 level.json）：
- * 中继（要切断的目标）、开局位置、敌人出生点、撤离点、标题镜头路线
- */
-export interface LevelData {
-  relays: { id: string; short: string; label: string; pos: Vec3; rot: number }[]
-  playerStart: { pos: Vec3; yaw: number }
-  extraction: { pos: Vec3; radius: number }
-  spawns: ['ground' | 'air', number, number, number][]
-  cinematic: { pos: Vec3; look: Vec3 }[]
-}
 
 /** 码头（原版坐标）：X 为码头边（再往东是海），RAILS 为两条起重机轨道的 x */
 export const QUAY = { X: 30, RAILS: [18.5, 28.5] as [number, number] }
@@ -110,15 +98,4 @@ export function buildSolids(pieces: Piece[]): Box[] {
     result.push({ min: [p.pos[0] - hx, p.pos[1] - sy / 2, p.pos[2] - hz], max: [p.pos[0] + hx, p.pos[1] + sy / 2, p.pos[2] + hz] })
   }
   return result
-}
-
-/** 一关的点位换算到 Unity 坐标 */
-export function levelPoints(level: LevelData) {
-  return {
-    relays: level.relays.map((r) => ({ ...r, pos: P(r.pos[0], r.pos[1], r.pos[2]), yaw: R(r.rot) })),
-    start: { pos: P(...level.playerStart.pos), yaw: R(level.playerStart.yaw) },
-    extraction: { pos: P(...level.extraction.pos), radius: level.extraction.radius },
-    spawns: level.spawns.map(([type, x, y, z]) => ({ type, pos: P(x, y, z) })),
-    cinematic: level.cinematic.map((c) => ({ pos: P(...c.pos), look: P(...c.look) })),
-  }
 }

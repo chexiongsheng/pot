@@ -18,7 +18,7 @@ function files() {
 import { defineGame } from '@pot/core'
 import fps from '@pot/kit/fps'
 import mech, { mechClear } from '@pot/kit/mech'
-import { HarborColliders } from '@pot/kit/harbor/place'
+import { HarborColliders } from '@pot/kit/harbor/map'
 import { Player, playerBlocks } from '../parts/player'
 import { foeSpawns, spawnFoe } from '../parts/enemies'
 export default defineGame({

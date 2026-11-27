@@ -9,7 +9,7 @@ pot 的游戏包是一个目录：`manifest.json` + `src/plugins/*.ts`（每个�
 
 ## 高层写法（新游戏优先用）
 
-新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ kits, vars, controls, blocks, flow, load, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。玩法与风格按需引入套件（`@pot/kit/topdown` 俯视角、`fps` 第一人称与枪械、`realistic` 写实环境、材质与第一人称枪模），耗时的预载写在 `load` 里。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）、`games/quiz-tsx`（纯界面）和 `games/saltline`（完整的写实 FPS：一个 `game.tsx` 加 `src/parts` 里的组件与积木，港口这个地方是 `harbor` 的 `<Harbor>`，敌人来自 `mech` 套件）。游戏变大时把组件、积木、界面拆进 `src/parts/*.tsx`，只导出定义，由 `game.tsx` 组装。
+新游戏写成一个 `src/plugins/game.tsx`，默认导出 `defineGame({ kits, vars, controls, blocks, flow, load, scene, ui })`：场景是 TSX 树，逐帧逻辑写在积木里，界面是界面标签树，流程管标题、进行中、暂停、结算。玩法与风格按需引入套件（`@pot/kit/topdown` 俯视角、`fps` 第一人称与枪械、`realistic` 写实环境、材质与第一人称枪模），耗时的预载写在 `load` 里。模板见 `templates/game/`，细节见 `references/world.md`，示例见 `games/hello-tsx`（动作）、`games/quiz-tsx`（纯界面）和 `games/saltline`（完整的写实 FPS：一个 `game.tsx` 加 `src/parts` 里的组件与积木，关卡是 `harbor` 的港口地图 `<Harbor>` 配上黄昏与暴雨，敌人来自 `mech` 套件）。游戏变大时把组件、积木、界面拆进 `src/parts/*.tsx`，只导出定义，由 `game.tsx` 组装。
 
 五条规矩：
 

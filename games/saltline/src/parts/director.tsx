@@ -14,7 +14,7 @@
  */
 import { defineBlock, type Context, type SceneArgs, type Vec3 } from '@pot/core'
 import { mechClear } from '@pot/kit/mech'
-import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { levelPoints, type LevelData } from './level'
 import { catmull, dist2d, dot, forward, norm, sub, yawOf } from '@pot/kit/realistic/math'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { foeSpawns, spawnFoe, type FoeSpawns } from './enemies'

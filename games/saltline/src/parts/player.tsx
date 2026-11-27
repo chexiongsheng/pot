@@ -9,7 +9,7 @@
 import { defineBlock, type SceneArgs } from '@pot/core'
 import { damage } from '@pot/kit/fps'
 import { harborBoxes } from '@pot/kit/harbor/physics'
-import { levelPoints, type LevelData } from '@pot/kit/harbor/level'
+import { levelPoints, type LevelData } from './level'
 import { sfx } from '@pot/kit/realistic/sfx'
 import { setPostValues } from '@pot/kit/realistic'
 import { ENEMY_LAYER, LEVEL_LAYER } from '@pot/kit/realistic/layers'

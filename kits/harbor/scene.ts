@@ -7,7 +7,7 @@
  * 材质（GPU 烘焙的原版材质）、表面贴图、喷字、闪灯与海鸥着色器按 World 缓存，几个积木共用；场景对象按实体建，exit 倒序销毁。
  */
 import { defineBlock } from '@pot/core'
-import { currentWeather } from '@pot/kit/realistic'
+import { currentWeather, paintRain } from '@pot/kit/realistic'
 import type { Context, Entity, MaterialOptions, Texture } from '@pot/core'
 import { createMats, MATS, type Mat, type Mats } from '@pot/kit/realistic/mats'
 import { toMesh } from '@pot/kit/realistic/geo'
@@ -390,8 +390,14 @@ export const harborLevel = defineBlock({
     enter(me, e, ctx, w) {
       const S = store(w)
       const old = S.levels.get(e.id)
-      if (old) dropLevel(old)
-      S.levels.set(e.id, buildLevelLook(S, ctx as any, me))
+      if (old) {
+        paintRain(w, old, false)
+        dropLevel(old)
+      }
+      const L = buildLevelLook(S, ctx as any, me)
+      S.levels.set(e.id, L)
+      // 雨幕建出来了（着色器可用）：雨由港口画，weather 不再撒内置雨滴
+      if (L.rain) paintRain(w, L, true)
     },
     update(_me, e, _objs, ctx, w) {
       const L = store(w).levels.get(e.id)
@@ -413,6 +419,7 @@ export const harborLevel = defineBlock({
       const L = S?.levels.get(e.id)
       if (!L) return
       S!.levels.delete(e.id)
+      paintRain(w, L, false)
       dropLevel(L)
     },
   },

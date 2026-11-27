@@ -2045,7 +2045,24 @@ games/saltline/
 
 套件里的代码不得依赖某个游戏的阶段、事件名或全局状态：敌人“何时追击、打到谁”由属性和事件给出；`decals` 的 `surfaceAt` 依赖 `origlevel`，改为由调用方传入表面查询。小文件（`physics`、`rating` 等）按用途归入，纯属本游戏的留在 `src/parts`。
 
-套件按玩家能认出来的东西提供（第 11 步加）：一个地方（港口）、一种敌人（机械猎犬、机械飞鸥）、一把枪，不按引擎的分层（碰撞、模型、着色器）切。一个地方由套件导出的场景组件给出，碰撞、外观、天气都在里面：harbor 导出 `<Harbor>`，游戏的 `scene` 写一行 `<Harbor />`，不再自己拼碰撞盒与布景。套件可以导出函数组件（`.tsx`），组件里只用本套件与所依赖套件的积木，和游戏的组件一样写。这条也为积木预览（19.6）留出入口：预览一个地方就是只放它的场景组件，预览一种敌人就是生成它的预制件，所以场景组件要能脱离具体游戏单独放。
+套件按玩家能认出来的东西提供（第 11 步加）：一个地方（港口）、一种敌人（机械猎犬、机械飞鸥）、一把枪，不按引擎的分层（碰撞、模型、着色器）切。一个地方由套件导出的地图组件给出，碰撞、外观都在里面：harbor 导出 `<Harbor>`，游戏不再自己拼碰撞盒与布景（第 11 步时天气也在里面，第 14 步移到游戏的关卡）。套件可以导出函数组件（`.tsx`），组件里只用本套件与所依赖套件的积木，和游戏的组件一样写。这条也为积木预览（19.6）留出入口：预览一个地方就是只放它的地图组件，预览一种敌人就是生成它的预制件，所以地图组件要能脱离具体游戏单独放。
+
+名词（第 14 步定）：名字相同就指同一个东西，游戏领域里约定俗成的意思优先。
+
+| 名词 | 含义 | 在哪 |
+|---|---|---|
+| 场景（scene） | 一个流程状态下世界里的全部实体：关卡、玩家、导演、配乐。切流程状态时按 key 对比重建，标 `keep` 的留下。`ctx.scene` 是引擎的画面接口，积木的 `view` 用它往画面里放物体、光、天空、雾 | 框架：`defineGame.scene`、`ctx.scene` |
+| 地图（map） | 一个地方：地形、碰撞、模型，以及跟时段天气无关的环境动态（海浪、起重机、远处闪灯、海鸥）。不含时段、天气，也不含任务；不给属性也能放出来 | 套件：harbor 的 `<Harbor>`（`map.tsx`） |
+| 时段（atmosphere） | 一天里的什么时候：主光、天空、环境光、雾、后处理、画质档 | realistic 的 `atmosphere` |
+| 天气（weather） | 雨（雨量、湿度、积水、雨色、风、雨声）与闪电。地图自己画雨幕、积水时读它；自己画了雨就告诉它（`paintRain`），它就不再撒内置雨滴 | realistic 的 `weather` |
+| 关卡（level） | 一关：地图 + 时段 + 天气 + 布置。同一张地图换时段、天气、布置就是另一关 | 游戏：saltline 的 `<Level>`（`parts/level.tsx`）与 `data/level.json` |
+| 布置 | 一关在地图上的点位：出生点、目标（中继）、敌人出生点、撤离点、标题镜头路线 | 游戏：`level.json` |
+| 流程状态（flow state） | 标题、一局、暂停这类大的切换，切换时场景按 key 重建 | `defineGame.flow` |
+| 阶段（phase） | 一局里的小阶段（开场、交战、阵亡、撤离），由导演切换，不重建场景 | saltline 的 `vars.sl.phase` |
+| 导演（director） | 按关卡的布置推进一局：开场、刷敌、目标、撤离、结算 | saltline 的 `slDirector` |
+| 外观积木 | 只有表现（`view`）的积木，例如 harbor 的 `harborLook` | 套件 |
+
+不再用的说法：“场景组件”改叫地图组件，“场景积木”改叫外观积木（都和“场景”撞名）；“地方”（place）就是地图；harbor 里的 `level` 都改掉（`harborLevel`、`buildLevel`、`origLevel`、`LEVEL_LAYER`、标签 `level`），`level` 只指游戏的关卡。
 
 ### 19.3 架构调整
 
@@ -2076,6 +2093,9 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 11. 港口作为一个地方（19.2 末段）：harbor 导出 `<Harbor>`（关卡碰撞盒、天气、港区模型），saltline 删除 `parts/level.tsx`、`parts/stage.tsx`；撤离点信标归导演组件（它是任务目标，导演点亮它），环境声直接写在 `game.tsx` 的 `scene` 里。`game.tsx` 的场景读起来是“港口、突击队员、任务、环境声”。
 12. 港口不再读游戏的数据：港区本身的样子（堆场、仓库、围栏、道具、起重机、远景）第 8 步起就由 harbor 的 `origlevel`（原版关卡代码）建，`level.json` 里只有码头的 `quay`（码头边、轨道）还在用，集装箱、杂物、桅杆、系缆桩、起重机、仓库、围栏、楼梯、栈桥、配色只被 `buildLevel` 已经走不到的分支（`origStatic` 为假）读。码头参数改为 harbor 的常量，删除死分支与这些字段；`buildLevel()`、`levelBoxes()`（改名 `harborBoxes()`）不再取数据，`harborLevel` 去掉 `level` 属性，`<Harbor>`、`<HarborColliders>` 去掉 `data`、`level`，不给属性也能放出来（预览要用）。saltline 的 `level.json` 只留这一关在港口里的点位（中继、开局位置、敌人出生点、撤离点、标题镜头路线），`level` 从此只指“这一关”。
 13. 天气单独成积木（规格见 17.8 末段）：玩家说“黄昏下暴雨”，黄昏是时段与画面，暴雨是天气。realistic 的 `atmosphere` 只管主光、天空、环境光、雾、后处理（链）、画质档位、反射；新增 `weather` 积木管雨（雨量、湿度、积水、雨色、风、雨声）与闪电（排期、事件、雷声）。闪光提亮画面是两者唯一的交点，由 `atmosphere` 读 `weather` 的闪电状态。`<Harbor>` 放两个实体：`atmosphere`（黄昏）与 `weather`（暴雨）。saltline 的 `parts/audio.ts` 去掉雨声，只剩配乐（低鸣、交战紧张感）与提示音。顺带的修正：港口的雨幕与积水地坪原来写死雨量 0.6、全湿，不跟 `<Harbor weather>` 走；改为每帧读 `weather`。分两次提交：先拆 `weather`（realistic、harbor 的 `place.tsx`、saltline），再港口跟随天气。
+14. 地图与关卡分开（名词见 19.2 末）：港口是地图，不该替游戏决定黄昏还是正午、下不下雨。`<Harbor>` 只放碰撞盒与港区模型，去掉 `weather`、`exposure`、`quality`、`lightning` 属性，`place.tsx` 改名 `map.tsx`。时段与天气由游戏的关卡配：saltline 新增 `parts/level.tsx`，`<Level>` 放 `<Harbor>`、`atmosphere`、`weather`；时段与天气写进 `level.json`（`atmosphere`、`weather` 两节），画质档与贴图档仍在 `tuning.json`，删去没人读的 `tuning.look`。`LevelData` 与 `levelPoints` 从 harbor 移到 `parts/level.tsx`（布置属于关卡；harbor 只留原版坐标换算 `P`、`R`）。`weather` 的 `shaderRain` 属性改为地图声明：雨幕真的建出来时 harbor 调 realistic 的 `paintRain(w, owner, true)`，weather 据此不撒内置雨滴，游戏不必知道哪张地图自己画雨。
+15. harbor 内部去掉 `level`：`scene.ts` 改名 `look.ts`，`harborLevel` 改名 `harborLook`；`level.ts` 改名 `quay.ts`，`buildLevel` 改名 `buildQuay`；`origlevel.ts` 改名 `origmap.ts`，`origLevel` 改名 `origMap`；渲染层 `LEVEL_LAYER` 改名 `MAP_LAYER`（realistic 的 `layers.ts`）；碰撞盒的标签 `level` 改为 `map`。
+16. 玩家反馈下沉：saltline 的 `slFeedback` 里大半是任何第一人称游戏都要的。受伤红屏的累积与衰减、重落地震屏、落地与脚步计数进 fps 的新积木 `feedbackFps`（受伤由套件的 `on.damaged` 累加，取代游戏里的 `<rule on="damaged">`）；脚步、落地、受伤的音效与受伤红边、低血量、开镜的后处理是写实风格的，进 realistic 的新积木 `viewFeedback`（读 `feedbackFps`、`health`、`gunFps`；第一人称相机在用时才显示，叠加状态时低血量不再过渡）。地面平面（码头地面与海面，子弹求交用）与海面高度是港口的，harbor 导出 `harborGround()`。游戏留下按阶段开关的 `slControl` 与落水救援 `slRescue`（掉进海里拉回码头、扣血、发提示，是本游戏的规矩）。`moveFps` 不动（有 C# 原生实现，要逐位一致）。
 
 ### 19.5 实施记录
 
@@ -2319,11 +2339,22 @@ E. 组装。`game.tsx` 是唯一的 `defineGame`：`kits` 列出 `fps`、`realis
 - 验证：`npm test` 306/307（仅 pot_gfx 一致性），玩家金标准、敌人回归不变；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 仍为 d304293d（只改表现层）。没有做 Runner 实机验证。
 - 字节数：harbor 的 `scene.ts` 21904。
 
+第 14 步（地图与关卡分开）：
+
+- 起因：`<Harbor>` 里放了黄昏的 `atmosphere` 和暴雨的 `weather`，港口替游戏决定了时段与天气；`level` 在 harbor 里指“港区几何”，在 saltline 里指“这一关的点位”；`defineGame.scene` 与 harbor 的“场景积木”“场景组件”也撞名。名词表见 19.2 末。
+- realistic：`weather` 去掉 `shaderRain` 属性，新增 `paintRain(w, owner, on)`：地图自己画雨时声明，只要还有一个声明，内置雨滴数就是 0；表现层每帧看声明有没有变，变了重下 `ctx.scene.weather`。原来是 `shaderRain && ctx.gfx.supported`，现在由地图在雨幕真的建出来时声明，更准。
+- harbor：`place.tsx` 改名 `map.tsx`，`<Harbor>` 只剩 `tex`、`chunks`，放碰撞盒、`harborLevel`、`harborStatics`；`harborLevel` 建出雨幕时 `paintRain(w, L, true)`，重建与退出时撤销。`level.ts` 去掉 `LevelData` 与 `levelPoints`，只留码头几何与原版坐标换算 `P`、`R`。
+- saltline：新增 `parts/level.tsx`，`<Level>` 放 `<Harbor>`、`atmosphere`、`weather`（都标 keep），`LevelData`（多了 `atmosphere`、`weather` 两节）与 `levelPoints` 也在这里；`level.json` 加上时段（`preset: 'dusk'`、`chain.exposure` 1）与天气（原 `DUSK_STORM` 加 `lightning: {}`），`tuning.json` 删去没人读的 `look`（黄昏的数值以 realistic 的 `dusk` 预设为准）。`game.tsx` 的场景是 `<Level>`、`<Player>`、`<Director>`、配乐；导演、HUD、玩家从 `./level` 取点位。
+- 实体顺序：原来是碰撞盒、atmosphere、weather、港区模型；现在是碰撞盒、港区模型、atmosphere、weather，weather 仍在玩家、导演之前，碰撞盒仍在角色之前，港区模型没有 `step`，所以 `w.rand` 的消耗先后与碰撞候选顺序都不变。
+- 测试：`kit-realistic.test.js` 的 `shaderRain` 一例改为 `paintRain`：声明后雨滴为 0，换画质档仍为 0，撤销后回到画质档的 100。玩家金标准与敌人回归改从 `@pot/kit/harbor/map` 引入 `HarborColliders`。
+- 验证：`npm test` 306/307（仅 pot_gfx 一致性），玩家金标准、敌人回归、harbor 套件测试不变；`tsc`、saltline 的 `tsc`、`pot check` 通过；冒烟 hash 由 d304293d 变为 5acea5cb。与 HEAD 对比开局后 1500 步：582 个实体、随机种子、vars 全同，只有 weather 少了 `shaderRain`，挂载记录的 key 多了一层 `Level#0/`。没有做 Runner 实机验证。
+- 字节数：harbor 的 `map.tsx` 3181，realistic 的 `weather.ts` 9315；saltline 的 `parts/level.tsx` 2597，`level.json` 2996，`tuning.json` 2790，`src` 86086。
+
 ### 19.6 后续：积木预览
 
 需求：单独看一个套件提供的东西，不进具体游戏，例如预览港口、机械猎犬、机械飞鸥。设计待定，先记约束：
 
-- 预览的单位是玩家能认出来的东西（19.2 末段）：地方是套件的场景组件（`<Harbor>`），角色与敌人是预制件（`hound`、`gull`）。
-- 场景组件不给属性也能放出来，用套件自带的缺省数据（第 12 步把港区布局移进 harbor 就是为此）。
+- 预览的单位是玩家能认出来的东西（19.2 末段）：地图是套件的地图组件（`<Harbor>`），角色与敌人是预制件（`hound`、`gull`）。
+- 地图组件不给属性也能放出来，用套件自带的缺省数据（第 12 步把港区布局移进 harbor 就是为此）。
 - 敌人预览要能不依赖玩家：没有目标时站着待机或按巡逻走，`mechFrozen` 可以冻结行为只看模型与动画。
 - 入口可能是 `pot preview <套件> <组件或预制件>`，在 Runner 里起一个只挂这一项、带自由相机的临时游戏；也可能放进 devtools。实施前再定。
