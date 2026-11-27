@@ -5,6 +5,7 @@
  */
 import type { Engine, Host, LogLevel } from '../host'
 import { WebInput } from './input'
+import { WebPhysics } from './physics'
 import { CAMERA_ID, WebScene } from './scene'
 import { WebUI } from './ui'
 
@@ -39,6 +40,7 @@ export interface WebHostOptions {
 export interface WebHost extends Host {
   platform: 'web'
   scene: WebScene
+  physics: WebPhysics
   input: WebInput
   ui: WebUI
   /** 游戏 id（manifest.json），缓存键前缀用 */
@@ -49,8 +51,6 @@ export interface WebHost extends Host {
 
 /** 未实现方法的中性返回值；没列的返回 ''（多数宿主方法以空串表示成功） */
 const NEUTRAL: Record<string, any> = {
-  raycast: null,
-  sphereCast: null,
   canvasText: null,
   textTexture: 0,
   audioLoop: 0,
@@ -62,7 +62,6 @@ const NEUTRAL: Record<string, any> = {
   gfxInstances: 'Web 宿主暂不支持实例缓冲',
   audioClip: false,
   audioHas: false,
-  colliderShape: '',
 }
 
 const KEY_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -80,6 +79,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     gameId = JSON.parse(files['manifest.json'] ?? '{}').id || 'game'
   } catch {}
   const unsupported = new Set<string>()
+  const physics = new WebPhysics(scene)
 
   const impl: Partial<Engine> = {
     spawn: (shape, name, parent) => scene.spawn(shape, name, parent),
@@ -130,6 +130,11 @@ export function createWebHost(options: WebHostOptions): WebHost {
     matTexture: (id, slot, tex) => scene.matTexture(id, slot, tex),
     matFloat: (id, prop, value) => scene.matFloat(id, prop, value),
     matVector: (id, prop, x, y, z, w) => scene.matVector(id, prop, x, y, z, w),
+    collider: (id, enabled) => physics.collider(id, enabled),
+    colliderShape: (id, kind, dynamic) => physics.colliderShape(id, kind, dynamic),
+    layer: (id, layer) => physics.layer(id, layer),
+    raycast: (ox, oy, oz, dx, dy, dz, maxDistance, mask) => physics.raycast(ox, oy, oz, dx, dy, dz, maxDistance, mask),
+    sphereCast: (ox, oy, oz, dx, dy, dz, radius, maxDistance, mask) => physics.sphereCast(ox, oy, oz, dx, dy, dz, radius, maxDistance, mask),
   }
   scene.warn = (text) => log('warn', text)
   scene.textures.error = (text) => log('error', text)
@@ -152,6 +157,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   return {
     platform: 'web',
     scene,
+    physics,
     input,
     ui,
     gameId,
