@@ -5,7 +5,7 @@
  * 网格：图元（geometry.ts）与 mesh:/skin: 自定义网格（mesh.ts，按 WebMesh.version 重建缓冲）；顶点属性 0 位置、1 法线、2 UV、3 顶点色（线性）、4 切线。
  * 材质贴图照 PotLit 的 PotSample：_MainTex/_BumpMap/_MaskMap 占单元 0/1/2，_Tiling、_UVMode（网格 UV、世界或物体三平面）、_Rest、_BumpScale、_Occlusion（只作用于间接光）。
  */
-import { M4, multiply, perspective, rotateVector, srgbToLinear, viewFromCamera } from './math'
+import { hdrColorToLinear, M4, multiply, perspective, rotateVector, srgbToLinear, viewFromCamera } from './math'
 import { primitiveMesh } from './geometry'
 import type { MeshSkinData } from './mesh'
 import type { WebTexture } from './texture'
@@ -507,10 +507,9 @@ function lin3(c: ArrayLike<number>, k = 1): [number, number, number] {
   return [srgbToLinear(c[0]) * k, srgbToLinear(c[1]) * k, srgbToLinear(c[2]) * k]
 }
 
-/** HDR 颜色（可大于 1）转线性：Unity Color.linear 对每个分量做 sRGB 解码 */
+/** 发光颜色（可大于 1）转线性：PotScene.SetEmission 走 HdrToLinear（大于 1 的部分作亮度倍数，保持线性） */
 function linHdr(c: ArrayLike<number>): [number, number, number] {
-  const f = (x: number) => (x <= 0 ? 0 : x <= 1 ? srgbToLinear(x) : Math.pow(x, 2.2))
-  return [f(c[0]), f(c[1]), f(c[2])]
+  return hdrColorToLinear(c[0], c[1], c[2])
 }
 
 /** 模型矩阵左上 3×3 的逆转置，返回行列式（负值表示镜像缩放，需翻转正面绕序） */

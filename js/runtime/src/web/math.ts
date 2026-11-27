@@ -247,7 +247,17 @@ export function srgbToLinear(c: number): number {
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
 }
 
-/** PotScene.HdrToLinear（Unity Color.linear）：分量 ≤ 1 按 sRGB 解码，大于 1 按 2.2 次幂 */
+/** Unity Color.linear（Mathf.GammaToLinearSpace）：分量 ≤ 1 按 sRGB 解码，大于 1 按 2.2 次幂；用于着色器属性缺省值 */
 export function hdrToLinear(x: number): number {
   return x <= 0 ? 0 : x <= 1 ? srgbToLinear(x) : Math.pow(x, 2.2)
+}
+
+/**
+ * PotScene.HdrToLinear：最大分量 m ≤ 1 时逐分量 sRGB 解码；m > 1 时视为“颜色 × 亮度倍数”，
+ * 先除以 m 解码再乘回 m（亮度倍数保持线性）。PotRender 的 Lin(Col(...)) 走这里。
+ */
+export function hdrColorToLinear(r: number, g: number, b: number): V3 {
+  const m = Math.max(r, g, b)
+  if (m <= 1) return [hdrToLinear(r), hdrToLinear(g), hdrToLinear(b)]
+  return [srgbToLinear(Math.max(0, r / m)) * m, srgbToLinear(Math.max(0, g / m)) * m, srgbToLinear(Math.max(0, b / m)) * m]
 }

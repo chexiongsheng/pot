@@ -6,7 +6,7 @@
  * 本文件不碰 WebGL：gl.ts 每帧读取 pools 画四边形。
  */
 import type { RaycastResult } from '../host'
-import { hdrToLinear } from './math'
+import { hdrColorToLinear } from './math'
 
 export type ParticleKind = 'spark' | 'glow' | 'smoke'
 
@@ -175,7 +175,7 @@ export class WebParticles {
       else { const l = Math.sqrt(l2); dx /= l; dy /= l; dz /= l }
     }
     const c = cfg.color.length >= 3 ? [+cfg.color[0] || 0, +cfg.color[1] || 0, +cfg.color[2] || 0, cfg.color.length > 3 ? +cfg.color[3] : 1] : [1, 1, 1, 1]
-    const lr = hdrToLinear(c[0]), lg = hdrToLinear(c[1]), lb = hdrToLinear(c[2])
+    const [lr, lg, lb] = hdrColorToLinear(c[0], c[1], c[2])
     const m = Math.max(1, lr, lg, lb)
     const count = Math.max(1, Math.min(500, Math.trunc(cfg.count)))
     const spread = Math.max(0, Math.min(1, cfg.spread))

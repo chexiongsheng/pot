@@ -36,9 +36,14 @@ test('sky：首次用 PotSky 缺省值，缺省字段保持，颜色不足 3 个
   assert.deepEqual(r.sky.horizonAway, [1, 1, 1, 1])
   assert.deepEqual(r.sky.ground, [0.5, 0.5, 0.5, 1])
   assert.deepEqual(r.sky.cloudColor, [0.5, 0.5, 0.5, 1])
-  // sun 存成线性 HDR：大于 1 的分量按 2.2 次幂
+  // sun 存成线性 HDR（PotScene.HdrToLinear）：最大分量 m > 1 时除以 m 解码再乘回 m
   r.configure('sky', JSON.stringify({ sun: [2, 1, 0] }))
-  assert.ok(near(r.sky.sun[0], Math.pow(2, 2.2)) && near(r.sky.sun[1], 1) && r.sky.sun[2] === 0)
+  assert.ok(near(r.sky.sun[0], 2) && near(r.sky.sun[1], 2 * W.srgbToLinear(0.5)) && r.sky.sun[2] === 0)
+  r.configure('sky', JSON.stringify({ sun: [22, 22 * 0.82, 22 * 0.6] }))
+  assert.ok(near(r.sky.sun[0], 22) && near(r.sky.sun[1], 22 * W.srgbToLinear(0.82)) && near(r.sky.sun[2], 22 * W.srgbToLinear(0.6)))
+  // 不大于 1 时逐分量 sRGB 解码；缺省值是着色器属性，按 Color.linear（大于 1 走 2.2 次幂）
+  assert.deepEqual(W.hdrColorToLinear(1, 0.5, 0), [1, W.srgbToLinear(0.5), 0])
+  assert.ok(near(W.defaultSky().sun[0], Math.pow(4, 2.2)))
 })
 
 test('sky：探针尺寸取 2 的幂并夹到 16..1024，reflection 0 销毁；ambient 与反射强度', () => {

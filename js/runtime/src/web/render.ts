@@ -4,7 +4,7 @@
  * 本文件只保存状态并给出与着色器一致的 CPU 版天空辐射（环境光球谐用），不碰 WebGL；绘制在 gl.ts。
  * 颜色约定：材质颜色属性（天空各色、云色、雨色、雾色）按 sRGB 存，上传时转线性；sky.sun 照 Lin(Col(...)) 存线性 HDR。
  */
-import { hdrToLinear, srgbToLinear, V3 } from './math'
+import { hdrColorToLinear, hdrToLinear, srgbToLinear, V3 } from './math'
 
 export type C4 = [number, number, number, number]
 
@@ -270,7 +270,7 @@ export class WebRenderConfig {
     const cloud = c('cloudColor', [0.5, 0.5, 0.5, 1])
     if (cloud) s.cloudColor = cloud
     const sun = c('sun', [1, 1, 1, 1])
-    if (sun) s.sun = [hdrToLinear(sun[0]), hdrToLinear(sun[1]), hdrToLinear(sun[2])]
+    if (sun) s.sun = hdrColorToLinear(sun[0], sun[1], sun[2])
     for (const k of ['sunSize', 'sunGlow', 'clouds', 'cloudSpeed', 'horizonFog', 'exposure'] as const) {
       const v = num(o, k)
       if (has(v)) s[k] = v

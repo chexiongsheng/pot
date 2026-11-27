@@ -38,9 +38,10 @@ test('burst：颜色转线性后除以最大分量，速度、尺寸、寿命按
   assert.ok(Math.abs(v[0]) < 1e-6 && Math.abs(v[1]) < 1e-6 && Math.abs(v[2] - 6) < 1e-5, String(v))
   assert.ok(Math.abs(s.size[0] - 0.05) < 1e-6)
   assert.ok(Math.abs(s.life[0] - 0.4) < 1e-6)
-  const m = Math.pow(2, 2.2)
+  // HdrToLinear([2,1,0]) = [2, 2·lin(0.5), 0]，再除以最大分量 2
+  const g = web().srgbToLinear(0.5)
   const c = [...s.color.slice(0, 4)]
-  assert.ok(Math.abs(c[0] - 1) < 1e-6 && Math.abs(c[1] - 1 / m) < 1e-6 && c[2] === 0 && c[3] === 0.5, String(c))
+  assert.ok(Math.abs(c[0] - 1) < 1e-6 && Math.abs(c[1] - g) < 1e-6 && c[2] === 0 && c[3] === 0.5, String(c))
 })
 
 test('burst：spread < 1 时反向的方向沿 dir 反射到正半球；寿命下限 0.02', () => {
