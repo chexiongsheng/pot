@@ -176,6 +176,57 @@ async function packGame(gameDir, outFile) {
 }
 
 /**
+ * pot check 的可移植检查（004 第 20.7 节）：游戏源码（src/**，不含 src/kits/ 下的套件副本）里把宿主专有的全局对象
+ * （BLOCKED_GLOBALS）当自由变量用的地方。用 TypeScript 语法树：属性访问的名字、对象键、类型位置、本文件里有同名声明的都不算；
+ * typeof X 是特性检测的写法，在 Web 上会自然走回退分支，也不算。返回 [{ file, line, name }]
+ */
+function findBlockedGlobals(gameDir, blocked) {
+  const ts = require('typescript')
+  const names = new Set(blocked)
+  const out = []
+  const files = walk(path.join(gameDir, 'src')).filter((f) => /\.(tsx?|jsx?|mts|cts)$/.test(f) && !f.startsWith('kits/') && !f.endsWith('.d.ts'))
+  for (const rel of files) {
+    const text = fs.readFileSync(path.join(gameDir, 'src', rel), 'utf8')
+    const kind = /x$/.test(rel) ? ts.ScriptKind.TSX : rel.endsWith('.js') ? ts.ScriptKind.JS : ts.ScriptKind.TS
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ES2022, true, kind)
+    const declared = new Set()
+    const refs = []
+    const declare = (n) => {
+      if (n && ts.isIdentifier(n)) declared.add(n.text)
+      else if (n && (ts.isObjectBindingPattern(n) || ts.isArrayBindingPattern(n))) for (const e of n.elements) if (!ts.isOmittedExpression(e)) declare(e.name)
+    }
+    const visit = (node) => {
+      if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return
+      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) return
+      if (ts.isTypeOfExpression(node) && ts.isIdentifier(node.expression)) return
+      if (ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) declare(node.name)
+      else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassExpression(node) || ts.isEnumDeclaration(node)) && node.name) declare(node.name)
+      else if (ts.isImportClause(node) && node.name) declare(node.name)
+      else if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node)) declare(node.name)
+      if (ts.isIdentifier(node) && names.has(node.text)) {
+        const p = node.parent
+        const isName =
+          (ts.isPropertyAccessExpression(p) && p.name === node) ||
+          ((ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p) || ts.isPropertySignature(p) ||
+            ts.isMethodSignature(p) || ts.isGetAccessor(p) || ts.isSetAccessor(p) || ts.isEnumMember(p)) && p.name === node) ||
+          (ts.isQualifiedName(p) && p.right === node) ||
+          ts.isJsxAttribute(p) || ts.isLabeledStatement(p) || ts.isBreakOrContinueStatement(p) ||
+          ts.isImportSpecifier(p) || ts.isExportSpecifier(p)
+        if (!isName) refs.push(node)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
+    for (const node of refs) {
+      if (declared.has(node.text)) continue
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf))
+      out.push({ file: `src/${rel}`, line: line + 1, name: node.text })
+    }
+  }
+  return out
+}
+
+/**
  * 检查：manifest、单元与 manifest 对应、试打包（语法/模块解析）；
  * 用了 defineGame 的游戏再在无画面宿主上求值（树求值、规则、界面的报错与告警）并生成 .pot/types.d.ts；
  * 最后 tsc 类型检查（有 tsconfig.json 时）。告警放在 warnings 里，不影响 ok。
@@ -204,6 +255,13 @@ async function checkGame(gameDir) {
     errors.push(...formatErrors(error))
   }
   const headless = require('./headless')
+  try {
+    for (const r of findBlockedGlobals(gameDir, headless.loadPot().BLOCKED_GLOBALS)) {
+      warnings.push(`${r.file}:${r.line}：用到了宿主专有的全局对象 ${r.name}，Web 发布包里它是 undefined；网络用 ctx.net，存储用 state，计时用 ctx.clock / ctx.timer（004 第 20.7 节）`)
+    }
+  } catch (error) {
+    warnings.push(`全局对象检查出错：${error?.message ?? error}`)
+  }
   if (bundled && headless.usesWorld(gameDir)) {
     try {
       const result = await headless.evaluateGame(gameDir)
@@ -233,4 +291,4 @@ async function generateGameTypes(gameDir) {
   return { ok: true, file: headless.writeTypes(gameDir, result.types) }
 }
 
-module.exports = { buildRelease, packGame, checkGame, generateGameTypes, listUnits, walk, KITS_DIR, resolveKitFile, isKitResource, kitResources }
+module.exports = { buildRelease, packGame, checkGame, findBlockedGlobals, generateGameTypes, listUnits, walk, KITS_DIR, resolveKitFile, isKitResource, kitResources }
